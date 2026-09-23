@@ -905,6 +905,29 @@ function openSheet(title, body, onReady) {
 }
 function closeSheet() { if (dlg.open) dlg.close(); }
 
+// Notes you have written before, most used and most recent first.
+function noteIndex() {
+  var g = {};
+  allTx().forEach(function (t) {
+    var n = (t.note || '').trim(); if (n.length < 2) return;
+    var k = n.toLowerCase(), o = g[k] || (g[k] = { note: n, n: 0, last: '', tx: t });
+    o.n++; if (t.d > o.last) { o.last = t.d; o.note = n; o.tx = t; }
+  });
+  return Object.keys(g).map(function (k) { return g[k]; });
+}
+function noteSuggest(q, cat, type) {
+  q = (q || '').trim().toLowerCase();
+  var list = noteIndex().filter(function (o) { return o.tx.t === type; });
+  if (q) list = list.filter(function (o) { return o.note.toLowerCase().indexOf(q) > -1 && o.note.toLowerCase() !== q; });
+  else if (cat) list = list.filter(function (o) { return o.tx.cat === cat; });
+  return list.sort(function (a, b) {
+    if (q) {
+      var ap = a.note.toLowerCase().indexOf(q) === 0, bp = b.note.toLowerCase().indexOf(q) === 0;
+      if (ap !== bp) return ap ? -1 : 1;
+    }
+    return b.n - a.n || (a.last < b.last ? 1 : -1);
+  }).slice(0, 6);
+}
 function txSheet(existing, asNew) {
   if (asNew) { var seed = existing; existing = null; }
   var t = existing ? JSON.parse(JSON.stringify(existing)) : asNew ? seed : { id: uid(), d: today(), t: 'exp', amt: 0, cat: '', sub: '', note: '', tags: [], src: 'app' };
@@ -920,7 +943,8 @@ function txSheet(existing, asNew) {
     '<label class="f">Category</label><div class="wrap" id="cats">' + catChips() + '</div>' +
     '<label class="f">Tags</label><div class="wrap" id="tags">' + tagChips() + '</div>' +
     '<label class="f">Paid with</label><div class="seg" id="pm"><button data-pm="cash" aria-pressed="' + (t.pm !== 'later') + '">Cash or bank</button><button data-pm="later" aria-pressed="' + (t.pm === 'later') + '">PayLater</button></div>' +
-    '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="What was it?">' +
+    '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="What was it?" autocomplete="off">' +
+    '<div class="wrap" id="nsug" style="margin-top:7px"></div>' +
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + t.d + '">' +
     '<div class="actions">' + (existing ? '<button class="btn danger" id="del">Delete</button>' : '') + '<button class="btn" id="save">' + (existing ? 'Save changes' : 'Add') + '</button></div>';
   openSheet(existing ? 'Edit transaction' : 'New transaction', body, function (el) {
@@ -934,11 +958,35 @@ function txSheet(existing, asNew) {
       var b = e.target.closest('[data-cat]'); if (!b) return; t.cat = b.dataset.cat;
       el.querySelectorAll('#cats .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
       if (t.cat === '💝 Dates' && t.tags.indexOf('Alaina') < 0) { t.tags.push('Alaina'); $('#tags', el).innerHTML = tagChips(); }
+      drawSug();
     });
     $('#tags', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-tag]'); if (!b) return; var g = b.dataset.tag, i = t.tags.indexOf(g);
       if (i > -1) t.tags.splice(i, 1); else t.tags.push(g); b.setAttribute('aria-pressed', i < 0);
     });
+    var noteEl = $('#note', el), sug = $('#nsug', el);
+    function drawSug() {
+      var list = noteSuggest(noteEl.value, t.cat, t.t);
+      sug.innerHTML = list.map(function (o, i) {
+        return '<button class="chip" data-sug="' + i + '">' + esc(o.note.length > 28 ? o.note.slice(0, 27) + '…' : o.note) + '</button>';
+      }).join('');
+      sug.querySelectorAll('[data-sug]').forEach(function (b) {
+        b.addEventListener('click', function () {
+          var o = list[+b.dataset.sug];
+          noteEl.value = o.note;
+          if (!t.cat) { // borrow the rest of the shape from the last time you wrote this
+            t.cat = o.tx.cat; t.sub = o.tx.sub || '';
+            $('#cats', el).innerHTML = catChips();
+            if ((o.tx.tags || []).indexOf('Alaina') > -1 && t.tags.indexOf('Alaina') < 0) { t.tags.push('Alaina'); $('#tags', el).innerHTML = tagChips(); }
+            if (o.tx.pm === 'later' && t.pm !== 'later') { t.pm = 'later'; el.querySelectorAll('#pm button').forEach(function (x) { x.setAttribute('aria-pressed', x.dataset.pm === 'later'); }); }
+            toast('Filled in from last time');
+          }
+          drawSug();
+        });
+      });
+    }
+    noteEl.addEventListener('input', drawSug);
+    drawSug();
     $('#pm', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-pm]'); if (!b) return; t.pm = b.dataset.pm;
       el.querySelectorAll('#pm button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
