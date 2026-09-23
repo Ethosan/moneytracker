@@ -399,17 +399,18 @@ var DEFAULT_CATS = [
   ['🤑 Allowance', 'inc', 'earned'], ['🏅 Bonus', 'inc', 'other'], ['↩️ Paybacks', 'inc', 'reimb'], ['💵 Petty cash', 'inc', 'reimb']
 ];
 function freshMeta() {
-  return { cats: DEFAULT_CATS.map(function (c) { return { name: c[0], type: c[1], kind: c[2] }; }), tags: ['Alaina'], budgets: [], subs: [], venues: {}, accounts: [], rules: [] };
+  return { cats: DEFAULT_CATS.map(function (c) { return { name: c[0], type: c[1], kind: c[2] }; }), tags: ['Alaina'], budgets: [], subs: [], venues: {}, accounts: [], rules: [], basis: 'cash' };
 }
 var S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [] };
 function normalize() { S.bills = S.bills || []; S.bills.forEach(function (b) { if (!b.from && b.month) b.from = b.month + '-01'; }); S.inbox = S.inbox || []; S.checks = S.checks || []; S.meta.accounts = S.meta.accounts || []; S.meta.rules = S.meta.rules || []; S.meta.venues = S.meta.venues || {}; }
-var UI = { tab: 'home', month: monthOf(today()), filter: 'all', q: '' };
+var UI = { tab: 'home', month: monthOf(today()), filter: 'all', q: '', all: false };
 var LS_KEY = 'ledger-state-v1';
 var store = { mode: 'connecting', col: null, dirty: {}, timer: null, writing: false };
 
 function allTx() { var a = []; Object.keys(S.tx).forEach(function (k) { a = a.concat(S.tx[k]); }); return a; }
 function catObj(name) { for (var i = 0; i < S.meta.cats.length; i++) if (S.meta.cats[i].name === name) return S.meta.cats[i]; return null; }
 function incKind(name) { var c = catObj(name); return (c && c.kind) || 'other'; }
+function cashBasis() { return (S.meta.basis || 'cash') === 'cash'; }
 function isClosed(v) { return !!(S.meta.venues[v] && S.meta.venues[v].closed); }
 function venueType(v) { return (S.meta.venues[v] && S.meta.venues[v].type) || 'broker'; }
 
@@ -549,9 +550,17 @@ function venuePnl(v) {
     return a.d < b.d ? -1 : a.d > b.d ? 1 : (a.f === 'bal') - (b.f === 'bal');
   });
   var o = { type: type, inn: 0, out: 0, n: es.length, bal: null, pnl: null, stale: false, last: es.length ? es[es.length - 1].d : null, opening: null };
-  if (type === 'prop' || type === 'poker') {
-    es.forEach(function (e) { if (e.f === 'in') o.inn += e.amt; else if (e.f === 'out') o.out += e.amt; });
-    o.pnl = o.out - o.inn; return o;
+  if (type === 'prop' || type === 'poker' || cashBasis()) {
+    var lastBal = null;
+    // A balance logged before any deposit or withdrawal is capital carried in from before
+    // you started tracking, so on a cash basis it counts as money put in.
+    if (es.length && es[0].f === 'bal') { o.opening = es[0].amt; o.inn += es[0].amt; }
+    es.forEach(function (e, i) { if (e.f === 'in') o.inn += e.amt; else if (e.f === 'out') o.out += e.amt; else if (i > 0) lastBal = e.amt; });
+    o.pnl = r2(o.out - o.inn); o.paper = lastBal; o.cash = true;
+    // On a cash basis, money still with a broker is neither profit nor loss yet.
+    o.open = (type === 'broker' || type === 'crypto') && !isClosed(v) && o.inn - o.out > 0.01;
+    o.outThere = o.open ? r2(o.inn - o.out) : 0;
+    return o;
   }
   var startIdx = -1, start = 0;
   if (es.length && es[0].f === 'bal') { startIdx = 0; start = es[0].amt; o.opening = start; }
@@ -655,11 +664,15 @@ function renderHome() {
   var propFees = sum(mEntries.filter(function (e) { return venueType(e.venue) === 'prop' && e.f === 'in'; }), function (e) { return e.amt; });
   var propPay = sum(mEntries.filter(function (e) { return venueType(e.venue) === 'prop' && e.f === 'out'; }), function (e) { return e.amt; });
   var poker = sum(mEntries.filter(function (e) { return venueType(e.venue) === 'poker'; }), function (e) { return e.f === 'out' ? e.amt : e.f === 'in' ? -e.amt : 0; });
-  if (mEntries.some(function (e) { var ty = venueType(e.venue); return ty === 'prop' || ty === 'poker'; })) {
+  var brIn = sum(mEntries.filter(function (e) { var t = venueType(e.venue); return (t === 'broker' || t === 'crypto') && e.f === 'in'; }), function (e) { return e.amt; });
+  var brOut = sum(mEntries.filter(function (e) { var t = venueType(e.venue); return (t === 'broker' || t === 'crypto') && e.f === 'out'; }), function (e) { return e.amt; });
+  if (mEntries.some(function (e) { var ty = venueType(e.venue); return ty === 'prop' || ty === 'poker' || ty === 'broker' || ty === 'crypto'; })) {
     h += '<section class="blk"><h2>Trading and poker this month <button data-tab="pnl">All P&amp;L</button></h2><div class="panel">' +
       '<div class="row"><div class="l"><b>Prop firm fees</b><span>' + mEntries.filter(function (e) { return venueType(e.venue) === 'prop' && e.f === 'in'; }).length + ' purchases</span></div><div class="r neg">' + money(-propFees) + '</div></div>' +
       '<div class="row"><div class="l"><b>Prop firm payouts</b></div><div class="r pos">' + money(propPay) + '</div></div>' +
-      '<div class="row"><div class="l"><b>Poker</b></div><div class="r ' + (poker >= 0 ? 'pos' : 'neg') + '">' + signed(poker) + '</div></div></div></section>';
+      '<div class="row"><div class="l"><b>Poker</b></div><div class="r ' + (poker >= 0 ? 'pos' : 'neg') + '">' + signed(poker) + '</div></div>' +
+      ((brIn || brOut) ? '<div class="row"><div class="l"><b>Moved to investments</b><span>Not spending. ' + money(brOut) + ' came back</span></div><div class="r">' + money(brIn) + '</div></div>' : '') +
+      '</div></section>';
   }
 
   var plTx = (S.tx[m] || []).filter(function (t) { return t.t === 'exp' && t.pm === 'later'; });
@@ -694,13 +707,14 @@ function txRow(t) {
     '</span></div><div class="r ' + (t.t === 'inc' ? 'pos' : '') + '">' + sign + money(t.amt).replace('$', '$') + '</div></button>';
 }
 function renderActivity() {
-  var m = UI.month, tx = (S.tx[m] || []).slice();
+  var m = UI.month, tx = UI.all ? allTx().slice() : (S.tx[m] || []).slice();
   var h = '<header class="top">' + monthSwitch() + '' + hdRight() + '</header>';
   var chips = [['all', 'All'], ['exp', 'Spending'], ['inc', 'Income']];
   S.meta.tags.forEach(function (t) { chips.push(['tag:' + t, t]); });
   chips.push(['cat:❓ Unaccounted', 'Unaccounted']);
   h += '<div class="chips">' + chips.map(function (c) { return '<button class="chip' + (c[0] === 'tag:Alaina' ? ' rose' : '') + '" data-filter="' + esc(c[0]) + '" aria-pressed="' + (UI.filter === c[0]) + '">' + esc(c[1]) + '</button>'; }).join('') + '</div>';
-  h += '<input class="search" type="search" placeholder="Search notes or categories" value="' + esc(UI.q) + '" id="q">';
+  h += '<div style="display:flex;gap:8px;align-items:center"><input class="search" type="search" placeholder="Search notes or categories" value="' + esc(UI.q) + '" id="q" style="flex:1">' +
+    '<button class="chip" data-act="allmonths" aria-pressed="' + UI.all + '" style="margin-bottom:12px">All time</button></div>';
   var f = UI.filter, q = UI.q.toLowerCase();
   tx = tx.filter(function (t) {
     if (f === 'exp' && t.t !== 'exp') return false;
@@ -711,7 +725,7 @@ function renderActivity() {
     return true;
   }).sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
   var tot = sum(tx, function (t) { return t.t === 'exp' ? t.amt : 0; });
-  h += '<div class="note" style="margin:0 2px 4px">' + tx.length + ' transactions, ' + money(tot) + ' spent</div>';
+  h += '<div class="note" style="margin:0 2px 4px">' + tx.length + ' transactions' + (UI.all ? ' across all months' : '') + ', ' + money(tot) + ' spent</div>';
   if (!tx.length) return h + '<div class="empty">No transactions match. Tap + to add one.</div>';
   var day = null, html = '';
   tx.forEach(function (t) {
@@ -728,20 +742,24 @@ function renderActivity() {
 function renderPnl() {
   var g = venuesByType();
   var h = '<header class="top"><h1>Gains and losses</h1>' + hdRight() + '</header>';
-  var all = [].concat(g.broker, g.crypto, g.prop, g.poker).filter(function (v) { return v.p.pnl != null; });
+  var all = [].concat(g.broker, g.crypto, g.prop, g.poker).filter(function (v) { return v.p.pnl != null && !v.p.open; });
   var grand = sum(all, function (v) { return v.p.pnl; });
+  var outThere = sum([].concat(g.broker, g.crypto), function (v) { return v.p.outThere || 0; });
   if (all.length) {
-    h += '<div class="hero"><div class="lbl">Net across everything with a known result</div><div class="big ' + (grand >= 0 ? 'pos' : 'neg') + '" style="font-size:44px">' + signed(grand, 0) + '</div>' +
+    h += '<div class="hero"><div class="lbl">' + (cashBasis() ? 'Realised so far, money back minus money in' : 'Net across everything with a known result') + '</div><div class="big ' + (grand >= 0 ? 'pos' : 'neg') + '" style="font-size:44px">' + signed(grand, 0) + '</div>' +
       '<div class="sub">' + [['broker', 'Brokers'], ['prop', 'Prop firms'], ['poker', 'Poker'], ['crypto', 'Crypto']].filter(function (k) { return g[k[0]].length; }).map(function (k) {
-        var t = sum(g[k[0]].filter(function (v) { return v.p.pnl != null; }), function (v) { return v.p.pnl; }); return k[1] + ' ' + signed(t, 0);
-      }).join(', ') + '</div></div>';
+        var t = sum(g[k[0]].filter(function (v) { return v.p.pnl != null && !v.p.open; }), function (v) { return v.p.pnl; }); return k[1] + ' ' + signed(t, 0);
+      }).join(', ') + (outThere > 0 ? '. ' + money(outThere, 0) + ' still invested, not counted either way' : '') + '</div></div>';
   }
   function group(title, list, kind) {
     if (!list.length) return '';
-    var known = list.filter(function (v) { return v.p.pnl != null; }), tot = sum(known, function (v) { return v.p.pnl; });
+    var known = list.filter(function (v) { return v.p.pnl != null && !v.p.open; }), tot = sum(known, function (v) { return v.p.pnl; });
+    var stillOut = sum(list, function (v) { return v.p.outThere || 0; });
     var closedN = list.filter(function (v) { return isClosed(v.name); }).length;
     var s = '<section class="blk"><h2>' + title + '<span class="note" style="margin:0">' + (list.length - closedN) + ' in use' + (closedN ? ', ' + closedN + ' closed' : '') + '</span></h2><div class="panel" style="padding-top:10px">';
-    s += '<div class="pl-big ' + (tot >= 0 ? 'pos' : 'neg') + '">' + signed(tot, 0) + '</div>';
+    s += '<div class="pl-big ' + (tot >= 0 ? 'pos' : 'neg') + '">' + signed(tot, 0) + '</div>' +
+      '<div class="note" style="margin:0 0 4px">' + (kind === 'prop' ? 'Fees against payouts' : kind === 'poker' ? 'Across all sessions' : 'Realised: money returned minus money put in') +
+      (stillOut > 0 ? ', plus ' + money(stillOut, 0) + ' still invested' : '') + '</div>';
     if (kind === 'prop') {
       var fees = sum(list, function (v) { return v.p.inn; }), pays = sum(list, function (v) { return v.p.out; }), n = sum(list, function (v) { return S.ledger.filter(function (e) { return e.venue === v.name && e.f === 'in'; }).length; });
       s += '<div class="kv"><span>Fees paid (' + n + ' purchases)</span><span>' + money(fees) + '</span><span>Payouts received</span><span>' + money(pays) + '</span>' +
@@ -750,6 +768,11 @@ function renderPnl() {
       var es = S.ledger.filter(function (e) { return venueType(e.venue) === 'poker'; });
       var wins = es.filter(function (e) { return e.f === 'out'; }).length;
       s += '<div class="kv"><span>Sessions logged</span><span>' + es.length + '</span><span>Winning sessions</span><span>' + wins + '</span></div>';
+    } else if (cashBasis()) {
+      var dep = sum(list, function (v) { return v.p.inn; }), wd = sum(list, function (v) { return v.p.out; });
+      s += '<div class="kv"><span>Money put in</span><span>' + money(dep) + '</span><span>Money taken out</span><span>' + money(wd) + '</span>' +
+        '<span>Still invested</span><span>' + money(stillOut) + '</span></div>' +
+        '<p class="note" style="margin-top:0">Only money that has come back counts as a result. What sits in an account is not part of your money until you withdraw it. If an account held money before you started tracking, log that as a balance dated before your first deposit so it counts as money put in.</p>';
     } else {
       var miss = list.length - known.length;
       s += '<div class="kv"><span>Deposited</span><span>' + money(sum(list, function (v) { return v.p.inn; })) + '</span><span>Withdrawn</span><span>' + money(sum(list, function (v) { return v.p.out; })) + '</span></div>';
@@ -761,18 +784,21 @@ function renderPnl() {
       var p = v.p, sub, cl = isClosed(v.name);
       if (kind === 'prop') sub = money(p.inn) + ' fees, ' + money(p.out) + ' payouts';
       else if (kind === 'poker') sub = p.n + ' sessions';
+      else if (p.cash) sub = 'In ' + money(p.inn, 0) + ', out ' + money(p.out, 0) + (p.open ? '. ' + money(p.outThere, 0) + ' still invested' : '') + (p.paper != null ? '. Paper value ' + money(p.paper, 0) + ', not counted' : '');
       else sub = p.bal == null || (cl && p.bal === 0) ? (cl ? 'In ' + money(p.inn, 0) + ', out ' + money(p.out, 0) : 'In ' + money(p.inn, 0) + ', out ' + money(p.out, 0) + '. Add balance') : 'Balance ' + money(p.bal, 0) + (p.opening != null ? ', from ' + money(p.opening, 0) + ' opening' : '') + (p.stale && !cl ? '. Balance out of date' : '');
       if (cl) sub = 'Closed' + (p.last ? ', last used ' + monthLabel(monthOf(p.last), true) + ' ' + p.last.slice(0, 4) : '') + '. ' + sub;
       s += '<button class="row' + (cl ? ' closed' : '') + '" data-venue="' + esc(v.name) + '"><div class="l"><b>' + esc(v.name) + '</b><span>' + sub + '</span></div><div class="r ' +
-        (p.pnl == null ? '' : p.pnl >= 0 ? 'pos' : 'neg') + '">' + (p.pnl == null ? '–' : signed(p.pnl, 0)) + '</div></button>';
+        (p.pnl == null || p.open ? '' : p.pnl >= 0 ? 'pos' : 'neg') + '">' + (p.open ? money(p.outThere, 0) + '<span>invested</span>' : p.pnl == null ? '–' : signed(p.pnl, 0)) + '</div></button>';
     });
     return s + '</div></section>';
   }
-  var body = group('Brokers', g.broker, 'broker') + group('Prop firms', g.prop, 'prop') + group('Poker', g.poker, 'poker') + group('Crypto', g.crypto, 'broker');
+  var body = group(cashBasis() ? 'Brokers, cash basis' : 'Brokers', g.broker, 'broker') + group('Prop firms', g.prop, 'prop') + group('Poker', g.poker, 'poker') + group('Crypto', g.crypto, 'broker');
   if (!body) body = '<div class="empty">No accounts yet. Log a deposit, prop firm fee or poker session to start.</div>';
   return h + '<div style="display:flex;gap:8px;margin-bottom:16px"><button class="btn sm" data-act="add-ledger">Log an entry</button></div>' + body +
     '<p class="note">Tap an account to change its group or mark it closed. Closed accounts stay in their group and in the totals, greyed out at the bottom.</p>' +
-    '<p class="note">Broker P&amp;L is current balance minus opening balance, plus withdrawals, minus deposits.</p>';
+    (cashBasis()
+      ? '<p class="note">Investments are counted the way trading results are: money taken out minus money put in. Balances you log are shown as paper value only and are never added to your money. Change this under \u22ef \u2192 Investment accounting.</p>'
+      : '<p class="note">Broker P&amp;L is current balance minus opening balance, plus withdrawals, minus deposits. Balances count as part of your money.</p>');
 }
 
 function renderMore() {
@@ -798,6 +824,13 @@ function renderMore() {
     var when = days == null ? 'No renewal date' : days < 0 ? 'Renewal date passed' : days === 0 ? 'Renews today' : 'Renews in ' + days + ' day' + (days === 1 ? '' : 's');
     h += '<button class="row" data-sub="' + esc(s.id) + '"><div class="l"><b>' + esc(s.name) + '</b><span>' + when + '</span></div><div class="r">' + money(s.amt) + '<span>' + cycleLabel(s.cycle) + '</span></div></button>';
   });
+  var due = subs.filter(function (x) { return x.next && x.next <= today(); });
+  if (due.length) {
+    h += '<div class="note" style="padding:10px 0 2px">Due now. Logging one adds the expense and moves the renewal date on.</div>';
+    due.forEach(function (x) {
+      h += '<div class="row"><div class="l"><b>' + esc(x.name) + '</b><span>Renewed ' + dayLabel(x.next) + '</span></div><div class="r">' + money(x.amt) + ' <button class="chip sm" data-paysub="' + esc(x.id) + '">Log it</button></div></div>';
+    });
+  }
   var sugg = subSuggestions();
   if (sugg.length) {
     h += '<div class="note" style="padding:10px 0 4px">Found in your history. Tap one to track it.</div>';
@@ -823,8 +856,11 @@ function renderMore() {
   // setup
   h += '<section class="blk"><h2>Setup</h2><div class="panel">' +
     '<button class="row" data-act="budgets"><div class="l"><b>Budgets</b><span>' + S.meta.budgets.length + ' set</span></div><div class="r">›</div></button>' +
+    '<button class="row" data-act="basis"><div class="l"><b>Investment accounting</b><span>' + (cashBasis() ? 'Cash basis, balances not counted' : 'Balances count as your money') + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="cats"><div class="l"><b>Categories and tags</b><span>' + S.meta.cats.length + ' categories, ' + S.meta.tags.length + ' tags</span></div><div class="r">›</div></button>' +
-    '<button class="row" data-act="export"><div class="l"><b>Download a backup</b><span>JSON file of everything</span></div><div class="r">›</div></button>' +
+    (isStandalone() ? '' : '<button class="row" data-act="install"><div class="l"><b>Install on your phone</b><span>Home screen icon, full screen, works offline</span></div><div class="r">\u203a</div></button>') +
+    '<button class="row" data-act="cleanup"><div class="l"><b>Clean up in a spreadsheet</b><span>Export to CSV, edit in Excel or Sheets, bring it back</span></div><div class="r">\u203a</div></button>' +
+    '<button class="row" data-act="export"><div class="l"><b>Download a backup</b><span>JSON of everything, including bills and loans</span></div><div class="r">›</div></button>' +
     '<button class="row" data-act="restore"><div class="l"><b>Restore a backup</b><span>Replaces everything with a backup file</span></div><div class="r">›</div></button>' +
     (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="signout"><div class="l"><b>Sign out</b><span>' + esc(store.email || '') + '</span></div><div class="r">›</div></button>' : '') +
     '<button class="row" data-act="theme"><div class="l"><b>Appearance</b><span>' + ({ light: 'Light', dark: 'Dark' }[localTheme()] || 'Match device') + '</span></div><div class="r">›</div></button>' +
@@ -1132,10 +1168,149 @@ function applyImport(res) {
   var months = Object.keys(S.tx).sort(); if (months.length) UI.month = months[months.length - 1];
 }
 
+var deferredInstall = null;
+window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; render(); });
+function isStandalone() { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }
+function installSheet() {
+  var ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  var body = deferredInstall
+    ? '<p style="margin-top:0">Install the app so it opens from your home screen, full screen and offline.</p><div class="actions"><button class="btn" id="doinst">Install</button></div>'
+    : ios
+      ? '<p style="margin-top:0">On iPhone, install it from Safari:</p><ol style="padding-left:20px;line-height:1.9"><li>Open this page in <b>Safari</b>, not in another app\'s browser.</li><li>Tap the <b>Share</b> button at the bottom.</li><li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol><p class="note">It then opens full screen, with no address bar, and works offline.</p>'
+      : '<p style="margin-top:0">In Chrome, open the <b>\u22ee</b> menu and choose <b>Install app</b> or <b>Add to Home screen</b>. If you do not see it, reload the page once and try again.</p>';
+  openSheet('Install on your phone', body, function (el) {
+    var b = $('#doinst', el);
+    if (b) b.addEventListener('click', function () {
+      var p = deferredInstall; deferredInstall = null; closeSheet();
+      p.prompt(); p.userChoice.then(function (r) { toast(r.outcome === 'accepted' ? 'Installing' : 'Maybe later'); render(); });
+    });
+  });
+}
 function exportData() {
   var blob = new Blob([JSON.stringify(S)], { type: 'application/json' }), a = document.createElement('a');
   a.href = URL.createObjectURL(blob); a.download = 'ledger-backup-' + today() + '.json'; document.body.appendChild(a); a.click();
   setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500); toast('Backup downloaded');
+}
+function csvCell(v) { var x = String(v == null ? '' : v); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; }
+function download(name, text, type) {
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([text], { type: type || 'text/csv;charset=utf-8' }));
+  a.download = name; document.body.appendChild(a); a.click();
+  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+}
+var TX_COLS = ['id', 'date', 'type', 'amount', 'category', 'subcategory', 'note', 'tags', 'paid with'];
+var INV_COLS = ['id', 'date', 'account', 'group', 'action', 'amount', 'note'];
+function exportCsv(kind) {
+  var rows;
+  if (kind === 'inv') {
+    rows = [['ID', 'Date', 'Account', 'Group', 'Action', 'Amount', 'Note']];
+    S.ledger.slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; }).forEach(function (e) {
+      rows.push([e.id, e.d, e.venue, venueType(e.venue), e.f === 'in' ? 'In' : e.f === 'out' ? 'Out' : 'Balance', e.amt, e.note || '']);
+    });
+    download('ledger-investments-' + today() + '.csv', rows.map(function (r) { return r.map(csvCell).join(','); }).join('\n'));
+  } else {
+    rows = [['ID', 'Date', 'Type', 'Amount', 'Category', 'Subcategory', 'Note', 'Tags', 'Paid with']];
+    allTx().sort(function (a, b) { return a.d < b.d ? -1 : 1; }).forEach(function (t) {
+      rows.push([t.id, t.d, t.t === 'exp' ? 'Expense' : t.t === 'inc' ? 'Income' : 'Adjustment', t.amt, t.cat, t.sub || '', t.note || '', (t.tags || []).join('; '), t.pm === 'later' ? 'PayLater' : '']);
+    });
+    download('ledger-transactions-' + today() + '.csv', rows.map(function (r) { return r.map(csvCell).join(','); }).join('\n'));
+  }
+  toast('CSV downloaded');
+}
+function csvParse(text) {
+  var rows = [], row = [], cur = '', q = false;
+  text = text.replace(/^\uFEFF/, '');
+  for (var i = 0; i < text.length; i++) {
+    var c = text[i];
+    if (q) {
+      if (c === '"' && text[i + 1] === '"') { cur += '"'; i++; }
+      else if (c === '"') q = false;
+      else cur += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(cur); cur = ''; }
+    else if (c === '\n' || c === '\r') {
+      if (c === '\r' && text[i + 1] === '\n') i++;
+      row.push(cur); cur = ''; if (row.some(function (x) { return x !== ''; })) rows.push(row); row = [];
+    } else cur += c;
+  }
+  row.push(cur); if (row.some(function (x) { return x !== ''; })) rows.push(row);
+  return rows;
+}
+function clean0(v) { return String(v == null ? '' : v).trim(); }
+// Read back a CSV that came out of this app, after cleaning it in Excel or Sheets.
+function csvDiff(rows) {
+  var head = (rows[0] || []).map(function (h) { return clean0(h).toLowerCase(); });
+  var isInv = head.indexOf('account') > -1 && head.indexOf('action') > -1;
+  var idx = {}; (isInv ? INV_COLS : TX_COLS).forEach(function (c) { idx[c] = head.indexOf(c); });
+  if (idx.date < 0 || idx.amount < 0) return null;
+  var out = { isInv: isInv, add: [], upd: [], del: [], bad: 0, seen: {} };
+  rows.slice(1).forEach(function (r) {
+    var get = function (c) { return idx[c] > -1 ? clean0(r[idx[c]]) : ''; };
+    var d = parseDateAny(get('date')), amt = parseFloat(String(get('amount')).replace(/[^0-9.\-]/g, ''));
+    if (!d || isNaN(amt) || !(Math.abs(amt) > 0)) { out.bad++; return; }
+    var id = get('id');
+    if (isInv) {
+      var act = get('action').toLowerCase();
+      var e = { id: id || uid(), d: d, venue: get('account') || 'Unknown', f: act.indexOf('bal') === 0 ? 'bal' : act.indexOf('out') === 0 ? 'out' : 'in', amt: r2(Math.abs(amt)), note: get('note'), src: 'csv', group: get('group').toLowerCase() };
+      if (id && S.ledger.some(function (x) { return x.id === id; })) { out.upd.push(e); out.seen[id] = 1; } else out.add.push(e);
+    } else {
+      var ty = get('type').toLowerCase();
+      var t = {
+        id: id || uid(), d: d, t: ty.indexOf('inc') === 0 ? 'inc' : ty.indexOf('adj') === 0 ? 'adj' : 'exp', amt: r2(Math.abs(amt)),
+        cat: get('category') || '\u{1F4E6} Other', sub: get('subcategory'), note: get('note'),
+        tags: get('tags').split(/[;,]/).map(function (x) { return x.trim(); }).filter(Boolean), src: 'csv'
+      };
+      if (/later/i.test(get('paid with'))) t.pm = 'later';
+      if (id && findTx(id)) { out.upd.push(t); out.seen[id] = 1; } else out.add.push(t);
+    }
+  });
+  (isInv ? S.ledger : allTx()).forEach(function (x) { if (!out.seen[x.id]) out.del.push(x); });
+  return out;
+}
+function csvImportSheet() {
+  var body = '<p style="margin-top:0">Export a CSV, clean it in Excel or Sheets, then bring it back here. Keep the ID column: rows keep their identity, so your edits land on the right transaction and anything you deleted in the sheet can be deleted here too.</p>' +
+    '<div class="wrap"><button class="chip" data-act="csv">Export transactions</button><button class="chip" data-act="csvinv">Export investments</button></div>' +
+    '<label class="f">Cleaned file</label><input type="file" id="cf" accept=".csv,text/csv" class="t"><div id="cres"></div>';
+  openSheet('Clean up in a spreadsheet', body, function (el) {
+    $('#cf', el).addEventListener('change', function () {
+      var f = this.files[0]; if (!f) return; var rd = new FileReader();
+      rd.onload = function () {
+        var diff;
+        try { diff = csvDiff(csvParse(rd.result)); } catch (e) { diff = null; }
+        if (!diff) { $('#cres', el).innerHTML = '<p class="neg">That file does not look like a ledger CSV. It needs at least the Date and Amount columns from the export.</p>'; return; }
+        $('#cres', el).innerHTML = '<div class="kv" style="margin-top:14px"><span>Rows updated</span><span>' + diff.upd.length + '</span>' +
+          '<span>Rows added</span><span>' + diff.add.length + '</span><span>Missing from the file</span><span>' + diff.del.length + '</span>' +
+          (diff.bad ? '<span>Rows skipped, no valid date or amount</span><span>' + diff.bad + '</span>' : '') + '</div>' +
+          (diff.del.length ? '<label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-top:10px"><input type="checkbox" id="dodel"> Delete the ' + diff.del.length + ' ' + (diff.isInv ? 'entries' : 'transactions') + ' missing from the file</label>' : '') +
+          '<p class="note">' + (diff.isInv ? 'Investment entries' : 'Transactions') + ' only. Bills, loans and settings are untouched.</p>' +
+          '<div class="actions"><button class="btn" id="capply">Apply</button></div>';
+        $('#capply', el).addEventListener('click', function () {
+          var del = $('#dodel', el) && $('#dodel', el).checked;
+          if (diff.isInv) {
+            var keep = {}; diff.upd.forEach(function (e) { keep[e.id] = e; });
+            S.ledger = S.ledger.filter(function (x) { return !(del && diff.del.some(function (y) { return y.id === x.id; })); })
+              .map(function (x) { return keep[x.id] ? Object.assign({}, x, keep[x.id]) : x; });
+            diff.add.forEach(function (e) { S.ledger.push(e); });
+            S.ledger.forEach(function (e) {
+              if (e.group) { if (!S.meta.venues[e.venue]) S.meta.venues[e.venue] = { name: e.venue, type: /prop|poker|crypto/.test(e.group) ? e.group : 'broker' }; delete e.group; }
+            });
+            mark('ledger'); mark('meta');
+          } else {
+            diff.upd.forEach(function (t) { var old = findTx(t.id); if (old) removeTx(old); });
+            if (del) diff.del.forEach(function (t) { removeTx(t); });
+            diff.upd.concat(diff.add).forEach(function (t) {
+              if (!catObj(t.cat)) S.meta.cats.push({ name: t.cat, type: t.t === 'inc' ? 'inc' : 'exp', kind: t.t === 'inc' ? 'other' : undefined });
+              (t.tags || []).forEach(function (g) { if (S.meta.tags.indexOf(g) < 0) S.meta.tags.push(g); });
+              var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
+            });
+            mark('meta');
+          }
+          closeSheet(); render(); toast('Applied ' + (diff.upd.length + diff.add.length) + ' rows');
+        });
+      };
+      rd.readAsText(f);
+    });
+  });
 }
 function restoreSheet() {
   openSheet('Restore a backup', '<p style="margin-top:0">Choose a ledger backup .json file. It replaces everything in the app.</p><input type="file" id="rf" accept=".json,application/json" class="t"><p class="neg" id="rerr"></p>', function (el) {
@@ -1146,6 +1321,18 @@ function restoreSheet() {
         catch (e) { $('#rerr', el).textContent = 'That file is not a ledger backup.'; }
       };
       rd.readAsText(f);
+    });
+  });
+}
+function basisSheet() {
+  var body = '<div class="seg" id="bs"><button data-b="cash" aria-pressed="' + cashBasis() + '">Cash basis</button><button data-b="balance" aria-pressed="' + !cashBasis() + '">Count balances</button></div>' +
+    '<p style="margin-top:4px"><b>Cash basis</b> treats brokers like your prop firm and poker accounts. Money you put in is money gone, money you take out is money back, and the gain or loss is the difference. Anything still in the account is paper value: shown for reference, never added to your money.</p>' +
+    '<p><b>Count balances</b> treats what is in your accounts as capital you own, and works out profit as balance minus opening balance, adjusted for deposits and withdrawals. It needs a current balance for each account.</p>' +
+    '<p class="note">Either way, deposits and withdrawals are never counted as spending or income, and balance checks only cover money you can actually reach.</p>';
+  openSheet('Investment accounting', body, function (el) {
+    $('#bs', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-b]'); if (!b) return;
+      S.meta.basis = b.dataset.b; mark('meta'); closeSheet(); render(); toast('Saved');
     });
   });
 }
@@ -1176,7 +1363,7 @@ function checkSheet() {
   var prev = lastCheck(), vals = {};
   if (prev && prev.lines) vals = Object.assign({}, prev.lines);
   function accRows() {
-    if (!S.meta.accounts.length) return '<div class="note" style="padding:10px 0">Add each place you keep money: bank accounts, cash, GrabPay wallet. Add GrabPay Later as money you owe.</div>';
+    if (!S.meta.accounts.length) return '<div class="note" style="padding:10px 0">Add each place you keep money you can spend: bank accounts, cash, GrabPay wallet. Add GrabPay Later as money you owe. Leave brokerage and prop firm accounts out, they are tracked separately.</div>';
     return S.meta.accounts.map(function (a) {
       return '<div class="row"><div class="l"><b>' + esc(a.name) + '</b><span>' + (a.liability ? 'Amount you owe' : 'Balance') + '</span></div>' +
         '<input class="t" style="width:120px;text-align:right" inputmode="decimal" data-acc="' + esc(a.name) + '" value="' + (vals[a.name] != null ? vals[a.name] : '') + '" placeholder="0.00"></div>';
@@ -1851,6 +2038,17 @@ function onClick(e) {
   if ((b = t.closest('[data-edit-tx]'))) { var x = findTx(b.dataset.editTx); if (x) txSheet(x); return; }
   if ((b = t.closest('[data-venue]'))) { venueSheet(b.dataset.venue); return; }
   if ((b = t.closest('[data-person]'))) { debtSheet(b.dataset.person); return; }
+  if ((b = t.closest('[data-paysub]'))) {
+    var sb = S.meta.subs.filter(function (q) { return q.id === b.dataset.paysub; })[0];
+    if (sb) {
+      var c = '🗓 Subscriptions'; if (!catObj(c)) S.meta.cats.push({ name: c, type: 'exp' });
+      var d = sb.next || today(), mm = monthOf(d);
+      (S.tx[mm] = S.tx[mm] || []).push({ id: uid(), d: d, t: 'exp', amt: sb.amt, cat: c, sub: '', note: sb.name, tags: [], src: 'app' });
+      sb.next = addMonth(monthOf(d), sb.cycle || 1) + '-' + d.slice(8, 10);
+      markMonth(mm); mark('meta'); render(); toast('Logged ' + sb.name);
+    }
+    return;
+  }
   if ((b = t.closest('[data-sub]'))) { var s = S.meta.subs.filter(function (q) { return q.id === b.dataset.sub; })[0]; if (s) subSheet(s); return; }
   if ((b = t.closest('[data-sugg]'))) { var sg = subSuggestions().filter(function (q) { return q.note === b.dataset.sugg; })[0]; if (sg) subSheet(null, { name: sg.note, amt: sg.amt }); return; }
   if ((b = t.closest('[data-act]'))) {
@@ -1868,6 +2066,12 @@ function onClick(e) {
     else if (a === 'theme') themeSheet();
     else if (a === 'check') checkSheet();
     else if (a === 'paylater') payLaterSheet();
+    else if (a === 'basis') basisSheet();
+    else if (a === 'allmonths') { UI.all = !UI.all; render(); }
+    else if (a === 'install') installSheet();
+    else if (a === 'csv') exportCsv('tx');
+    else if (a === 'csvinv') exportCsv('inv');
+    else if (a === 'cleanup') csvImportSheet();
     else if (a === 'restore') restoreSheet();
     else if (a === 'signout') { store.sb.auth.signOut().then(function () { try { localStorage.removeItem(LS_KEY); localStorage.removeItem('ledger-dirty'); } catch (e) { } S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [] }; store.mode = 'auth'; render(); }); }
     else if (a === 'stmt') stmtSheet();
@@ -1882,7 +2086,10 @@ function boot() {
   loadLocal();
   document.addEventListener('click', onClick);
   dlg.addEventListener('click', function (e) { if (e.target === dlg) closeSheet(); });
+  var q = new URLSearchParams(location.search);
+  if (q.get('tab')) UI.tab = q.get('tab');
   render();
+  if (q.get('add')) txSheet();
   connect();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(function () { });
 }
