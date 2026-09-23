@@ -1,0 +1,4 @@
+# Never commit your money data
+*.json
+!manifest.webmanifest
+*.xlsx
