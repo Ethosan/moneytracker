@@ -282,15 +282,49 @@ var MM = (function () {
     if (m) return m[3] + '-' + m[2].padStart(2, '0') + '-' + m[1].padStart(2, '0');
     return null;
   }
+  // Find the header row and work out which column is which. Money Manager's
+  // exports differ by version, currency and locale, so never trust fixed positions.
+  function layout(rows) {
+    var L = null;
+    for (var i = 0; i < Math.min(rows.length, 12) && !L; i++) {
+      var r = rows[i] || [], h = r.map(function (x) { return clean(x).toLowerCase(); });
+      var col = { date: -1, account: -1, cat: -1, sub: -1, note: -1, amt: -1, cur: -1, type: -1, desc: -1 };
+      h.forEach(function (v, j) {
+        var raw = clean(r[j]);
+        if (col.date < 0 && /^(date|period|time)/.test(v)) col.date = j;
+        else if (col.account < 0 && /account/.test(v)) col.account = j;
+        else if (col.cat < 0 && /^categor/.test(v)) col.cat = j;
+        else if (col.sub < 0 && /sub.?categor/.test(v)) col.sub = j;
+        else if (col.note < 0 && /^(note|memo|remark|title)/.test(v)) col.note = j;
+        else if (col.type < 0 && /(income.*expense|^type$|transaction type)/.test(v)) col.type = j;
+        else if (col.desc < 0 && /descri/.test(v)) col.desc = j;
+        else if (col.cur < 0 && /^currency$/.test(v)) col.cur = j;
+        else if (/^[a-z]{3}$/.test(v) && /^[A-Z]{3}$/.test(raw)) { if (col.amt < 0) col.amt = j; }
+        else if (col.amt < 0 && /(amount|value|total)/.test(v)) col.amt = j;
+      });
+      if (col.amt < 0) h.forEach(function (v, j) { if (col.amt < 0 && /(amount|value|total)/.test(v)) col.amt = j; });
+      if (col.date > -1 && col.amt > -1 && col.type > -1) { col.header = i; L = col; }
+    }
+    return L;
+  }
   // rows: array of arrays incl. header row
   function map(rows, XLSX) {
-    var out = { tx: [], ledger: [], debts: [], venues: {}, cats: {}, skipped: 0 };
+    var out = { tx: [], ledger: [], debts: [], venues: {}, cats: {}, skipped: 0, headers: [] };
     var n = 0;
     function id() { n++; return 'mm' + n; }
-    for (var i = 1; i < rows.length; i++) {
+    var L = layout(rows);
+    if (!L) { L = { header: 0, date: 0, account: 1, cat: 2, sub: 3, note: 4, amt: 5, type: 6, desc: 7 }; out.guessed = true; }
+    out.headers = (rows[L.header] || []).map(function (x) { return clean(x); }).filter(Boolean);
+    function cell(r, j) { return j > -1 && j < r.length ? r[j] : ''; }
+    for (var i = L.header + 1; i < rows.length; i++) {
       var r = rows[i]; if (!r || !r.length) continue;
-      var d = dateOf(r[0], XLSX), acct = clean(r[1]), cat = clean(r[2]), sub = clean(r[3]),
-        note = clean(r[4]), amt = Math.abs(parseFloat(r[5])), type = clean(r[6]);
+      var d = dateOf(cell(r, L.date), XLSX), acct = clean(cell(r, L.account)), cat = clean(cell(r, L.cat)), sub = clean(cell(r, L.sub)),
+        note = clean(cell(r, L.note)) || clean(cell(r, L.desc)),
+        raw = cell(r, L.amt), amt = Math.abs(typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/[^0-9.\-]/g, ''))),
+        type = clean(cell(r, L.type));
+      if (!type && amt) type = (typeof raw === 'number' ? raw : parseFloat(String(raw).replace(/[^0-9.\-]/g, ''))) < 0 ? 'Expense' : 'Income';
+      if (/^expense/i.test(type)) type = 'Expense'; else if (/^income/i.test(type)) type = 'Income';
+      else if (/transfer.?out|^out$/i.test(type)) type = 'Transfer-Out'; else if (/transfer.?in|^in$/i.test(type)) type = 'Transfer-In';
       if (!d || !(amt > 0)) { out.skipped++; continue; }
       amt = Math.round(amt * 100) / 100;
       if (type === 'Expense' || type === 'Income') {
@@ -367,8 +401,8 @@ var DEFAULT_CATS = [
 function freshMeta() {
   return { cats: DEFAULT_CATS.map(function (c) { return { name: c[0], type: c[1], kind: c[2] }; }), tags: ['Alaina'], budgets: [], subs: [], venues: {}, accounts: [], rules: [] };
 }
-var S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [] };
-function normalize() { S.inbox = S.inbox || []; S.checks = S.checks || []; S.meta.accounts = S.meta.accounts || []; S.meta.rules = S.meta.rules || []; S.meta.venues = S.meta.venues || {}; }
+var S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [] };
+function normalize() { S.bills = S.bills || []; S.bills.forEach(function (b) { if (!b.from && b.month) b.from = b.month + '-01'; }); S.inbox = S.inbox || []; S.checks = S.checks || []; S.meta.accounts = S.meta.accounts || []; S.meta.rules = S.meta.rules || []; S.meta.venues = S.meta.venues || {}; }
 var UI = { tab: 'home', month: monthOf(today()), filter: 'all', q: '' };
 var LS_KEY = 'ledger-state-v1';
 var store = { mode: 'connecting', col: null, dirty: {}, timer: null, writing: false };
@@ -394,6 +428,7 @@ function bodyFor(key) {
   if (key === 'debts') return { entries: S.debts };
   if (key === 'inbox') return { items: S.inbox };
   if (key === 'checks') return { entries: S.checks };
+  if (key === 'bills') return { entries: S.bills };
   var m = key.slice(3); return (S.tx[m] && S.tx[m].length) ? { items: S.tx[m] } : null;
 }
 function saveDirty() { try { localStorage.setItem('ledger-dirty', JSON.stringify(Object.keys(store.dirty))); } catch (e) { } }
@@ -419,10 +454,10 @@ function flush() {
   })();
 }
 function setSync(t) { var el = $('#sync'); if (el) el.textContent = t; }
-function markAll() { mark('meta'); mark('ledger'); mark('debts'); mark('inbox'); mark('checks'); Object.keys(S.tx).forEach(markMonth); }
+function markAll() { mark('meta'); mark('ledger'); mark('debts'); mark('inbox'); mark('checks'); mark('bills'); Object.keys(S.tx).forEach(markMonth); }
 
 function docsToState(rows) {
-  var n = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [] };
+  var n = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [] };
   rows.forEach(function (d) {
     var b = d.body || {};
     if (d.id === 'meta') n.meta = Object.assign(freshMeta(), b);
@@ -430,6 +465,7 @@ function docsToState(rows) {
     else if (d.id === 'debts') n.debts = b.entries || [];
     else if (d.id === 'inbox') n.inbox = b.items || [];
     else if (d.id === 'checks') n.checks = b.entries || [];
+    else if (d.id === 'bills') n.bills = b.entries || [];
     else if (d.id.indexOf('tx-') === 0) n.tx[d.id.slice(3)] = b.items || [];
   });
   return n;
@@ -626,6 +662,13 @@ function renderHome() {
       '<div class="row"><div class="l"><b>Poker</b></div><div class="r ' + (poker >= 0 ? 'pos' : 'neg') + '">' + signed(poker) + '</div></div></div></section>';
   }
 
+  var plTx = (S.tx[m] || []).filter(function (t) { return t.t === 'exp' && t.pm === 'later'; });
+  var plOwed = laterOwed(), plNext = nextPayment(), plMonth = r2(sum(plTx, function (t) { return t.amt; }));
+  if (plOwed > 0 || plMonth > 0) {
+    h += '<section class="blk"><h2>PayLater <button data-act="paylater">Open</button></h2><div class="panel">' +
+      '<div class="row"><div class="l"><b>Charged to PayLater in ' + monthLabel(m, true) + '</b><span>' + plTx.length + ' purchases, already counted as spending</span></div><div class="r">' + money(plMonth) + '</div></div>' +
+      '<div class="row"><div class="l"><b>Still owed overall</b><span>' + (plNext ? 'Next payment ' + money(plNext.amt) + ' on ' + dayLabel(plNext.d) : 'No plan set yet') + '</span></div><div class="r">' + money(plOwed) + '</div></div></div></section>';
+  }
   var lcx = lastCheck(), since = lcx ? Math.round((new Date(today()) - new Date(lcx.d)) / 864e5) : null;
   h += '<button class="banner quiet" data-act="check"><b>' + (lcx ? 'Balance checked ' + (since === 0 ? 'today' : since + ' day' + (since === 1 ? '' : 's') + ' ago') : 'No balance check yet') + '</b><span>' + (lcx && since < 14 ? 'Next one due in ' + (14 - since) + ' days' : 'Takes a minute and catches anything you missed') + '</span></button>';
   // trend
@@ -763,6 +806,10 @@ function renderMore() {
     });
   }
   h += '</div></section>';
+  var owed = laterOwed(), nx = nextPayment();
+  h += '<section class="blk"><h2>PayLater</h2><div class="panel">' +
+    '<button class="row" data-act="paylater"><div class="l"><b>' + (owed > 0 ? money(owed) + ' outstanding' : 'Nothing outstanding') + '</b><span>' +
+    (nx ? 'Next payment ' + money(nx.amt) + ' on ' + dayLabel(nx.d) : 'Bills, instalment plans and what is coming up') + '</span></div><div class="r">›</div></button></div></section>';
   var lc = lastCheck();
   h += '<section class="blk"><h2>Balance check</h2><div class="panel">' +
     '<button class="row" data-act="check"><div class="l"><b>Check your balances</b><span>' + (lc ? 'Last done ' + dayLabel(lc.d) + ', total ' + money(lc.total, 0) : 'Count what you have and find missed spending') + '</span></div><div class="r">›</div></button></div>' +
@@ -822,8 +869,9 @@ function openSheet(title, body, onReady) {
 }
 function closeSheet() { if (dlg.open) dlg.close(); }
 
-function txSheet(existing) {
-  var t = existing ? JSON.parse(JSON.stringify(existing)) : { id: uid(), d: today(), t: 'exp', amt: 0, cat: '', sub: '', note: '', tags: [], src: 'app' };
+function txSheet(existing, asNew) {
+  if (asNew) { var seed = existing; existing = null; }
+  var t = existing ? JSON.parse(JSON.stringify(existing)) : asNew ? seed : { id: uid(), d: today(), t: 'exp', amt: 0, cat: '', sub: '', note: '', tags: [], src: 'app' };
   function catChips() {
     return S.meta.cats.filter(function (c) { return c.type === t.t; }).map(function (c) { return '<button class="chip" data-cat="' + esc(c.name) + '" aria-pressed="' + (t.cat === c.name) + '">' + esc(c.name) + '</button>'; }).join('');
   }
@@ -835,6 +883,7 @@ function txSheet(existing) {
     '<div class="amt-in"><span>$</span><input id="amt" inputmode="decimal" placeholder="0.00" value="' + (t.amt ? t.amt : '') + '" aria-label="Amount"></div>' +
     '<label class="f">Category</label><div class="wrap" id="cats">' + catChips() + '</div>' +
     '<label class="f">Tags</label><div class="wrap" id="tags">' + tagChips() + '</div>' +
+    '<label class="f">Paid with</label><div class="seg" id="pm"><button data-pm="cash" aria-pressed="' + (t.pm !== 'later') + '">Cash or bank</button><button data-pm="later" aria-pressed="' + (t.pm === 'later') + '">PayLater</button></div>' +
     '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="What was it?">' +
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + t.d + '">' +
     '<div class="actions">' + (existing ? '<button class="btn danger" id="del">Delete</button>' : '') + '<button class="btn" id="save">' + (existing ? 'Save changes' : 'Add') + '</button></div>';
@@ -853,6 +902,10 @@ function txSheet(existing) {
     $('#tags', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-tag]'); if (!b) return; var g = b.dataset.tag, i = t.tags.indexOf(g);
       if (i > -1) t.tags.splice(i, 1); else t.tags.push(g); b.setAttribute('aria-pressed', i < 0);
+    });
+    $('#pm', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-pm]'); if (!b) return; t.pm = b.dataset.pm;
+      el.querySelectorAll('#pm button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
     });
     $('#save', el).addEventListener('click', function () {
       var a = parseFloat($('#amt', el).value);
@@ -1040,13 +1093,22 @@ function importSheet() {
       if (!window.XLSX) { $('#imp', el).innerHTML = '<p class="neg">The spreadsheet reader did not load. Check your connection and reopen the page.</p>'; return; }
       var rd = new FileReader();
       rd.onload = function () {
-        var res;
+        var res = null;
+        var wb;
         try {
-          var wb = XLSX.read(new Uint8Array(rd.result), { type: 'array' });
-          var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: '' });
-          res = MM.map(rows, XLSX);
+          wb = XLSX.read(new Uint8Array(rd.result), { type: 'array', cellDates: false });
+          // try every sheet, keep whichever yields the most rows
+          wb.SheetNames.forEach(function (nm) {
+            var rows = XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, raw: true, defval: '' });
+            var r = MM.map(rows, XLSX);
+            if (!res || (r.tx.length + r.ledger.length) > (res.tx.length + res.ledger.length)) res = r;
+          });
         } catch (err) { $('#imp', el).innerHTML = '<p class="neg">This file could not be read. Export again from Money Manager as .xlsx and retry.</p>'; return; }
-        if (!res.tx.length && !res.ledger.length) { $('#imp', el).innerHTML = '<p class="neg">No transactions found. Check this is a Money Manager export.</p>'; return; }
+        if (!res || (!res.tx.length && !res.ledger.length)) {
+          $('#imp', el).innerHTML = '<p class="neg">No rows could be read from this file.</p><p class="note">Sheets found: ' + esc(wb.SheetNames.join(', ')) +
+            '.<br>Column headings found: ' + esc((res && res.headers.length ? res.headers.join(', ') : 'none')) +
+            '.<br>The reader needs a date column, an amount column and an Income/Expense column. Send the file to Claude and it can be fitted to your export.</p>'; return;
+        }
         var al = sum(res.tx.filter(function (t) { return t.tags.indexOf('Alaina') > -1; }), function (t) { return t.amt; });
         $('#imp', el).innerHTML = '<div class="kv" style="margin-top:14px"><span>Transactions</span><span>' + res.tx.length + '</span><span>Trading and poker entries</span><span>' + res.ledger.length +
           '</span><span>Friend loans and paybacks</span><span>' + res.debts.length + '</span><span>Tagged with Alaina</span><span>' + money(al, 0) + '</span></div>' +
@@ -1120,11 +1182,12 @@ function checkSheet() {
         '<input class="t" style="width:120px;text-align:right" inputmode="decimal" data-acc="' + esc(a.name) + '" value="' + (vals[a.name] != null ? vals[a.name] : '') + '" placeholder="0.00"></div>';
     }).join('');
   }
-  var qd = quietDays(30);
+  var qd = quietDays(30), owedPL = laterOwed();
   var body = '<p class="note" style="margin-top:0">Enter what you actually have right now. The app compares it with what your logs say you should have' + (prev ? ' since your last check on ' + dayLabel(prev.d) : '') + '.</p>' +
     '<div class="panel" id="accs">' + accRows() + '</div>' +
     '<div style="display:flex;gap:8px;margin-top:10px"><input class="t" id="an" placeholder="e.g. DBS, Cash, GrabPay Later"><button class="btn sm ghost" id="aa">Add</button></div>' +
     '<label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-top:8px"><input type="checkbox" id="al"> This is money I owe, like GrabPay Later</label>' +
+    (owedPL > 0 ? '<p class="note">Your logs say ' + money(owedPL) + ' is outstanding on PayLater. <button class="chip sm" id="usepl">Fill it in</button></p>' : '') +
     '<div id="calc" class="panel" style="margin-top:16px;padding:10px 14px"></div>' +
     (qd.length ? '<p class="note">Days in the last month with no spending logged: ' + qd.slice(0, 12).map(function (d) { return dayLabel(d); }).join(', ') + (qd.length > 12 ? ' and ' + (qd.length - 12) + ' more' : '') + '. A gap usually hides here.</p>' : '') +
     '<div class="actions" id="acts"></div>';
@@ -1149,6 +1212,13 @@ function checkSheet() {
     }
     refresh();
     el.addEventListener('input', function (e) { if (e.target.matches('[data-acc]')) refresh(); });
+    var up = $('#usepl', el);
+    if (up) up.addEventListener('click', function () {
+      readVals();
+      var acc = S.meta.accounts.filter(function (a) { return a.liability && /pay ?later/i.test(a.name); })[0];
+      if (!acc) { acc = { name: 'GrabPay Later', liability: true }; S.meta.accounts.push(acc); mark('meta'); }
+      vals[acc.name] = owedPL; $('#accs', el).innerHTML = accRows(); refresh();
+    });
     $('#aa', el).addEventListener('click', function () {
       var n = $('#an', el).value.trim(); if (!n || S.meta.accounts.some(function (a) { return a.name === n; })) return;
       readVals(); S.meta.accounts.push({ name: n, liability: $('#al', el).checked }); mark('meta');
@@ -1170,6 +1240,181 @@ function checkSheet() {
   });
 }
 
+// ---------- PayLater: every purchase and every payment kept as its own record ----------
+// Grab bills a statement period of PayLater spending as one bill, payable in full the
+// next month or split over 4, 8 or 12 monthly payments (8 and 12 carry a processing fee).
+var PL_SPLITS = [1, 4, 8, 12];
+function cycleDay() { return Math.min(28, Math.max(1, S.meta.plCycle || 1)); }
+function pad2(n) { return String(n).padStart(2, '0'); }
+function dayBefore(d) { var x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() - 1); return x.getFullYear() + '-' + pad2(x.getMonth() + 1) + '-' + pad2(x.getDate()); }
+function periodStart(d) { var m = monthOf(d), cs = cycleDay(); if (+d.slice(8, 10) < cs) m = addMonth(m, -1); return m + '-' + pad2(cs); }
+function periodEnd(from) { return dayBefore(addMonth(monthOf(from), 1) + '-' + from.slice(8, 10)); }
+function periodLabel(from) {
+  var to = periodEnd(from);
+  return cycleDay() === 1 ? monthLabel(monthOf(from)) : dayLabel(from) + ' to ' + dayLabel(to);
+}
+function laterItems(from) {
+  var to = periodEnd(from), out = [];
+  allTx().forEach(function (t) { if (t.t === 'exp' && t.pm === 'later' && t.d >= from && t.d <= to) out.push(t); });
+  return out.sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; });
+}
+function billFor(from) { return S.bills.filter(function (b) { return b.from === from; })[0] || null; }
+function billTotal(b) { return r2(sum(laterItems(b.from), function (t) { return t.amt; })); }
+function billDue(b) { return r2(billTotal(b) + (b.fee || 0)); }
+function billPaid(b) { return r2(sum(b.payments || [], function (p) { return p.amt; })); }
+function billLeft(b) { return r2(billDue(b) - billPaid(b)); }
+function billSchedule(b) {
+  var n = b.n || 1, due = billDue(b), each = r2(due / n), out = [], paid = billPaid(b);
+  var first = b.first || (addMonth(monthOf(periodEnd(b.from)), 1) + '-' + pad2(Math.min(28, +periodEnd(b.from).slice(8, 10))));
+  for (var i = 0; i < n; i++) {
+    var amt = i === n - 1 ? r2(due - each * (n - 1)) : each;
+    var covered = Math.min(amt, Math.max(0, paid - each * i));
+    out.push({ i: i, d: addMonth(monthOf(first), i) + '-' + first.slice(8, 10), amt: amt, part: r2(covered), paid: covered >= amt - 0.01 });
+  }
+  return out;
+}
+function periods() {
+  var ps = {};
+  allTx().forEach(function (t) { if (t.t === 'exp' && t.pm === 'later') ps[periodStart(t.d)] = 1; });
+  S.bills.forEach(function (b) { ps[b.from] = 1; });
+  return Object.keys(ps).sort().reverse();
+}
+function laterOwed() {
+  return r2(sum(periods(), function (f) { var b = billFor(f); return b ? billLeft(b) : r2(sum(laterItems(f), function (t) { return t.amt; })); }));
+}
+function nextPayment() {
+  var out = null;
+  S.bills.forEach(function (b) { billSchedule(b).forEach(function (s) { if (!s.paid && (!out || s.d < out.d)) out = { d: s.d, amt: r2(s.amt - s.part), from: b.from }; }); });
+  return out;
+}
+function upcoming(n) {
+  var out = [];
+  for (var i = 0; i < n; i++) {
+    var m = addMonth(monthOf(today()), i), amt = 0;
+    S.bills.forEach(function (b) { billSchedule(b).forEach(function (s) { if (!s.paid && monthOf(s.d) === m) amt += s.amt - s.part; }); });
+    out.push({ m: m, amt: r2(amt) });
+  }
+  return out;
+}
+function payLaterSheet() {
+  var owed = laterOwed(), nx = nextPayment(), up = upcoming(6), ps = periods();
+  var body = '<div class="kv"><span>Outstanding on PayLater</span><span>' + money(owed) + '</span>' +
+    '<span>Next payment</span><span>' + (nx ? money(nx.amt) + ' on ' + dayLabel(nx.d) : 'Nothing scheduled') + '</span></div>';
+  if (up.some(function (u) { return u.amt > 0; })) {
+    body += '<label class="f">Committed over the next 6 months</label><div class="panel">' + up.map(function (u) {
+      return '<div class="row"><div class="l"><b>' + monthLabel(u.m) + '</b></div><div class="r">' + (u.amt ? money(u.amt) : '–') + '</div></div>';
+    }).join('') + '</div>';
+  }
+  body += '<label class="f">Bills by statement period</label><div class="panel">';
+  if (!ps.length) body += '<div class="empty" style="padding:14px">Nothing charged to PayLater yet. Set "Paid with" to PayLater when you add a transaction, or tick "Charge to PayLater" when importing a Grab statement.</div>';
+  ps.forEach(function (f) {
+    var b = billFor(f), items = laterItems(f), tot = r2(sum(items, function (t) { return t.amt; }));
+    var sub = b ? (b.n > 1 ? b.n + ' monthly payments, ' + money(billLeft(b)) + ' left' : (billLeft(b) <= 0.01 ? 'Settled' : 'Due ' + dayLabel(billSchedule(b)[0].d))) : items.length + ' purchases, no plan set';
+    body += '<button class="row" data-bill="' + f + '"><div class="l"><b>' + periodLabel(f) + '</b><span>' + sub + '</span></div><div class="r">' + money(b ? billDue(b) : tot) + '</div></button>';
+  });
+  body += '</div><label class="f" for="cyc">Statement period starts on day</label><input class="t" id="cyc" inputmode="numeric" value="' + cycleDay() + '">' +
+    '<p class="note">Grab bills a whole period at once. Set the day your bill period starts so purchases fall into the right bill. Your purchases and payments stay separate records either way.</p>';
+  openSheet('PayLater', body, function (el) {
+    el.querySelectorAll('[data-bill]').forEach(function (btn) { btn.addEventListener('click', function () { billSheet(btn.dataset.bill); }); });
+    $('#cyc', el).addEventListener('change', function () {
+      var v = parseInt(this.value, 10); if (!(v >= 1 && v <= 28)) { this.value = cycleDay(); return; }
+      S.meta.plCycle = v; mark('meta'); closeSheet(); render(); payLaterSheet();
+    });
+  });
+}
+function billSheet(from) {
+  var b = billFor(from);
+  if (!b) { b = { id: uid(), from: from, n: 1, fee: 0, first: '', payments: [] }; S.bills.push(b); mark('bills'); }
+  function save() { mark('bills'); render(); }
+  function body() {
+    var items = laterItems(from), tot = billTotal(b), sch = billSchedule(b), paid = billPaid(b);
+    var h = '<div class="kv"><span>Purchases in this period</span><span>' + money(tot) + ' over ' + items.length + ' items</span>' +
+      (b.fee ? '<span>Processing fee</span><span>' + money(b.fee) + '</span>' : '') +
+      '<span>Total to pay</span><span>' + money(billDue(b)) + '</span><span>Paid so far</span><span>' + money(paid) + '</span><span><b>Still to pay</b></span><span><b>' + money(billLeft(b)) + '</b></span></div>';
+    if (b.stmt) {
+      var diff = r2(b.stmt - tot);
+      h += '<div class="kv"><span>Grab statement total</span><span>' + money(b.stmt) + '</span><span>Difference</span><span class="' + (Math.abs(diff) < 0.01 ? '' : 'neg') + '">' + signed(diff) + '</span></div>' +
+        (Math.abs(diff) >= 0.01 ? '<p class="warn">' + (diff > 0 ? money(diff) + ' on the statement is not logged yet. Add the missing purchases so the detail stays complete.' : 'You have logged ' + money(-diff) + ' more than the statement. Check for a duplicate.') + '</p>' : '');
+    }
+    h += '<div class="actions" style="margin-top:14px"><button class="btn ghost" id="addi">Add a purchase</button><button class="btn" id="addp">Record a payment</button></div>';
+    h += '<label class="f">Payments made</label><div class="panel">';
+    h += (b.payments || []).length ? b.payments.slice().sort(function (x, y) { return x.d < y.d ? 1 : -1; }).map(function (p) {
+      return '<button class="row" data-pmt="' + p.id + '"><div class="l"><b>' + esc(p.note || 'Payment') + '</b><span>' + dayLabel(p.d) + '</span></div><div class="r">' + money(p.amt) + '</div></button>';
+    }).join('') : '<div class="empty" style="padding:14px">No payments recorded yet.</div>';
+    h += '</div>';
+    h += '<label class="f">Plan</label><div class="seg" id="pn">' + PL_SPLITS.map(function (n) {
+      return '<button data-n="' + n + '" aria-pressed="' + ((b.n || 1) === n) + '">' + (n === 1 ? 'In full' : n + '×') + '</button>';
+    }).join('') + '</div>';
+    h += '<div class="panel">' + sch.map(function (x) {
+      return '<div class="row"><div class="l"><b>' + (x.paid ? 'Covered' : 'Due') + ' ' + dayLabel(x.d) + '</b><span>Payment ' + (x.i + 1) + ' of ' + sch.length + (x.part > 0 && !x.paid ? ', ' + money(x.part) + ' paid' : '') + '</span></div><div class="r">' + money(x.amt) + '</div></div>';
+    }).join('') + '</div>';
+    h += '<label class="f" for="fee">Processing fee</label><input class="t" id="fee" inputmode="decimal" value="' + (b.fee || '') + '" placeholder="0.00">' +
+      '<label class="f" for="fd">First payment due</label><input class="t" type="date" id="fd" value="' + (b.first || sch[0].d) + '">' +
+      '<label class="f" for="stt">Grab statement total, to check against</label><input class="t" id="stt" inputmode="decimal" value="' + (b.stmt || '') + '" placeholder="optional">' +
+      '<div class="actions"><button class="btn danger" id="delb">Delete bill</button><button class="btn" id="saveb">Save</button></div>';
+    h += '<label class="f">Purchases in this bill</label><div class="panel">' + (items.length ? items.map(txRow).join('') : '<div class="empty" style="padding:14px">Nothing charged to PayLater in this period.</div>') + '</div>';
+    return h;
+  }
+  function draw() {
+    openSheet(periodLabel(from) + ' bill', body(), function (el) {
+      $('#pn', el).addEventListener('click', function (e) {
+        var btn = e.target.closest('[data-n]'); if (!btn) return; b.n = +btn.dataset.n; save(); draw();
+      });
+      $('#saveb', el).addEventListener('click', function () {
+        var f = parseFloat($('#fee', el).value), st = parseFloat($('#stt', el).value);
+        var hadFee = b.fee || 0;
+        b.fee = isNaN(f) ? 0 : r2(f); b.stmt = isNaN(st) ? null : r2(st); b.first = $('#fd', el).value || b.first;
+        if (b.fee > 0 && b.fee !== hadFee) logFee(b);
+        save(); draw(); toast('Saved');
+      });
+      $('#delb', el).addEventListener('click', function () {
+        if (!confirm('Delete this bill and its payment records? The purchases themselves stay.')) return;
+        S.bills = S.bills.filter(function (x) { return x.id !== b.id; }); save(); closeSheet(); payLaterSheet();
+      });
+      $('#addp', el).addEventListener('click', function () { paymentSheet(b, null, draw); });
+      $('#addi', el).addEventListener('click', function () {
+        closeSheet();
+        txSheet({ id: uid(), d: periodEnd(from) > today() ? today() : periodEnd(from), t: 'exp', amt: 0, cat: '', sub: '', note: '', tags: [], pm: 'later', src: 'app' }, true);
+      });
+      el.querySelectorAll('[data-pmt]').forEach(function (btn) {
+        btn.addEventListener('click', function () { paymentSheet(b, (b.payments || []).filter(function (p) { return p.id === btn.dataset.pmt; })[0], draw); });
+      });
+      el.querySelectorAll('[data-edit-tx]').forEach(function (btn) {
+        btn.addEventListener('click', function (e) { e.stopPropagation(); var t = findTx(btn.dataset.editTx); if (t) txSheet(t); });
+      });
+    });
+  }
+  draw();
+}
+function logFee(b) {
+  var c = '💳 Finance fees'; if (!catObj(c)) { S.meta.cats.push({ name: c, type: 'exp' }); mark('meta'); }
+  if (b.feeTx) { var old = findTx(b.feeTx); if (old) removeTx(old); }
+  var d = b.first || billSchedule(b)[0].d;
+  var t = { id: uid(), d: d, t: 'exp', amt: b.fee, cat: c, sub: '', note: 'PayLater processing fee, ' + periodLabel(b.from) + ' bill', tags: [], src: 'app' };
+  b.feeTx = t.id; var m = monthOf(d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
+}
+function paymentSheet(b, p, after) {
+  var isNew = !p, sch = billSchedule(b), nx = null;
+  sch.forEach(function (x) { if (!nx && !x.paid) nx = x; });
+  p = p ? Object.assign({}, p) : { id: uid(), d: today(), amt: nx ? r2(nx.amt - nx.part) : billLeft(b), note: '' };
+  var body = '<div class="amt-in"><span>$</span><input id="pa" inputmode="decimal" value="' + (p.amt || '') + '" aria-label="Amount paid"></div>' +
+    '<label class="f" for="pd">Date paid</label><input class="t" type="date" id="pd" value="' + p.d + '">' +
+    '<label class="f" for="pnote">Note</label><input class="t" id="pnote" value="' + esc(p.note) + '" placeholder="e.g. paid from DBS, auto-deducted">' +
+    '<p class="note">This records the money leaving your account. It is not counted as new spending, because the purchases were counted on the days you made them.</p>' +
+    '<div class="actions">' + (isNew ? '' : '<button class="btn danger" id="pdel">Delete</button>') + '<button class="btn" id="psave">' + (isNew ? 'Record payment' : 'Save') + '</button></div>';
+  openSheet(isNew ? 'Record a payment' : 'Edit payment', body, function (el) {
+    $('#psave', el).addEventListener('click', function () {
+      var a = parseFloat($('#pa', el).value);
+      if (!(a > 0)) { toast('Enter an amount'); return; }
+      p.amt = r2(a); p.d = $('#pd', el).value || today(); p.note = $('#pnote', el).value.trim();
+      b.payments = (b.payments || []).filter(function (x) { return x.id !== p.id; }); b.payments.push(p);
+      mark('bills'); render(); closeSheet(); if (after) after(); toast('Payment recorded');
+    });
+    var dl = $('#pdel', el); if (dl) dl.addEventListener('click', function () {
+      b.payments = b.payments.filter(function (x) { return x.id !== p.id; }); mark('bills'); render(); closeSheet(); if (after) after();
+    });
+  });
+}
 // ---------- statement import (Grab, bank) ----------
 var MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
 function ymd(y, m, d) { if (y < 100) y += 2000; if (m < 1 || m > 12 || d < 1 || d > 31) return null; return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
@@ -1319,7 +1564,7 @@ function stmtSheet() {
     });
   });
 }
-var IB = { f: 'all', sort: 'new', q: '', m: '', win: 3 };
+var IB = { f: 'all', sort: 'new', q: '', m: '', win: 3, later: true };
 function inboxSheet() {
   function shown() {
     var q = IB.q.toLowerCase();
@@ -1361,12 +1606,13 @@ function inboxSheet() {
     '<select class="t" id="ibs" style="width:auto;margin-bottom:10px"><option value="new">Newest</option><option value="old">Oldest</option><option value="big">Largest</option></select></div>' +
     '<div style="display:flex;gap:8px;margin-bottom:10px"><select class="t" id="ibm" style="flex:1">' + monthOpts() + '</select>' +
     '<select class="t" id="ibw" style="width:auto" aria-label="Match window"><option value="1">Match ±1 day</option><option value="3">Match ±3 days</option><option value="7">Match ±7 days</option><option value="14">Match ±14 days</option></select></div>' +
-    '<div class="wrap" style="margin-bottom:8px"><button class="chip" data-bulk="sel">Select shown</button><button class="chip" data-bulk="unsel">Deselect shown</button><button class="chip rose" data-bulk="tag">Tag shown Alaina</button><button class="chip" data-bulk="untag">Untag shown</button><button class="chip" data-bulk="drop">Discard unselected shown</button></div>' +
+    '<div class="wrap" style="margin-bottom:8px"><button class="chip" id="plt" aria-pressed="' + (IB.later !== false) + '">Charge to PayLater</button><button class="chip" data-bulk="sel">Select shown</button><button class="chip" data-bulk="unsel">Deselect shown</button><button class="chip rose" data-bulk="tag">Tag shown Alaina</button><button class="chip" data-bulk="untag">Untag shown</button><button class="chip" data-bulk="drop">Discard unselected shown</button></div>' +
     '<div style="display:flex;gap:8px;margin-bottom:10px"><select class="t" id="ibcat" style="flex:1"><option value="">Set category for shown…</option>' + expCats + '<option value="__new">New category…</option></select></div>' +
     '<div id="ibrule"></div><div id="ibl">' + list() + '</div>' +
     '<div class="actions"><button class="btn ghost" id="ibc">Clear list</button><button class="btn" id="iba">Add selected</button></div>';
   openSheet('Review imported rows', body, function (el) {
     $('#ibs', el).value = IB.sort; $('#ibw', el).value = String(IB.win);
+    $('#plt', el).addEventListener('click', function () { IB.later = IB.later === false; this.setAttribute('aria-pressed', IB.later !== false); });
     function re() { $('#ibl', el).innerHTML = list(); $('#ibm', el).innerHTML = monthOpts(); ruleHint(); }
     $('#ibm', el).addEventListener('change', function () { IB.m = this.value; re(); });
     $('#ibw', el).addEventListener('change', function () { IB.win = +this.value; rematch(); mark('inbox'); re(); });
@@ -1407,6 +1653,7 @@ function inboxSheet() {
       var sel = S.inbox.filter(function (r) { return r.include; }); if (!sel.length) { toast('Select at least one row'); return; }
       sel.forEach(function (r) {
         var t = { id: uid(), d: r.d, t: r.kind === 'refund' ? 'inc' : 'exp', amt: r.amt, cat: r.cat, sub: r.sub, note: r.desc.slice(0, 90), tags: r.tags.slice(), src: 'stmt' };
+        if (IB.later !== false && t.t === 'exp') t.pm = 'later';
         if (!catObj(t.cat)) S.meta.cats.push({ name: t.cat, type: t.t, kind: t.t === 'inc' ? 'reimb' : undefined });
         var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
       });
@@ -1620,8 +1867,9 @@ function onClick(e) {
     else if (a === 'export') exportData();
     else if (a === 'theme') themeSheet();
     else if (a === 'check') checkSheet();
+    else if (a === 'paylater') payLaterSheet();
     else if (a === 'restore') restoreSheet();
-    else if (a === 'signout') { store.sb.auth.signOut().then(function () { try { localStorage.removeItem(LS_KEY); localStorage.removeItem('ledger-dirty'); } catch (e) { } S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [] }; store.mode = 'auth'; render(); }); }
+    else if (a === 'signout') { store.sb.auth.signOut().then(function () { try { localStorage.removeItem(LS_KEY); localStorage.removeItem('ledger-dirty'); } catch (e) { } S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [] }; store.mode = 'auth'; render(); }); }
     else if (a === 'stmt') stmtSheet();
     else if (a === 'inbox') inboxSheet();
     else if (a === 'clear-rules') { if (confirm('Remove all auto-tag rules?')) { S.meta.rules = []; mark('meta'); render(); } }
