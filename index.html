@@ -216,6 +216,96 @@ section.blk:has(.cw){background:var(--surface);border-radius:22px;padding:16px;b
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 
 .row .l b .tag{display:inline-block;font-size:11px;color:var(--rose)}
+details.fold{border-top:1px solid var(--line)}
+details.fold summary{list-style:none;cursor:pointer;padding:12px 0;font-size:13.5px;color:var(--muted);font-weight:500;display:flex;align-items:center;gap:6px}
+details.fold summary::-webkit-details-marker{display:none}
+details.fold summary::before{content:"›";display:inline-block;transition:transform .15s;font-size:17px;color:var(--muted)}
+details.fold[open] summary::before{transform:rotate(90deg)}
+details.fold[open] summary{border-bottom:1px solid var(--line)}
+details.fold .row:first-of-type{border-top:0}
+
+/* ---------------------------------------------------------------
+   Responsive layer. Mobile first: one column, 44px touch targets.
+   768px: two columns. 1024px: three, with hover and active states.
+   --------------------------------------------------------------- */
+
+/* Touch targets: every interactive element clears 44px on touch devices */
+nav.tabs button{min-height:48px;justify-content:center}
+button.icon{width:44px;height:44px}
+.monthsw button{width:44px;height:44px}
+.monthsw span{min-height:44px;display:flex;align-items:center;justify-content:center}
+.chip{min-height:44px;display:inline-flex;align-items:center;padding:0 16px}
+.chip.sm{min-height:34px;padding:0 12px}
+.row,button.row{min-height:52px}
+.seg button{min-height:44px}
+.btn{min-height:48px}
+.btn.sm{min-height:40px}
+input.t,select.t,.search{min-height:48px}
+.ck{width:32px;height:32px;position:relative}
+.ck::after{content:"";position:absolute;inset:-8px} /* invisible 48px tap area */
+.legend li{min-height:52px}
+details.fold summary{min-height:48px}
+input[type="checkbox"]{width:22px;height:22px}
+
+/* Pointer devices: hover and pressed feedback */
+@media (hover:hover) and (pointer:fine){
+  button.row:hover,.row:hover{background:var(--sunk)}
+  button.row,.row{transition:background .15s;border-radius:12px;padding-left:10px;padding-right:10px;margin-left:-10px;margin-right:-10px}
+  .chip:hover{background:var(--sunk)}
+  .chip[aria-pressed="true"]:hover{background:var(--ink)}
+  .btn:hover{filter:brightness(1.07)}
+  .btn:active{filter:brightness(.95)}
+  nav.tabs button:hover{background:var(--sunk)}
+  .kpis div,.panel,.strip div{transition:box-shadow .2s,transform .2s}
+  .tbl .tr:hover{background:var(--sunk)}
+}
+
+/* Tablet: two columns, wider gutters */
+@media (min-width:768px){
+  main{max-width:900px;padding:16px 24px 130px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 20px;align-content:start}
+  header.top,.hero,.strip,.kpis,.chips,.search,.banner,.legend-wrap,section.blk,.trend,.heat,.day,.panel,.note,.seg,p.note,div.note{grid-column:1 / -1}
+  section.blk{margin:0}
+  .hero .big{font-size:64px}
+  .strip{grid-template-columns:repeat(3,1fr)}
+  .strip div:last-child{grid-column:auto}
+}
+
+/* Desktop: three balanced columns with the summary leading */
+@media (min-width:1024px){
+  main{max-width:1180px;padding:96px 32px 48px;grid-template-columns:repeat(3,minmax(0,1fr));gap:20px 22px;align-items:start}
+  header.top{padding-top:0}
+  .banner.quiet{grid-column:span 2}
+  .hero{grid-column:span 2;padding:26px 28px}
+  .legend-wrap{grid-column:span 1;align-self:stretch;overflow:auto}
+  section.blk,.trend{grid-column:span 1}
+  section.blk:has(.cw),section.blk:has(.heat),section.blk:has(.tbl){grid-column:span 2}
+  .kpis{grid-template-columns:repeat(4,minmax(0,1fr))}
+  .chips{margin:0;padding:0 0 4px;flex-wrap:wrap;overflow:visible}
+  /* nav moves to the top as a centred pill with an active indicator */
+  nav.tabs{position:fixed;top:16px;bottom:auto;left:0;right:0;margin:0 auto;max-width:560px}
+  nav.tabs button{flex-direction:row;gap:8px;font-size:13.5px;padding:9px 0;position:relative}
+  nav.tabs button[aria-current="page"]{background:var(--accent-soft);border-radius:999px}
+  nav.tabs button[aria-current="page"]::after{content:"";position:absolute;bottom:2px;left:50%;transform:translateX(-50%);width:18px;height:3px;border-radius:999px;background:var(--accent)}
+  nav.tabs .add{width:46px;height:46px;margin-top:0}
+  /* sheets become centred dialogs */
+  dialog.sheet{margin:auto;border-radius:22px;max-width:560px;max-height:86vh}
+  .sheet .hd::before{display:none}
+  .sheet .hd h3{margin:0}
+}
+
+/* Very large screens: cap the reading width, keep the grid balanced */
+@media (min-width:1536px){
+  main{max-width:1320px}
+  .hero .big{font-size:72px}
+}
+
+/* Narrow phones: the header keeps the month picker and the menu; the sync
+   wording collapses to its status dot until there is room for words. */
+.sync{max-width:1.2em;overflow:hidden;white-space:nowrap;color:transparent}
+.sync:not(:empty)::before{margin-right:0}
+header.top{gap:6px}
+.monthsw{min-width:0}
+@media (min-width:480px){ .sync{max-width:none;color:var(--muted)} .sync:not(:empty)::before{margin-right:5px} }
 </style>
 </head>
 <body>
@@ -403,10 +493,13 @@ function freshMeta() {
 }
 var S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [] };
 function normalize() { S.bills = S.bills || []; S.bills.forEach(function (b) { if (!b.from && b.month) b.from = b.month + '-01'; }); S.inbox = S.inbox || []; S.checks = S.checks || []; S.meta.accounts = S.meta.accounts || []; S.meta.rules = S.meta.rules || []; S.meta.venues = S.meta.venues || {}; }
-var UI = { tab: 'home', month: monthOf(today()), filter: 'all', q: '', all: false };
+var UI = { folds: {}, tab: 'home', month: monthOf(today()), filter: 'all', q: '', all: false };
 var LS_KEY = 'ledger-state-v1';
 var store = { mode: 'connecting', col: null, dirty: {}, timer: null, writing: false };
 
+// What the transaction actually cost you: if you paid for others, only your share
+// counts as spending. The rest is money owed to you, tracked under People.
+function ea(t) { return t.t === 'exp' && t.split && t.split.mine >= 0 ? t.split.mine : t.amt; }
 function allTx() { var a = []; Object.keys(S.tx).forEach(function (k) { a = a.concat(S.tx[k]); }); return a; }
 function catObj(name) { for (var i = 0; i < S.meta.cats.length; i++) if (S.meta.cats[i].name === name) return S.meta.cats[i]; return null; }
 function incKind(name) { var c = catObj(name); return (c && c.kind) || 'other'; }
@@ -548,8 +641,9 @@ function monthStats(m) {
   var o = { spend: 0, earned: 0, other: 0, reimb: 0, alaina: 0, byCat: {} };
   tx.forEach(function (t) {
     if (t.t === 'exp') {
-      o.spend += t.amt; o.byCat[t.cat] = (o.byCat[t.cat] || 0) + t.amt;
-      if ((t.tags || []).indexOf('Alaina') > -1) o.alaina += t.amt;
+      var v = ea(t);
+      o.spend += v; o.byCat[t.cat] = (o.byCat[t.cat] || 0) + v;
+      if ((t.tags || []).indexOf('Alaina') > -1) o.alaina += v;
     } else if (t.t === 'inc') {
       var k = incKind(t.cat); o[k === 'earned' ? 'earned' : k === 'reimb' ? 'reimb' : 'other'] += t.amt;
     }
@@ -557,7 +651,7 @@ function monthStats(m) {
   o.net = o.spend - o.reimb; o.saved = o.earned + o.other - o.net;
   return o;
 }
-function tagSpend(m, tag) { return sum((S.tx[m] || []).filter(function (t) { return t.t === 'exp' && (t.tags || []).indexOf(tag) > -1; }), function (t) { return t.amt; }); }
+function tagSpend(m, tag) { return sum((S.tx[m] || []).filter(function (t) { return t.t === 'exp' && (t.tags || []).indexOf(tag) > -1; }), ea); }
 function priorAvg(m) {
   var acc = {}, n = 0;
   for (var k = 1; k <= 3; k++) {
@@ -651,7 +745,7 @@ function renderHome() {
     // tape: Alaina-tagged share drawn as its own hatched segment
     var tape = '', i = 0;
     var rest = {}; cats.forEach(function (c) { rest[c] = st.byCat[c]; });
-    (S.tx[m] || []).forEach(function (t) { if (t.t === 'exp' && (t.tags || []).indexOf('Alaina') > -1) rest[t.cat] -= t.amt; });
+    (S.tx[m] || []).forEach(function (t) { if (t.t === 'exp' && (t.tags || []).indexOf('Alaina') > -1) rest[t.cat] -= ea(t); });
     if (st.alaina > 0) tape += '<i class="al" style="width:' + (st.alaina / st.spend * 100) + '%" title="Alaina"></i>';
     cats.forEach(function (c, k) { if (rest[c] > 0.005) tape += '<i style="width:' + (rest[c] / st.spend * 100) + '%;background:' + SEGS[Math.min(k, 4)] + '"></i>'; });
     h += '<div class="tape" role="img" aria-label="Spending by category">' + tape + '</div>';
@@ -731,7 +825,8 @@ function txRow(t) {
   var sign = t.t === 'exp' ? '−' : t.t === 'inc' ? '+' : '±';
   var tags = (t.tags || []).map(function (g) { return '<span class="tag">' + esc(g) + '</span>'; }).join('');
   return '<button class="row" data-edit-tx="' + esc(t.id) + '"><span class="av' + ((t.tags || []).indexOf('Alaina') > -1 ? ' al' : '') + '">' + esc(avatar(t.cat)) + '</span><div class="l"><b>' + esc(t.note || t.cat) + tags + '</b><span>' + esc(t.cat.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')) + (t.sub ? ', ' + esc(t.sub) : '') +
-    '</span></div><div class="r ' + (t.t === 'inc' ? 'pos' : '') + '">' + sign + money(t.amt).replace('$', '$') + '</div></button>';
+    '</span></div><div class="r ' + (t.t === 'inc' ? 'pos' : '') + '">' + sign + money(ea(t)) +
+    (t.split && t.split.mine !== t.amt ? '<span>your share of ' + money(t.amt) + '</span>' : '') + '</div></button>';
 }
 function renderActivity() {
   var m = UI.month, tx = UI.all ? allTx().slice() : (S.tx[m] || []).slice();
@@ -751,7 +846,7 @@ function renderActivity() {
     if (q && ((t.note || '') + ' ' + t.cat + ' ' + (t.sub || '')).toLowerCase().indexOf(q) < 0) return false;
     return true;
   }).sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
-  var tot = sum(tx, function (t) { return t.t === 'exp' ? t.amt : 0; });
+  var tot = sum(tx, function (t) { return t.t === 'exp' ? ea(t) : 0; });
   h += '<div class="note" style="margin:0 2px 4px">' + tx.length + ' transactions' + (UI.all ? ' across all months' : '') + ', ' + money(tot) + ' spent</div>';
   if (!tx.length) return h + '<div class="empty">No transactions match. Tap + to add one.</div>';
   var day = null, html = '';
@@ -807,6 +902,7 @@ function renderPnl() {
     }
     function rank(v) { return v.p.pnl == null ? -1e12 : v.p.pnl; }
     list.sort(function (a, b) { var ca = isClosed(a.name), cb = isClosed(b.name); if (ca !== cb) return ca ? 1 : -1; return rank(b) - rank(a); });
+    var openRows = '', closedRows = '', closedTot = 0;
     list.forEach(function (v) {
       var p = v.p, sub, cl = isClosed(v.name);
       if (kind === 'prop') sub = money(p.inn) + ' fees, ' + money(p.out) + ' payouts';
@@ -816,9 +912,15 @@ function renderPnl() {
       if (pk.length) sub += '. Plus ' + pk.map(function (n) { return money(p.partners[n], 0) + ' of ' + esc(n) + "\u2019s"; }).join(', ');
       else sub = p.bal == null || (cl && p.bal === 0) ? (cl ? 'In ' + money(p.inn, 0) + ', out ' + money(p.out, 0) : 'In ' + money(p.inn, 0) + ', out ' + money(p.out, 0) + '. Add balance') : 'Balance ' + money(p.bal, 0) + (p.opening != null ? ', from ' + money(p.opening, 0) + ' opening' : '') + (p.stale && !cl ? '. Balance out of date' : '');
       if (cl) sub = 'Closed' + (p.last ? ', last used ' + monthLabel(monthOf(p.last), true) + ' ' + p.last.slice(0, 4) : '') + '. ' + sub;
-      s += '<button class="row' + (cl ? ' closed' : '') + '" data-venue="' + esc(v.name) + '"><div class="l"><b>' + esc(v.name) + '</b><span>' + sub + '</span></div><div class="r ' +
+      var row = '<button class="row' + (cl ? ' closed' : '') + '" data-venue="' + esc(v.name) + '"><div class="l"><b>' + esc(v.name) + '</b><span>' + sub + '</span></div><div class="r ' +
         (p.pnl == null || p.open ? '' : p.pnl >= 0 ? 'pos' : 'neg') + '">' + (p.open ? money(p.outThere, 0) + '<span>invested</span>' : p.pnl == null ? '–' : signed(p.pnl, 0)) + '</div></button>';
+      if (cl) { closedRows += row; closedTot += (p.pnl || 0); } else openRows += row;
     });
+    s += openRows;
+    if (closedRows) {
+      s += '<details class="fold"' + (UI.folds[kind + title] ? ' open' : '') + ' data-fold="' + esc(kind + title) + '">' +
+        '<summary>' + closedN + ' closed account' + (closedN > 1 ? 's' : '') + ', ' + signed(closedTot, 0) + '</summary>' + closedRows + '</details>';
+    }
     return s + '</div></section>';
   }
   var body = group(cashBasis() ? 'Brokers, cash basis' : 'Brokers', g.broker, 'broker') + group('Prop firms', g.prop, 'prop') + group('Poker', g.poker, 'poker') + group('Crypto', g.crypto, 'broker');
@@ -919,6 +1021,9 @@ function render() {
   var v = UI.tab === 'activity' ? renderActivity() : UI.tab === 'pnl' ? renderPnl() : UI.tab === 'more' ? renderMore() : UI.tab === 'insights' ? renderInsights() : renderHome();
   $('#app').innerHTML = '<main>' + v + '</main>' + nav();
   setSync(store.mode === 'cloud' ? 'Synced' : store.mode === 'local' ? 'On this device' : store.mode === 'cloud-offline' ? 'Offline, will sync' : store.mode === 'error' ? 'Sync problem' : '');
+  document.querySelectorAll('[data-fold]').forEach(function (d) {
+    d.addEventListener('toggle', function () { UI.folds[d.dataset.fold] = d.open; });
+  });
   if (UI.tab === 'insights') drawInsights();
   var cu = document.querySelector('[data-count]');
   if (cu && window.requestAnimationFrame && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
@@ -975,6 +1080,10 @@ function txSheet(existing, asNew) {
     '<div class="amt-in"><span>$</span><input id="amt" inputmode="decimal" placeholder="0.00" value="' + (t.amt ? t.amt : '') + '" aria-label="Amount"></div>' +
     '<label class="f">Category</label><div class="wrap" id="cats">' + catChips() + '</div>' +
     '<label class="f">Tags</label><div class="wrap" id="tags">' + tagChips() + '</div>' +
+    '<label class="f">Did you pay for other people?</label><div class="seg" id="sp"><button data-sp="0" aria-pressed="' + !t.split + '">Just me</button><button data-sp="1" aria-pressed="' + !!t.split + '">I paid for others</button></div>' +
+    '<div id="spbox"' + (t.split ? '' : ' hidden') + '><label class="f" for="mine">My share</label><input class="t" id="mine" inputmode="decimal" value="' + (t.split ? t.split.mine : '') + '" placeholder="e.g. 30">' +
+    '<label class="f">Who owes you the rest</label><div class="wrap" id="spwho"></div>' +
+    '<p class="note" id="spmsg"></p></div>' +
     '<label class="f">Paid with</label><div class="seg" id="pm"><button data-pm="cash" aria-pressed="' + (t.pm !== 'later') + '">Cash or bank</button><button data-pm="later" aria-pressed="' + (t.pm === 'later') + '">PayLater</button></div>' +
     '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="What was it?" autocomplete="off">' +
     '<div class="wrap" id="nsug" style="margin-top:7px"></div>' +
@@ -999,6 +1108,35 @@ function txSheet(existing, asNew) {
       var b = e.target.closest('[data-tag]'); if (!b) return; var g = b.dataset.tag, i = t.tags.indexOf(g);
       if (i > -1) t.tags.splice(i, 1); else t.tags.push(g); b.setAttribute('aria-pressed', i < 0);
     });
+    var spWho = t.split ? t.split.person : '';
+    function whoList() {
+      var ps = {}; S.debts.forEach(function (d) { ps[d.person] = 1; }); S.meta.tags.forEach(function (x) { if (x !== 'Alaina') 0; });
+      if (spWho) ps[spWho] = 1;
+      return Object.keys(ps);
+    }
+    function drawWho() {
+      var box = $('#spwho', el); if (!box) return;
+      box.innerHTML = whoList().map(function (n) { return '<button class="chip" data-spw="' + esc(n) + '" aria-pressed="' + (spWho === n) + '">' + esc(n) + '</button>'; }).join('') +
+        '<button class="chip" data-spw="__new">Someone else\u2026</button>';
+      var mine = parseFloat(($('#mine', el) || {}).value), full = parseFloat($('#amt', el).value);
+      $('#spmsg', el).textContent = (mine > 0 && full > mine)
+        ? money(full - mine) + ' goes to ' + (spWho || 'them') + ' as money owed to you, and only ' + money(mine) + ' counts as your spending.'
+        : 'Enter the total you paid above, and your share here.';
+    }
+    $('#sp', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-sp]'); if (!b) return;
+      var on = b.dataset.sp === '1';
+      el.querySelectorAll('#sp button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
+      $('#spbox', el).hidden = !on; if (!on) t.split = null; drawWho();
+    });
+    el.addEventListener('input', function (e) { if (e.target.id === 'mine' || e.target.id === 'amt') drawWho(); });
+    $('#spwho', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-spw]'); if (!b) return;
+      if (b.dataset.spw === '__new') { var n = (prompt('Who owes you the rest?') || '').trim(); if (!n) return; spWho = n; }
+      else spWho = b.dataset.spw;
+      drawWho();
+    });
+    drawWho();
     var noteEl = $('#note', el), sug = $('#nsug', el);
     function drawSug() {
       var list = noteSuggest(noteEl.value, t.cat, t.t);
@@ -1031,7 +1169,13 @@ function txSheet(existing, asNew) {
       if (!(a > 0)) { toast('Enter an amount'); $('#amt', el).focus(); return; }
       if (!t.cat) { toast('Pick a category'); return; }
       t.amt = r2(a); t.note = $('#note', el).value.trim(); t.d = $('#dt', el).value || today();
+      var mineV = parseFloat(($('#mine', el) || {}).value);
+      if (!$('#spbox', el).hidden && mineV >= 0 && mineV < t.amt) {
+        if (!spWho) { toast('Say who owes you the rest'); return; }
+        t.split = { mine: r2(mineV), person: spWho };
+      } else t.split = null;
       if (existing) removeTx(existing);
+      syncSplitDebt(t);
       var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
       closeSheet(); render(); toast(existing ? 'Saved' : 'Added');
     });
@@ -1059,7 +1203,16 @@ function moveSheet() {
     });
   });
 }
+// Keep the People ledger in step with a split: the part you covered is owed to you.
+function syncSplitDebt(t) {
+  S.debts = S.debts.filter(function (d) { return d.txId !== t.id; });
+  if (t.split && t.amt > t.split.mine) {
+    S.debts.push({ id: uid(), txId: t.id, d: t.d, person: t.split.person, amt: r2(t.amt - t.split.mine), note: (t.note || t.cat) + ', their share', src: 'app' });
+  }
+  mark('debts');
+}
 function removeTx(t) {
+  if (S.debts.some(function (d) { return d.txId === t.id; })) { S.debts = S.debts.filter(function (d) { return d.txId !== t.id; }); mark('debts'); }
   var m = monthOf(t.d), a = S.tx[m] || [];
   for (var i = 0; i < a.length; i++) if (a[i].id === t.id) { a.splice(i, 1); break; }
   if (!a.length) delete S.tx[m];
@@ -1171,6 +1324,13 @@ function debtSheet(person) {
     '<label class="f" for="note">Note</label><input class="t" id="note">' +
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + today() + '">' +
     '<div class="actions"><button class="btn" id="save">Save</button></div>';
+  if (person) {
+    var bal = r2(sum(S.debts.filter(function (d) { return d.person === person; }), function (d) { return d.amt; }));
+    if (Math.abs(bal) > 0.005) {
+      body = '<div class="kv" style="margin-top:0"><span>' + (bal > 0 ? esc(person) + ' owes you' : 'You owe ' + esc(person)) + '</span><span>' + money(Math.abs(bal)) + '</span></div>' +
+        '<div class="actions" style="margin:6px 0 18px"><button class="btn ghost" id="settle">Settle up</button></div>' + body;
+    }
+  }
   if (hist.length) {
     body += '<label class="f" style="margin-top:20px">History (tap to delete)</label><div class="panel">' + hist.map(function (d) {
       return '<button class="row" data-dd="' + esc(d.id) + '"><div class="l"><b>' + esc(d.note || (d.amt > 0 ? 'They owe more' : 'They owe less')) + '</b><span>' + dayLabel(d.d) + '</span></div><div class="r">' + (d.amt > 0 ? '+' : '−') + money(Math.abs(d.amt)) + '</div></button>';
@@ -1178,6 +1338,8 @@ function debtSheet(person) {
   }
   openSheet(person || 'Money between friends', body, function (el) {
     $('#da', el).addEventListener('click', function (e) { var b = e.target.closest('[data-a]'); if (!b) return; act = b.dataset.a; el.querySelectorAll('#da .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
+    var stl = $('#settle', el);
+    if (stl) stl.addEventListener('click', function () { settleSheet(person); });
     $('#save', el).addEventListener('click', function () {
       var p = $('#per', el).value.trim(), a = parseFloat($('#amt', el).value);
       if (!p) { toast('Add a name'); return; } if (!(a > 0)) { toast('Enter an amount'); return; }
@@ -1189,6 +1351,44 @@ function debtSheet(person) {
   });
 }
 
+// Real life: people pay back a round number, or a bit off. Settle the balance in one go
+// and put the difference where it belongs instead of leaving a stray few dollars forever.
+function settleSheet(person) {
+  var bal = r2(sum(S.debts.filter(function (d) { return d.person === person; }), function (d) { return d.amt; }));
+  var body = '<div class="kv" style="margin-top:0"><span>Balance</span><span>' + (bal > 0 ? esc(person) + ' owes you ' : 'You owe ' + esc(person) + ' ') + money(Math.abs(bal)) + '</span></div>' +
+    '<label class="f">Amount actually ' + (bal > 0 ? 'received' : 'paid') + '</label><div class="amt-in"><span>$</span><input id="sa" inputmode="decimal" value="' + Math.abs(bal) + '" aria-label="Amount"></div>' +
+    '<label class="f" for="sd">Date</label><input class="t" type="date" id="sd" value="' + today() + '">' +
+    '<p class="note" id="smsg"></p><div class="actions"><button class="btn" id="sgo">Settle</button></div>';
+  openSheet('Settle up with ' + person, body, function (el) {
+    function msg() {
+      var a = parseFloat($('#sa', el).value), diff = r2(Math.abs(bal) - (isNaN(a) ? 0 : a));
+      $('#smsg', el).textContent = Math.abs(diff) < 0.005 ? 'Settles exactly. Nothing left over.'
+        : bal > 0
+          ? (diff > 0 ? money(diff) + ' short. The shortfall is added to your spending and the balance is cleared.' : money(-diff) + ' extra. It is recorded as a small gain and the balance is cleared.')
+          : (diff > 0 ? money(diff) + ' less than you owed. The saving is recorded as a small gain.' : money(-diff) + ' more than you owed, so the extra counts as spending.');
+    }
+    $('#sa', el).addEventListener('input', msg); msg();
+    $('#sgo', el).addEventListener('click', function () {
+      var a = parseFloat($('#sa', el).value), d = $('#sd', el).value || today();
+      if (isNaN(a) || a < 0) { toast('Enter an amount'); return; }
+      var paid = r2(a), diff = r2(Math.abs(bal) - paid);
+      S.debts.push({ id: uid(), d: d, person: person, amt: bal > 0 ? -paid : paid, note: 'Settled up', src: 'app' });
+      if (Math.abs(diff) > 0.005) {
+        S.debts.push({ id: uid(), d: d, person: person, amt: bal > 0 ? -diff : diff, note: 'Difference written off', src: 'app' });
+        var short = (bal > 0 && diff > 0) || (bal < 0 && diff < 0);
+        var m = monthOf(d), amt = Math.abs(diff);
+        if (short) {
+          var c = '📦 Other'; if (!catObj(c)) S.meta.cats.push({ name: c, type: 'exp' });
+          (S.tx[m] = S.tx[m] || []).push({ id: uid(), d: d, t: 'exp', amt: amt, cat: c, sub: '', note: 'Shortfall settling up with ' + person, tags: [], src: 'app' });
+        } else {
+          (S.tx[m] = S.tx[m] || []).push({ id: uid(), d: d, t: 'adj', amt: amt, cat: '🔧 Adjustment', sub: '', note: 'Extra from settling up with ' + person, tags: [], src: 'app' });
+        }
+        markMonth(m); mark('meta');
+      }
+      mark('debts'); closeSheet(); render(); toast('Settled with ' + person);
+    });
+  });
+}
 function subSheet(existing, prefill) {
   var s = existing ? Object.assign({}, existing) : Object.assign({ id: uid(), name: '', amt: 0, cycle: 1, next: '', active: true }, prefill || {});
   var body = '<label class="f" for="sn">Name</label><input class="t" id="sn" value="' + esc(s.name) + '">' +
@@ -1508,7 +1708,7 @@ function themeSheet() {
 function flowsBetween(a, b) {
   // net change to your money for dates in (a, b]
   var n = 0;
-  allTx().forEach(function (t) { if (t.d > a && t.d <= b) n += t.t === 'exp' ? -t.amt : t.amt; });
+  allTx().forEach(function (t) { if (t.d > a && t.d <= b) n += t.t === 'exp' ? -t.amt : t.amt; }); // full amount: the cash really did leave
   S.ledger.forEach(function (e) { if (e.d > a && e.d <= b && e.f !== 'bal') n += e.f === 'out' ? e.amt : -e.amt; });
   S.debts.forEach(function (e) { if (e.d > a && e.d <= b) n -= e.amt; });
   return n;
@@ -2027,7 +2227,7 @@ function dataMonths() {
   return out;
 }
 function catColorMap() {
-  var tot = {}; allTx().forEach(function (t) { if (t.t === 'exp') tot[t.cat] = (tot[t.cat] || 0) + t.amt; });
+  var tot = {}; allTx().forEach(function (t) { if (t.t === 'exp') tot[t.cat] = (tot[t.cat] || 0) + ea(t); });
   var order = Object.keys(tot).sort(function (a, b) { return tot[b] - tot[a]; }), pal = isDark() ? COVE_D : COVE_L, map = {};
   order.forEach(function (c, i) { map[c] = i < 7 ? pal[i] : pal[7]; });
   return { map: map, top: order.slice(0, 7) };
@@ -2041,7 +2241,7 @@ function renderInsights() {
   var st = ms.map(monthStats), tx = allTx().filter(function (t) { return ms.indexOf(monthOf(t.d)) > -1; }), exps = tx.filter(function (t) { return t.t === 'exp'; });
   var avgSpend = sum(st, function (x) { return x.net; }) / ms.length, inc = sum(st, function (x) { return x.earned + x.other; }), kept = sum(st, function (x) { return x.saved; });
   var alTot = sum(st, function (x) { return x.alaina; }), spTot = sum(st, function (x) { return x.spend; });
-  var subsCat = sum(exps.filter(function (t) { return t.cat === '🗓 Subscriptions'; }), function (t) { return t.amt; }) / ms.length;
+  var subsCat = sum(exps.filter(function (t) { return t.cat === '🗓 Subscriptions'; }), ea) / ms.length;
   var peakI = st.reduce(function (b, x, i) { return x.net > st[b].net ? i : b; }, 0);
   h += '<div class="kpis"><div><span>Average month</span><b>' + money(avgSpend, 0) + '</b><i>spent after paybacks</i></div>' +
     '<div><span>Savings rate</span><b class="' + (kept >= 0 ? 'pos' : 'neg') + '">' + (inc ? Math.round(kept / inc * 100) : 0) + '%</b><i>' + signed(kept, 0) + ' kept</i></div>' +
@@ -2053,7 +2253,7 @@ function renderInsights() {
 
   // Alaina
   var alTx = exps.filter(function (t) { return (t.tags || []).indexOf('Alaina') > -1; }), alDays = {};
-  alTx.forEach(function (t) { alDays[t.d] = (alDays[t.d] || 0) + t.amt; });
+  alTx.forEach(function (t) { alDays[t.d] = (alDays[t.d] || 0) + ea(t); });
   var nd = Object.keys(alDays).length, big = alTx.slice().sort(function (a, b) { return b.amt - a.amt; }).slice(0, 3);
   h += '<section class="blk"><h2>Time with Alaina</h2><div class="panel" style="padding:12px 14px">' +
     '<div class="kv"><span>Days with spending together</span><span>' + nd + '</span><span>Average per day together</span><span>' + money(nd ? alTot / nd : 0) + '</span><span>Share of all spending</span><span>' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</span></div>' +
@@ -2062,13 +2262,13 @@ function renderInsights() {
 
   // transport
   var grab = exps.filter(function (t) { return t.cat === '🚖 Transport' && /grab/i.test((t.sub || '') + ' ' + (t.note || '')); }), pub = exps.filter(function (t) { return t.cat === '🚖 Transport' && grab.indexOf(t) < 0; });
-  var gT = sum(grab, function (t) { return t.amt; }), pT = sum(pub, function (t) { return t.amt; });
+  var gT = sum(grab, ea), pT = sum(pub, ea);
   h += chartBlock('c4', 'Grab is ' + (gT + pT ? Math.round(gT / (gT + pT) * 100) : 0) + '% of your transport spending', money(gT, 0) + ' on ' + grab.length + ' Grab rides, averaging ' + money(grab.length ? gT / grab.length : 0) + ' each', 170,
     '<div class="lg"><span><i style="background:' + (isDark() ? COVE_D[1] : COVE_L[1]) + '"></i>Grab</span><span><i style="background:' + (isDark() ? COVE_D[0] : COVE_L[0]) + '"></i>Public transport and other</span></div>');
 
   // weekday + heatmap
   var wd = [0, 0, 0, 0, 0, 0, 0], wdN = [0, 0, 0, 0, 0, 0, 0], byDay = {};
-  exps.forEach(function (t) { byDay[t.d] = (byDay[t.d] || 0) + t.amt; });
+  exps.forEach(function (t) { byDay[t.d] = (byDay[t.d] || 0) + ea(t); });
   var first = ms[0] + '-01', last = addMonth(ms[ms.length - 1], 1) + '-01';
   for (var dt = new Date(first + 'T00:00:00'); ; dt.setDate(dt.getDate() + 1)) {
     var k = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
@@ -2080,7 +2280,7 @@ function renderInsights() {
   h += '<section class="blk"><h2>Every day, last 20 weeks</h2>' + heatmap(byDay) + '<p class="note">Darker means more spent. Empty squares are days with nothing logged; if you know you spent, that is where a gap hides.</p></section>';
 
   // category table
-  var cc = catColorMap(), catT = {}; exps.forEach(function (t) { catT[t.cat] = (catT[t.cat] || 0) + t.amt; });
+  var cc = catColorMap(), catT = {}; exps.forEach(function (t) { catT[t.cat] = (catT[t.cat] || 0) + ea(t); });
   var lastM = ms[ms.length - 1], prevAvg = priorAvg(lastM) || {}, lastSt = monthStats(lastM);
   h += '<section class="blk"><h2>Categories</h2><div class="panel tbl"><div class="th"><span>Category</span><span>Per month</span><span>Share</span><span>' + monthLabel(lastM, true) + ' vs avg</span></div>' +
     Object.keys(catT).sort(function (a, b) { return catT[b] - catT[a]; }).map(function (c) {
@@ -2089,7 +2289,7 @@ function renderInsights() {
     }).join('') + '</div></section>';
 
   // top places
-  var pl = {}; exps.forEach(function (t) { var n = normNote(t.note); if (!n || n.length < 3) return; var o = pl[n] || (pl[n] = { n: t.note, amt: 0, c: 0 }); o.amt += t.amt; o.c++; });
+  var pl = {}; exps.forEach(function (t) { var n = normNote(t.note); if (!n || n.length < 3) return; var o = pl[n] || (pl[n] = { n: t.note, amt: 0, c: 0 }); o.amt += ea(t); o.c++; });
   var tops = Object.keys(pl).map(function (k) { return pl[k]; }).filter(function (o) { return o.c > 1; }).sort(function (a, b) { return b.amt - a.amt; }).slice(0, 10);
   if (tops.length) h += '<section class="blk"><h2>Where the money repeats</h2><div class="panel">' + tops.map(function (o) {
     return '<div class="row"><div class="l"><b>' + esc(o.n) + '</b><span>' + o.c + ' times, ' + money(o.amt / o.c) + ' each on average</span></div><div class="r">' + money(o.amt, 0) + '</div></div>';
@@ -2158,12 +2358,12 @@ function drawInsights() {
   mk('c3', { type: 'bar', data: { labels: labels, datasets: [Object.assign({ label: 'With Alaina', data: st.map(function (x) { return r2(x.alaina); }), backgroundColor: cssv('--rose') }, bar)] }, options: base(false) });
   // c4 transport
   var tr = ms.map(function (m) {
-    var g = 0, p = 0; (S.tx[m] || []).forEach(function (t) { if (t.t === 'exp' && t.cat === '🚖 Transport') { if (/grab/i.test((t.sub || '') + ' ' + (t.note || ''))) g += t.amt; else p += t.amt; } }); return [r2(g), r2(p)];
+    var g = 0, p = 0; (S.tx[m] || []).forEach(function (t) { if (t.t === 'exp' && t.cat === '🚖 Transport') { if (/grab/i.test((t.sub || '') + ' ' + (t.note || ''))) g += ea(t); else p += ea(t); } }); return [r2(g), r2(p)];
   });
   mk('c4', { type: 'bar', data: { labels: labels, datasets: [Object.assign({ label: 'Grab', data: tr.map(function (x) { return x[0]; }), backgroundColor: pal[1] }, bar, { borderRadius: 0 }), Object.assign({ label: 'Public transport and other', data: tr.map(function (x) { return x[1]; }), backgroundColor: pal[0] }, bar)] }, options: base(true) });
   // c5 weekday
   var exps = allTx().filter(function (t) { return t.t === 'exp' && ms.indexOf(monthOf(t.d)) > -1; }), byDay = {};
-  exps.forEach(function (t) { byDay[t.d] = (byDay[t.d] || 0) + t.amt; });
+  exps.forEach(function (t) { byDay[t.d] = (byDay[t.d] || 0) + ea(t); });
   var wd = [0, 0, 0, 0, 0, 0, 0], wn = [0, 0, 0, 0, 0, 0, 0], last = addMonth(ms[ms.length - 1], 1) + '-01';
   for (var dt = new Date(ms[0] + '-01T00:00:00'); ; dt.setDate(dt.getDate() + 1)) {
     var k = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
