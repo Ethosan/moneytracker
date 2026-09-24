@@ -1,5 +1,5 @@
 // Keeps the app opening offline. Pages and scripts: try the network, fall back to the cached copy.
-const CACHE = 'ledger-v26';
+const CACHE = 'ledger-v28';
 const SHELL = ['./', './index.html', './config.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
 self.addEventListener('install', e => {
   // Cache files one by one: a single missing file must not stop the worker installing,
