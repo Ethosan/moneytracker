@@ -946,7 +946,9 @@ function movementRows() {
       text: e.venue + ' ' + (e.note || '') + ' ' + (e.who || '') + ' ' + (e.acct || '') });
   });
   S.debts.forEach(function (x) {
-    var what = /settled/i.test(x.note || '') ? 'Settled up with ' + x.person
+    if (x.txId || x.ledgerId) return; // already shown on its transaction or ledger entry
+    var what = x.k === 'settle' ? 'Settled up with ' + x.person
+      : /settled/i.test(x.note || '') ? 'Settled up with ' + x.person
       : /written off/i.test(x.note || '') ? 'Difference written off, ' + x.person
       : /part payment/i.test(x.note || '') ? x.person + ' part-paid you'
       : x.k === 'held' ? (x.amt < 0 ? x.person + ' gave you money to hold' : 'Invested ' + x.person + '\u2019s money')
@@ -956,7 +958,10 @@ function movementRows() {
       : x.k === 'borrowed' ? 'Borrowed from ' + x.person
       : x.k === 'paid' ? 'Paid ' + x.person + ' back'
       : x.amt > 0 ? x.person + ' owes you more' : 'You owe ' + x.person + ' more';
-    out.push({ d: x.d, kind: 'ppl', title: what, sub: x.note && !/settled|written off|part payment/i.test(x.note) ? x.note : (x.amt > 0 ? 'Balance moved your way' : 'Balance moved their way'),
+    out.push({ d: x.d, kind: 'ppl', title: what, sub: x.k === 'settle'
+        ? money(x.paid) + (Math.abs(x.diff || 0) < 0.005 ? ', settled exactly' : x.diff > 0 ? ', ' + money(x.diff) + ' short, added to spending' : ', ' + money(-x.diff) + ' extra, kept as a gain')
+        : x.k === 'part' ? money(x.paid) + ' part payment, the rest stays owing'
+        : (x.note && !/settled|written off|part payment/i.test(x.note) ? x.note : (x.amt > 0 ? 'Balance moved your way' : 'Balance moved their way')),
       right: (x.amt > 0 ? '+' : '\u2212') + money(Math.abs(x.amt)), cls: x.amt > 0 ? 'pos' : 'neg', av: '\u21c4', attr: 'data-person="' + esc(x.person) + '"',
       text: x.person + ' ' + (x.note || '') });
   });
@@ -1683,10 +1688,13 @@ function settleSheet(person) {
       var a = parseFloat($('#sa', el).value), d = $('#sd', el).value || today();
       if (isNaN(a) || a < 0) { toast('Enter an amount'); return; }
       var paid = r2(a), diff = r2(Math.abs(bal) - paid);
-      S.debts.push({ id: uid(), d: d, person: person, amt: bal > 0 ? -paid : paid, note: mode === 'part' ? 'Part payment' : 'Settled up', src: 'app' });
-      if (mode === 'part') { mark('debts'); closeSheet(); render(); toast('Recorded'); return; }
+      if (mode === 'part') {
+        S.debts.push({ id: uid(), d: d, person: person, amt: bal > 0 ? -paid : paid, note: 'Part payment', k: 'part', paid: paid, src: 'app' });
+        mark('debts'); closeSheet(); render(); toast('Recorded'); return;
+      }
+      // one entry clears the balance, whatever was actually paid
+      S.debts.push({ id: uid(), d: d, person: person, amt: -bal, note: 'Settled up', k: 'settle', paid: paid, diff: diff, src: 'app' });
       if (Math.abs(diff) > 0.005) {
-        S.debts.push({ id: uid(), d: d, person: person, amt: bal > 0 ? -diff : diff, note: 'Difference written off', src: 'app' });
         var short = (bal > 0 && diff > 0) || (bal < 0 && diff < 0);
         var m = monthOf(d), amt = Math.abs(diff);
         if (short) {
