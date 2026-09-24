@@ -447,12 +447,29 @@ function flush() {
       : t.delete().eq('user_id', store.uid).eq('id', k);
     p.then(function (r) {
       if (r.error) throw r.error;
-      next();
-    }).catch(function () {
+      store.err = null; next();
+    }).catch(function (e) {
       store.dirty[k] = true; store.writing = false; saveDirty();
-      setSync('Offline, will sync'); setTimeout(flush, 5000);
+      store.err = errText(e);
+      if (isNetworkErr(e)) { setSync('Offline, will sync'); setTimeout(flush, 5000); }
+      else { store.mode = 'error'; setSync('Sync problem'); render(); }
     });
   })();
+}
+function errText(e) {
+  if (!e) return 'Unknown error';
+  return e.message || e.error_description || e.details || e.hint || (typeof e === 'string' ? e : JSON.stringify(e));
+}
+function isNetworkErr(e) {
+  var t = errText(e);
+  return navigator.onLine === false || /failed to fetch|networkerror|load failed|network request failed|timeout/i.test(t);
+}
+function syncHint(t) {
+  if (/does not exist|relation .*ledger_docs|schema cache/i.test(t)) return 'The ledger_docs table is missing. Run supabase/schema.sql in your Supabase SQL editor.';
+  if (/permission denied|row-level security|violates row-level/i.test(t)) return 'Supabase is refusing the write. The row level security policies from schema.sql are missing or incomplete.';
+  if (/jwt|token|session|401|invalid api key|apikey/i.test(t)) return 'Your sign-in has expired or the keys in config.js are wrong. Sign out and back in.';
+  if (/quota|payload|too large|413/i.test(t)) return 'The data is too large for one write. Export a backup and tell Claude.';
+  return 'Open the Supabase dashboard and check the project is running.';
 }
 function setSync(t) { var el = $('#sync'); if (el) el.textContent = t; }
 function markAll() { mark('meta'); mark('ledger'); mark('debts'); mark('inbox'); mark('checks'); mark('bills'); Object.keys(S.tx).forEach(markMonth); }
@@ -489,10 +506,16 @@ function connect() {
       else if (!res.data.length && (allTx().length || S.ledger.length)) markAll();
       store.mode = 'cloud'; setSync('Synced'); render(); flush();
     });
-  }).catch(function () {
-    // offline or server unreachable: keep working from the local copy
-    store.mode = 'cloud-offline'; setSync('Offline, will sync'); render();
-    setTimeout(connect, 15000);
+  }).catch(function (e) {
+    store.err = errText(e);
+    if (isNetworkErr(e)) {
+      // genuinely offline: keep working from the local copy and try again shortly
+      store.mode = 'cloud-offline'; setSync('Offline, will sync'); render();
+      clearTimeout(connect.t); connect.t = setTimeout(connect, 15000);
+    } else {
+      // something is wrong at the other end; retrying forever would just hide it
+      store.mode = 'error'; setSync('Sync problem'); render();
+    }
   });
 }
 window.addEventListener('online', function () { if (store.mode === 'cloud') flush(); else if (store.mode === 'cloud-offline') connect(); });
@@ -546,10 +569,13 @@ function priorAvg(m) {
 }
 function venuePnl(v) {
   var type = venueType(v);
-  var es = S.ledger.filter(function (e) { return e.venue === v; }).sort(function (a, b) {
+  var all = S.ledger.filter(function (e) { return e.venue === v; });
+  var partners = {};
+  all.forEach(function (e) { if (e.who && e.who !== 'me' && e.f !== 'bal') partners[e.who] = r2((partners[e.who] || 0) + (e.f === 'in' ? e.amt : -e.amt)); });
+  var es = all.filter(function (e) { return !e.who || e.who === 'me' || e.f === 'bal'; }).sort(function (a, b) {
     return a.d < b.d ? -1 : a.d > b.d ? 1 : (a.f === 'bal') - (b.f === 'bal');
   });
-  var o = { type: type, inn: 0, out: 0, n: es.length, bal: null, pnl: null, stale: false, last: es.length ? es[es.length - 1].d : null, opening: null };
+  var o = { type: type, partners: partners, inn: 0, out: 0, n: all.length, bal: null, pnl: null, stale: false, last: es.length ? es[es.length - 1].d : null, opening: null };
   if (type === 'prop' || type === 'poker' || cashBasis()) {
     var lastBal = null;
     // A balance logged before any deposit or withdrawal is capital carried in from before
@@ -672,6 +698,7 @@ function renderHome() {
       '<div class="row"><div class="l"><b>Prop firm payouts</b></div><div class="r pos">' + money(propPay) + '</div></div>' +
       '<div class="row"><div class="l"><b>Poker</b></div><div class="r ' + (poker >= 0 ? 'pos' : 'neg') + '">' + signed(poker) + '</div></div>' +
       ((brIn || brOut) ? '<div class="row"><div class="l"><b>Moved to investments</b><span>Not spending. ' + money(brOut) + ' came back</span></div><div class="r">' + money(brIn) + '</div></div>' : '') +
+      '<div class="row"><div class="l"><b>All money out this month</b><span>Spending, plus fees, buy-ins and money moved to investments</span></div><div class="r">' + money(st.net + propFees + Math.max(0, -poker) + brIn - brOut) + '</div></div>' +
       '</div></section>';
   }
 
@@ -785,6 +812,8 @@ function renderPnl() {
       if (kind === 'prop') sub = money(p.inn) + ' fees, ' + money(p.out) + ' payouts';
       else if (kind === 'poker') sub = p.n + ' sessions';
       else if (p.cash) sub = 'In ' + money(p.inn, 0) + ', out ' + money(p.out, 0) + (p.open ? '. ' + money(p.outThere, 0) + ' still invested' : '') + (p.paper != null ? '. Paper value ' + money(p.paper, 0) + ', not counted' : '');
+      var pk = Object.keys(p.partners || {}).filter(function (n) { return Math.abs(p.partners[n]) > 0.01; });
+      if (pk.length) sub += '. Plus ' + pk.map(function (n) { return money(p.partners[n], 0) + ' of ' + esc(n) + "\u2019s"; }).join(', ');
       else sub = p.bal == null || (cl && p.bal === 0) ? (cl ? 'In ' + money(p.inn, 0) + ', out ' + money(p.out, 0) : 'In ' + money(p.inn, 0) + ', out ' + money(p.out, 0) + '. Add balance') : 'Balance ' + money(p.bal, 0) + (p.opening != null ? ', from ' + money(p.opening, 0) + ' opening' : '') + (p.stale && !cl ? '. Balance out of date' : '');
       if (cl) sub = 'Closed' + (p.last ? ', last used ' + monthLabel(monthOf(p.last), true) + ' ' + p.last.slice(0, 4) : '') + '. ' + sub;
       s += '<button class="row' + (cl ? ' closed' : '') + '" data-venue="' + esc(v.name) + '"><div class="l"><b>' + esc(v.name) + '</b><span>' + sub + '</span></div><div class="r ' +
@@ -858,6 +887,9 @@ function renderMore() {
     '<button class="row" data-act="budgets"><div class="l"><b>Budgets</b><span>' + S.meta.budgets.length + ' set</span></div><div class="r">›</div></button>' +
     '<button class="row" data-act="basis"><div class="l"><b>Investment accounting</b><span>' + (cashBasis() ? 'Cash basis, balances not counted' : 'Balances count as your money') + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="cats"><div class="l"><b>Categories and tags</b><span>' + S.meta.cats.length + ' categories, ' + S.meta.tags.length + ' tags</span></div><div class="r">›</div></button>' +
+    '<button class="row" data-act="sync"><div class="l"><b>Sync status</b><span>' +
+    (store.mode === 'cloud' ? 'Synced with Supabase' : store.mode === 'error' ? 'Not syncing: ' + esc(store.err || 'unknown problem') : store.mode === 'cloud-offline' ? 'Offline, changes are waiting' : 'Saved in this browser only') +
+    '</span></div><div class="r">\u203a</div></button>' +
     (isStandalone() ? '' : '<button class="row" data-act="install"><div class="l"><b>Install on your phone</b><span>Home screen icon, full screen, works offline</span></div><div class="r">\u203a</div></button>') +
     '<button class="row" data-act="cleanup"><div class="l"><b>Clean up in a spreadsheet</b><span>Export to CSV, edit in Excel or Sheets, bring it back</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="export"><div class="l"><b>Download a backup</b><span>JSON of everything, including bills and loans</span></div><div class="r">›</div></button>' +
@@ -886,7 +918,7 @@ function render() {
   if (store.mode === 'auth') { $('#app').innerHTML = renderLogin(); wireLogin(); return; }
   var v = UI.tab === 'activity' ? renderActivity() : UI.tab === 'pnl' ? renderPnl() : UI.tab === 'more' ? renderMore() : UI.tab === 'insights' ? renderInsights() : renderHome();
   $('#app').innerHTML = '<main>' + v + '</main>' + nav();
-  setSync(store.mode === 'cloud' ? 'Synced' : store.mode === 'local' ? 'On this device' : store.mode === 'cloud-offline' ? 'Offline, will sync' : '');
+  setSync(store.mode === 'cloud' ? 'Synced' : store.mode === 'local' ? 'On this device' : store.mode === 'cloud-offline' ? 'Offline, will sync' : store.mode === 'error' ? 'Sync problem' : '');
   if (UI.tab === 'insights') drawInsights();
   var cu = document.querySelector('[data-count]');
   if (cu && window.requestAnimationFrame && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
@@ -938,6 +970,7 @@ function txSheet(existing, asNew) {
     return S.meta.tags.map(function (g) { return '<button class="chip' + (g === 'Alaina' ? ' rose' : '') + '" data-tag="' + esc(g) + '" aria-pressed="' + (t.tags.indexOf(g) > -1) + '">' + (g === 'Alaina' ? 'With ' : '') + esc(g) + '</button>'; }).join('');
   }
   var body = '<div class="seg" id="tt"><button data-t="exp" aria-pressed="' + (t.t === 'exp') + '">Expense</button><button data-t="inc" aria-pressed="' + (t.t === 'inc') + '">Income</button>' +
+    (existing ? '' : '<button data-t="move" aria-pressed="false">Move money</button>') +
     (t.t === 'adj' ? '<button data-t="adj" aria-pressed="true">Adjustment</button>' : '') + '</div>' +
     '<div class="amt-in"><span>$</span><input id="amt" inputmode="decimal" placeholder="0.00" value="' + (t.amt ? t.amt : '') + '" aria-label="Amount"></div>' +
     '<label class="f">Category</label><div class="wrap" id="cats">' + catChips() + '</div>' +
@@ -950,7 +983,9 @@ function txSheet(existing, asNew) {
   openSheet(existing ? 'Edit transaction' : 'New transaction', body, function (el) {
     if (!existing) setTimeout(function () { $('#amt', el).focus(); }, 50);
     $('#tt', el).addEventListener('click', function (e) {
-      var b = e.target.closest('[data-t]'); if (!b) return; t.t = b.dataset.t; t.cat = '';
+      var b = e.target.closest('[data-t]'); if (!b) return;
+      if (b.dataset.t === 'move') { closeSheet(); moveSheet(); return; }
+      t.t = b.dataset.t; t.cat = '';
       el.querySelectorAll('#tt button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
       $('#cats', el).innerHTML = catChips();
     });
@@ -1003,6 +1038,27 @@ function txSheet(existing, asNew) {
     if (existing) $('#del', el).addEventListener('click', function () { if (!confirm('Delete this transaction?')) return; removeTx(existing); closeSheet(); render(); toast('Deleted'); });
   });
 }
+// Moving money is not spending. It either goes into an investment account, or it just
+// shifts between your own bank, wallet and cash, which needs no record at all.
+function moveSheet() {
+  var body = '<p style="margin-top:0">Which kind of move is it?</p><div class="panel">' +
+    '<button class="row" data-mv="inv"><div class="l"><b>To or from an investment account</b><span>Broker, crypto, prop firm or poker</span></div><div class="r">\u203a</div></button>' +
+    '<button class="row" data-mv="own"><div class="l"><b>Between my own accounts</b><span>Bank to cash, wallet top-up</span></div><div class="r">\u203a</div></button>' +
+    '<button class="row" data-mv="ppl"><div class="l"><b>Someone gave me money, or I gave them some</b><span>Loans, shared costs, money you hold for someone</span></div><div class="r">\u203a</div></button>' +
+    '<button class="row" data-mv="bill"><div class="l"><b>Paying a PayLater bill</b><span>Goes against the bill, never counted as spending</span></div><div class="r">\u203a</div></button></div>';
+  openSheet('Move money', body, function (el) {
+    el.querySelectorAll('[data-mv]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var k = b.dataset.mv;
+        if (k === 'inv') ledgerSheet();
+        else if (k === 'ppl') debtSheet();
+        else if (k === 'bill') payLaterSheet();
+        else openSheet('Between your own accounts', '<p style="margin-top:0">Nothing to record. Moving money between your own bank, wallet and cash does not change what you have, and this app never counts it as spending or income.</p>' +
+          '<p class="note">The only place it matters is the balance check, where you enter what each account holds at that moment.</p><div class="actions"><button class="btn" data-close>Got it</button></div>');
+      });
+    });
+  });
+}
 function removeTx(t) {
   var m = monthOf(t.d), a = S.tx[m] || [];
   for (var i = 0; i < a.length; i++) if (a[i].id === t.id) { a.splice(i, 1); break; }
@@ -1027,12 +1083,23 @@ function ledgerSheet(opts) {
     if (!FLOW_LABELS[ty].some(function (x) { return x[0] === e.f; })) e.f = FLOW_LABELS[ty][0][0];
     return FLOW_LABELS[ty].map(function (x) { return '<button data-f="' + x[0] + '" aria-pressed="' + (e.f === x[0]) + '">' + x[1] + '</button>'; }).join('');
   }
+  function people() {
+    var ps = {}; S.debts.forEach(function (d) { ps[d.person] = 1; });
+    S.ledger.forEach(function (x) { if (x.who && x.who !== 'me') ps[x.who] = 1; });
+    return Object.keys(ps);
+  }
+  function whoChips() {
+    return '<button class="chip" data-who="me" aria-pressed="' + (!e.who || e.who === 'me') + '">Mine</button>' +
+      people().map(function (n) { return '<button class="chip" data-who="' + esc(n) + '" aria-pressed="' + (e.who === n) + '">' + esc(n) + '</button>'; }).join('') +
+      '<button class="chip" data-who="__new">Someone else\u2026</button>';
+  }
   var body = '<label class="f" for="ven">Account</label><select class="t" id="ven">' + (names.length ? '' : '<option value="">Choose…</option>') +
     names.map(function (n) { return '<option' + (n === e.venue ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '<option value="__new">New account…</option></select>' +
     '<div id="newv" hidden><label class="f" for="nvn">Name</label><input class="t" id="nvn" placeholder="e.g. Topstep">' +
     '<label class="f">Type</label><div class="seg" id="nvt"><button data-ty="broker" aria-pressed="true">Broker</button><button data-ty="prop" aria-pressed="false">Prop firm</button><button data-ty="poker" aria-pressed="false">Poker</button><button data-ty="crypto" aria-pressed="false">Crypto</button></div></div>' +
     '<label class="f">What happened</label><div class="seg" id="fl">' + flows() + '</div>' +
     '<div class="amt-in"><span>$</span><input id="amt" inputmode="decimal" placeholder="0.00" value="' + (e.amt || '') + '" aria-label="Amount"></div>' +
+    '<label class="f">Whose money</label><div class="wrap" id="who">' + whoChips() + '</div>' +
     '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(e.note) + '">' +
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + e.d + '">' +
     '<div class="actions">' + (opts.entry ? '<button class="btn danger" id="del">Delete</button>' : '') + '<button class="btn" id="save">' + (opts.entry ? 'Save changes' : 'Log it') + '</button></div>';
@@ -1046,6 +1113,12 @@ function ledgerSheet(opts) {
     $('#nvt', el).addEventListener('click', function (ev) {
       var b = ev.target.closest('[data-ty]'); if (!b) return; newType = b.dataset.ty;
       el.querySelectorAll('#nvt button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); $('#fl', el).innerHTML = flows();
+    });
+    $('#who', el).addEventListener('click', function (ev) {
+      var b = ev.target.closest('[data-who]'); if (!b) return;
+      if (b.dataset.who === '__new') { var n = (prompt('Whose money is this?') || '').trim(); if (!n) return; e.who = n; }
+      else e.who = b.dataset.who;
+      $('#who', el).innerHTML = whoChips();
     });
     $('#fl', el).addEventListener('click', function (ev) {
       var b = ev.target.closest('[data-f]'); if (!b) return; e.f = b.dataset.f; el.querySelectorAll('#fl button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
@@ -1072,7 +1145,7 @@ function venueSheet(v) {
   var body = '<div class="pl-big ' + (p.pnl == null ? '' : p.pnl >= 0 ? 'pos' : 'neg') + '">' + (p.pnl == null ? 'Needs a balance' : signed(p.pnl)) + '</div>' +
     '<div class="actions" style="margin:12px 0 8px"><button class="btn sm" id="addv">Log an entry</button>' + ((ty === 'broker' || ty === 'crypto') ? '<button class="btn sm ghost" id="balv">Update balance</button>' : '') + '</div><div class="panel">';
   es.forEach(function (e) {
-    body += '<button class="row" data-le="' + esc(e.id) + '"><div class="l"><b>' + (lab[e.f] || e.f) + '</b><span>' + dayLabel(e.d) + (e.note ? ', ' + esc(e.note) : '') + '</span></div><div class="r">' + money(e.amt) + '</div></button>';
+    body += '<button class="row" data-le="' + esc(e.id) + '"><div class="l"><b>' + (lab[e.f] || e.f) + (e.who && e.who !== 'me' ? ' \u00b7 ' + esc(e.who) + "\u2019s money" : '') + '</b><span>' + dayLabel(e.d) + (e.note ? ', ' + esc(e.note) : '') + '</span></div><div class="r">' + money(e.amt) + '</div></button>';
   });
   body += '</div>';
   body += '<label class="f" style="margin-top:18px">Group</label><div class="seg" id="vty">' + [['broker', 'Broker'], ['prop', 'Prop firm'], ['poker', 'Poker'], ['crypto', 'Crypto']].map(function (x) { return '<button data-ty="' + x[0] + '" aria-pressed="' + (ty === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>' +
@@ -1087,7 +1160,8 @@ function venueSheet(v) {
   });
 }
 
-var DEBT_ACTS = [['lent', 'I lent them', 1], ['repaid', 'They paid me back', -1], ['borrowed', 'I borrowed', -1], ['paid', 'I paid them back', 1]];
+var DEBT_ACTS = [['lent', 'I lent them', 1], ['repaid', 'They paid me back', -1], ['borrowed', 'I borrowed', -1], ['paid', 'I paid them back', 1],
+  ['held', 'They gave me money to invest or hold', -1], ['returned', 'I gave their money back', 1]];
 function debtSheet(person) {
   var act = 'lent', ppl = {}; S.debts.forEach(function (d) { ppl[d.person] = 1; });
   var hist = person ? S.debts.filter(function (d) { return d.person === person; }).sort(function (a, b) { return a.d < b.d ? 1 : -1; }) : [];
@@ -1384,6 +1458,30 @@ function restoreSheet() {
         catch (e) { $('#rerr', el).textContent = 'That file is not a ledger backup.'; }
       };
       rd.readAsText(f);
+    });
+  });
+}
+function syncSheet() {
+  var pending = Object.keys(store.dirty).length;
+  var state = store.mode === 'cloud' ? 'Everything is saved to your Supabase database.'
+    : store.mode === 'cloud-offline' ? 'Your phone cannot reach Supabase right now. Changes are safe on this device and go up when the connection returns.'
+    : store.mode === 'error' ? 'Supabase answered, but refused the request. Until this is fixed, nothing new is being saved to the database.'
+    : store.mode === 'auth' ? 'You are signed out.'
+    : 'No Supabase keys are set, so data is kept in this browser only.';
+  var body = '<p style="margin-top:0">' + state + '</p>' +
+    '<div class="kv"><span>State</span><span>' + ({ cloud: 'Synced', 'cloud-offline': 'Offline', error: 'Sync problem', local: 'This device only', auth: 'Signed out' }[store.mode] || store.mode) + '</span>' +
+    '<span>Changes waiting to upload</span><span>' + pending + '</span>' +
+    '<span>Connection</span><span>' + (navigator.onLine === false ? 'No network' : 'Network available') + '</span></div>';
+  if (store.err) body += '<label class="f">What Supabase said</label><div class="panel" style="padding:12px 14px"><div style="font-size:13px;word-break:break-word">' + esc(store.err) + '</div></div>' +
+    '<p class="warn">' + esc(syncHint(store.err)) + '</p>';
+  body += '<div class="actions"><button class="btn ghost" id="sbk">Download a backup</button><button class="btn" id="sretry">Try again now</button></div>' +
+    '<p class="note">Your data always stays on this device as well, so nothing is lost while sync is broken.</p>';
+  openSheet('Sync status', body, function (el) {
+    $('#sbk', el).addEventListener('click', function () { exportData(); });
+    $('#sretry', el).addEventListener('click', function () {
+      store.err = null; setSync('Checking\u2026'); closeSheet();
+      if (store.mode === 'cloud') { flush(); } else { store.mode = 'connecting'; connect(); }
+      setTimeout(function () { toast(store.mode === 'cloud' ? 'Synced' : store.mode === 'error' ? 'Still failing' : 'Trying\u2026'); }, 1500);
     });
   });
 }
@@ -2130,6 +2228,7 @@ function onClick(e) {
     else if (a === 'check') checkSheet();
     else if (a === 'paylater') payLaterSheet();
     else if (a === 'basis') basisSheet();
+    else if (a === 'sync') syncSheet();
     else if (a === 'allmonths') { UI.all = !UI.all; render(); }
     else if (a === 'install') installSheet();
     else if (a === 'csv') exportCsv('tx');
