@@ -332,6 +332,16 @@ label.f{margin:16px 2px 8px}
 .heat,.trend{padding:16px 18px}
 @media (min-width:768px){ main{padding:18px 28px 132px;gap:22px 24px} .chips{margin:0;padding:2px 0 14px} }
 @media (min-width:1024px){ main{padding:100px 36px 56px;gap:24px 26px} .hero{padding:30px 32px} }
+
+/* Activity rows: give each line room and keep the secondary text quiet. */
+.panel .row,.panel button.row{padding:14px 0;gap:14px}
+.row .l b{font-size:15px;line-height:1.35}
+.row .l span{font-size:12.5px;margin-top:2px;color:var(--muted)}
+.row .r{font-size:15.5px}
+.av{width:38px;height:38px;border-radius:12px;font-size:18px}
+.av.mv{background:var(--accent-soft);color:var(--accent);font-size:16px;font-weight:700}
+.day{font-size:12.5px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);padding:20px 6px 8px}
+.row .r.mut{color:var(--muted);font-weight:500}
 </style>
 </head>
 <body>
@@ -749,6 +759,48 @@ function venuesByType() {
 }
 function monthlyEquiv(s) { return s.amt / (s.cycle || 1); }
 
+// A repayment should be recorded once: either as a payback on the income side, or
+// against the person's balance. Recording both inflates your money on paper.
+function doubleCounts() {
+  var inc = allTx().filter(function (t) { return t.t === 'inc' && incKind(t.cat) === 'reimb' && !t.ok; });
+  var pays = S.debts.filter(function (d) { return d.amt < 0 && !d.ok && !d.ledgerId && !d.txId; });
+  var out = [], used = {};
+  inc.forEach(function (t) {
+    var note = (t.note || '').toLowerCase();
+    var hit = null;
+    pays.forEach(function (d) {
+      if (used[d.id] || hit) return;
+      var gap = Math.abs(new Date(d.d) - new Date(t.d)) / 864e5;
+      var near = Math.abs(Math.abs(d.amt) - t.amt) <= 2;
+      var samePerson = note.indexOf(d.person.toLowerCase()) > -1;
+      if (gap <= 7 && near && (samePerson || note === '')) hit = d;
+    });
+    if (hit) { used[hit.id] = 1; out.push({ tx: t, debt: hit }); }
+  });
+  return out;
+}
+function dupeSheet() {
+  var list = doubleCounts();
+  var body = list.length ? '<p style="margin-top:0">Each of these looks recorded twice: once as money coming in, and once against the person\u2019s balance. Keep one side of each.</p>' +
+    list.map(function (x, i) {
+      return '<div class="panel" style="margin-bottom:12px;padding:12px 16px"><div class="kv" style="margin:0"><span>' + esc(x.tx.note || x.tx.cat) + ', ' + dayLabel(x.tx.d) + '</span><span class="pos">+' + money(x.tx.amt) + '</span>' +
+        '<span>' + esc(x.debt.person) + ', ' + dayLabel(x.debt.d) + '</span><span>' + money(Math.abs(x.debt.amt)) + '</span></div>' +
+        '<div class="actions" style="margin-top:12px;gap:8px"><button class="btn sm ghost" data-dupe="tx:' + i + '">Keep the balance one</button>' +
+        '<button class="btn sm ghost" data-dupe="debt:' + i + '">Keep the income one</button>' +
+        '<button class="btn sm ghost" data-dupe="ok:' + i + '">Not a duplicate</button></div></div>';
+    }).join('') : '<div class="empty">Nothing looks double counted.</div>';
+  openSheet('Possible double counts', body, function (el) {
+    el.querySelectorAll('[data-dupe]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var p = b.dataset.dupe.split(':'), x = list[+p[1]];
+        if (p[0] === 'tx') { removeTx(x.tx); }
+        else if (p[0] === 'debt') { S.debts = S.debts.filter(function (d) { return d.id !== x.debt.id; }); mark('debts'); }
+        else { x.tx.ok = 1; x.debt.ok = 1; markMonth(monthOf(x.tx.d)); mark('debts'); }
+        closeSheet(); render(); dupeSheet();
+      });
+    });
+  });
+}
 // ---------- rendering ----------
 var ICON = {
   home: '<span class="ms" aria-hidden="true">donut_large</span>', list: '<span class="ms" aria-hidden="true">receipt_long</span>',
@@ -778,6 +830,8 @@ function renderHome() {
     return h + '<div class="empty"><p>Nothing logged yet. Bring in your Money Manager history, or add your first transaction.</p>' +
       '<button class="btn sm" data-act="import">Import from Money Manager</button></div>';
   }
+  var dup = doubleCounts();
+  if (dup.length) h += '<button class="banner" data-act="dupes"><b>' + dup.length + ' repayment' + (dup.length > 1 ? 's look' : ' looks') + ' recorded twice</b><span>Once as income and once against a balance. Tap to keep one.</span></button>';
   if (S.inbox.length) h += '<button class="banner" data-act="inbox"><b>' + S.inbox.length + ' statement rows to review</b><span>Tag Alaina rides and add them</span></button>';
   h += '<div class="hero"><div class="lbl">Spent in ' + monthLabel(m, true) + ', after paybacks</div>' +
     '<div class="big"><small>$</small><span data-count="' + Math.round(st.net) + '">' + Math.round(st.net).toLocaleString('en-SG') + '</span></div>' +
@@ -862,12 +916,21 @@ function renderHome() {
   return h;
 }
 
+function plain(c) { return String(c || '').replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, ''); }
 function txRow(t) {
-  var sign = t.t === 'exp' ? '−' : t.t === 'inc' ? '+' : '±';
+  var sign = t.t === 'exp' ? '\u2212' : t.t === 'inc' ? '+' : '\u00b1';
   var tags = (t.tags || []).map(function (g) { return '<span class="tag">' + esc(g) + '</span>'; }).join('');
-  return '<button class="row" data-edit-tx="' + esc(t.id) + '"><span class="av' + ((t.tags || []).indexOf('Alaina') > -1 ? ' al' : '') + '">' + esc(avatar(t.cat)) + '</span><div class="l"><b>' + esc(t.note || t.cat) + tags + '</b><span>' + esc(t.cat.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')) + (t.sub ? ', ' + esc(t.sub) : '') +
-    '</span></div><div class="r ' + (t.t === 'inc' ? 'pos' : '') + '">' + sign + money(ea(t)) +
-    (t.split && t.split.mine !== t.amt ? '<span>your share of ' + money(t.amt) + '</span>' : '') + '</div></button>';
+  var title = t.note ? t.note : plain(t.cat);
+  var sub = t.note ? plain(t.cat) : '';
+  if (t.sub) sub = sub ? sub + ' \u00b7 ' + t.sub : t.sub;
+  if (t.pm === 'later') sub = sub ? sub + ' \u00b7 PayLater' : 'PayLater';
+  if (t.split && t.split.mine === 0) sub = 'Bought for ' + t.split.person + ', none of it yours';
+  return '<button class="row" data-edit-tx="' + esc(t.id) + '"><span class="av' + ((t.tags || []).indexOf('Alaina') > -1 ? ' al' : '') + '">' + esc(avatar(t.cat)) + '</span>' +
+    '<div class="l"><b>' + esc(title) + tags + '</b>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div>' +
+    (t.split && t.split.mine === 0
+      ? '<div class="r mut">' + money(t.amt) + '<span>paid out, owed back</span></div></button>'
+      : '<div class="r ' + (t.t === 'inc' ? 'pos' : '') + '">' + sign + money(ea(t)) +
+        (t.split && t.split.mine !== t.amt ? '<span>your share of ' + money(t.amt) + '</span>' : '') + '</div></button>');
 }
 function movementRows() {
   // Money that moved without being spending or income: investments, loans and PayLater bills.
@@ -881,7 +944,17 @@ function movementRows() {
       text: e.venue + ' ' + (e.note || '') + ' ' + (e.who || '') + ' ' + (e.acct || '') });
   });
   S.debts.forEach(function (x) {
-    out.push({ d: x.d, kind: 'ppl', title: x.person + ' \u00b7 ' + (x.amt > 0 ? 'balance moved your way' : 'balance moved their way'), sub: x.note || 'Money between you',
+    var what = /settled/i.test(x.note || '') ? 'Settled up with ' + x.person
+      : /written off/i.test(x.note || '') ? 'Difference written off, ' + x.person
+      : /part payment/i.test(x.note || '') ? x.person + ' part-paid you'
+      : x.k === 'held' ? (x.amt < 0 ? x.person + ' gave you money to hold' : 'Invested ' + x.person + '\u2019s money')
+      : x.k === 'returned' ? 'Gave ' + x.person + '\u2019s money back'
+      : x.k === 'lent' ? 'Lent to ' + x.person
+      : x.k === 'repaid' ? x.person + ' paid you back'
+      : x.k === 'borrowed' ? 'Borrowed from ' + x.person
+      : x.k === 'paid' ? 'Paid ' + x.person + ' back'
+      : x.amt > 0 ? x.person + ' owes you more' : 'You owe ' + x.person + ' more';
+    out.push({ d: x.d, kind: 'ppl', title: what, sub: x.note && !/settled|written off|part payment/i.test(x.note) ? x.note : (x.amt > 0 ? 'Balance moved your way' : 'Balance moved their way'),
       right: (x.amt > 0 ? '+' : '\u2212') + money(Math.abs(x.amt)), cls: x.amt > 0 ? 'pos' : 'neg', av: '\u21c4', attr: 'data-person="' + esc(x.person) + '"',
       text: x.person + ' ' + (x.note || '') });
   });
@@ -1203,6 +1276,7 @@ function txSheet(existing, asNew) {
     '<label class="f">Tags</label><div class="wrap" id="tags">' + tagChips() + '</div>' +
     '<label class="f">Did you pay for other people?</label><div class="seg" id="sp"><button data-sp="0" aria-pressed="' + !t.split + '">Just me</button><button data-sp="1" aria-pressed="' + !!t.split + '">I paid for others</button></div>' +
     '<div id="spbox"' + (t.split ? '' : ' hidden') + '><label class="f" for="mine">My share</label><input class="t" id="mine" inputmode="decimal" value="' + (t.split ? t.split.mine : '') + '" placeholder="e.g. 30">' +
+    '<div class="wrap" style="margin-top:7px"><button class="chip" id="mine0">None of it is mine</button><button class="chip" id="minehalf">Half</button></div>' +
     '<label class="f">Who owes you the rest</label><div class="wrap" id="spwho"></div>' +
     '<p class="note" id="spmsg"></p></div>' +
     '<label class="f">Paid with</label><div class="seg" id="pm"><button data-pm="cash" aria-pressed="' + (t.pm !== 'later') + '">Cash or bank</button><button data-pm="later" aria-pressed="' + (t.pm === 'later') + '">PayLater</button></div>' +
@@ -1246,8 +1320,9 @@ function txSheet(existing, asNew) {
       box.innerHTML = whoList().map(function (n) { return '<button class="chip" data-spw="' + esc(n) + '" aria-pressed="' + (spWho === n) + '">' + esc(n) + '</button>'; }).join('') +
         '<button class="chip" data-spw="__new">Someone else\u2026</button>';
       var mine = parseFloat(($('#mine', el) || {}).value), full = parseFloat($('#amt', el).value);
-      $('#spmsg', el).textContent = (mine > 0 && full > mine)
-        ? money(full - mine) + ' goes to ' + (spWho || 'them') + ' as money owed to you, and only ' + money(mine) + ' counts as your spending.'
+      $('#spmsg', el).textContent = !(full > 0) ? 'Enter the total you paid above, and your share here.'
+        : mine === 0 ? 'None of this is your spending. The full ' + money(full) + ' is owed to you by ' + (spWho || 'them') + '.'
+        : (mine > 0 && full > mine) ? money(full - mine) + ' goes to ' + (spWho || 'them') + ' as money owed to you, and only ' + money(mine) + ' counts as your spending.'
         : 'Enter the total you paid above, and your share here.';
     }
     $('#sp', el).addEventListener('click', function (e) {
@@ -1257,6 +1332,10 @@ function txSheet(existing, asNew) {
       $('#spbox', el).hidden = !on; if (!on) t.split = null; drawWho();
     });
     el.addEventListener('input', function (e) { if (e.target.id === 'mine' || e.target.id === 'amt') drawWho(); });
+    $('#mine0', el).addEventListener('click', function () { $('#mine', el).value = '0'; drawWho(); });
+    $('#minehalf', el).addEventListener('click', function () {
+      var full = parseFloat($('#amt', el).value); if (full > 0) $('#mine', el).value = r2(full / 2); drawWho();
+    });
     $('#spwho', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-spw]'); if (!b) return;
       if (b.dataset.spw === '__new') { var n = (prompt('Who owes you the rest?') || '').trim(); if (!n) return; spWho = n; }
@@ -1587,6 +1666,15 @@ function settleSheet(person) {
         : bal > 0
           ? (diff > 0 ? money(diff) + ' short. The shortfall is added to your spending and the balance is cleared.' : money(-diff) + ' extra. It is recorded as a small gain and the balance is cleared.')
           : (diff > 0 ? money(diff) + ' less than you owed. The saving is recorded as a small gain.' : money(-diff) + ' more than you owed, so the extra counts as spending.');
+    }
+    var near = allTx().filter(function (t) {
+      return t.t === 'inc' && incKind(t.cat) === 'reimb' && Math.abs(new Date(t.d) - new Date(today())) / 864e5 <= 14 &&
+        ((t.note || '').toLowerCase().indexOf(person.toLowerCase()) > -1 || Math.abs(t.amt - Math.abs(bal)) <= 2);
+    });
+    if (near.length) {
+      var w = document.createElement('p'); w.className = 'warn';
+      w.textContent = 'You already logged ' + money(near[0].amt) + ' as a payback on ' + dayLabel(near[0].d) + '. If that was this repayment, delete it rather than recording it here as well.';
+      $('#smsg', el).parentNode.insertBefore(w, $('#smsg', el));
     }
     $('#sa', el).addEventListener('input', msg); msg();
     $('#sgo', el).addEventListener('click', function () {
@@ -1957,7 +2045,12 @@ function flowsBetween(a, b) {
     n += t.t === 'exp' ? -t.amt : t.amt; // full amount: the cash really did leave
   });
   S.ledger.forEach(function (e) { if (e.d > a && e.d <= b && e.f !== 'bal') n += e.f === 'out' ? e.amt : -e.amt; });
-  S.debts.forEach(function (e) { if (e.d > a && e.d <= b) n -= e.amt; });
+  S.debts.forEach(function (e) {
+    // Balances created by a split purchase or by investing someone's capital carry no
+    // cash of their own: the transaction or ledger entry already moved the money.
+    if (e.txId || e.ledgerId) return;
+    if (e.d > a && e.d <= b) n -= e.amt;
+  });
   return n;
 }
 function lastCheck() { var c = S.checks.slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; }); return c[c.length - 1] || null; }
@@ -2666,6 +2759,7 @@ function onClick(e) {
     var a = b.dataset.act;
     if (a === 'prev') { UI.month = addMonth(UI.month, -1); render(); }
     else if (a === 'accttab') render();
+    else if (a === 'dupes') dupeSheet();
     else if (a === 'next') { UI.month = addMonth(UI.month, 1); render(); }
     else if (a === 'add-tx') txSheet();
     else if (a === 'add-ledger') ledgerSheet();
