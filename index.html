@@ -342,6 +342,8 @@ label.f{margin:16px 2px 8px}
 .av.mv{background:var(--accent-soft);color:var(--accent);font-size:16px;font-weight:700}
 .day{font-size:12.5px;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);padding:20px 6px 8px}
 .row .r.mut{color:var(--muted);font-weight:500}
+.chip.emo{padding:0;width:44px;justify-content:center;font-size:19px}
+.chip.emo[aria-pressed="true"]{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}
 </style>
 </head>
 <body>
@@ -1734,31 +1736,139 @@ function budgetSheet() {
   });
 }
 
-function catSheet() {
+var EMOJI = ['🍜','🍔','🍣','☕','🧋','🍺','🛒','🚖','🚇','⛽','✈️','🏠','💡','📱','🗓','🎬','🎮','🎟','🏋️','⚽','💊','🏥','💇','🧴','🧥','👟','🎁','💝','❤️','🤝','👬','✝️','📚','📖','🎓','💳','🏦','💹','🪖','🌐','🛠','🐶','🌱','❓','📦','🔧'];
+function catUse(name) {
+  var n = 0, amt = 0;
+  allTx().forEach(function (t) { if (t.cat === name) { n++; amt += t.amt; } });
+  return { n: n, amt: r2(amt) };
+}
+function subUse(cat, sub) { return allTx().filter(function (t) { return t.cat === cat && cleanSub(t.sub) === sub; }).length; }
+// Renaming has to carry everything with it: the transactions, the budget, the
+// remembered subcategories, and any imported rows still waiting for review.
+function renameCat(oldName, newName) {
+  newName = String(newName || '').trim();
+  if (!newName || newName === oldName) return false;
+  var merging = !!catObj(newName);
+  Object.keys(S.tx).forEach(function (m) {
+    var hit = false;
+    S.tx[m].forEach(function (t) { if (t.cat === oldName) { t.cat = newName; hit = true; } });
+    if (hit) markMonth(m);
+  });
+  S.inbox.forEach(function (r) { if (r.cat === oldName) r.cat = newName; });
+  S.meta.budgets.forEach(function (b) { if (b.key === 'cat:' + oldName) b.key = 'cat:' + newName; });
+  if (S.meta.subcats[oldName]) {
+    var keep = S.meta.subcats[newName] || [];
+    S.meta.subcats[oldName].forEach(function (x) { if (keep.indexOf(x) < 0) keep.push(x); });
+    S.meta.subcats[newName] = keep.sort(function (a, b) { return a.localeCompare(b); });
+    delete S.meta.subcats[oldName];
+  }
+  var old = catObj(oldName);
+  if (merging) S.meta.cats = S.meta.cats.filter(function (c) { return c.name !== oldName; });
+  else if (old) old.name = newName;
+  mark('meta'); mark('inbox');
+  return merging ? 'merged' : true;
+}
+function renameSub(cat, oldSub, newSub) {
+  newSub = cleanSub(newSub);
+  Object.keys(S.tx).forEach(function (m) {
+    var hit = false;
+    S.tx[m].forEach(function (t) { if (t.cat === cat && cleanSub(t.sub) === oldSub) { t.sub = newSub; hit = true; } });
+    if (hit) markMonth(m);
+  });
+  removeKnownSub(cat, oldSub);
+  if (newSub) rememberSub(cat, newSub);
+  mark('meta');
+}
+function catEditSheet(name) {
+  var c = catObj(name); if (!c) return;
+  var use = catUse(name), icon = avatar(name), label = plain(name);
   var KL = { earned: 'Earned', other: 'Gift or bonus', reimb: 'Payback' };
-  var body = '<label class="f">Tags work across categories</label><div class="wrap">' + S.meta.tags.map(function (t) { return '<span class="chip">' + esc(t) + '</span>'; }).join('') + '</div>' +
-    '<div style="display:flex;gap:8px;margin-top:8px"><input class="t" id="nt" placeholder="New tag, e.g. Holiday"><button class="btn sm" id="at">Add</button></div>' +
-    '<label class="f" style="margin-top:18px">Income categories</label><div class="panel">' + S.meta.cats.filter(function (c) { return c.type === 'inc'; }).map(function (c) {
-      return '<div class="row"><div class="l"><b>' + esc(c.name) + '</b></div><select class="t" style="width:auto" data-ck="' + esc(c.name) + '">' + Object.keys(KL).map(function (k) { return '<option value="' + k + '"' + (c.kind === k ? ' selected' : '') + '>' + KL[k] + '</option>'; }).join('') + '</select></div>';
-    }).join('') + '</div><p class="note">Paybacks are subtracted from spending rather than counted as income.</p>' +
-    '<label class="f" style="margin-top:18px">Subcategories by expense category</label><div class="panel">' +
-    S.meta.cats.filter(function (c) { return c.type === 'exp'; }).map(function (c) {
-      var ss = subsFor(c.name);
-      return '<details class="fold"><summary>' + esc(c.name) + (ss.length ? ', ' + ss.length : ', none yet') + '</summary>' +
-        (ss.length ? ss.map(function (x) { return '<div class="row"><div class="l"><b>' + esc(x) + '</b></div><button class="btn sm ghost" data-rmsub="' + esc(c.name) + '||' + esc(x) + '">Remove</button></div>'; }).join('')
-          : '<div class="note" style="padding:0 0 10px">Subcategories you type on a transaction are remembered here.</div>') + '</details>';
+  var body = '<div class="kv" style="margin-top:0"><span>Used by</span><span>' + use.n + ' transaction' + (use.n === 1 ? '' : 's') + '</span>' +
+    '<span>Total</span><span>' + money(use.amt, 0) + '</span></div>' +
+    '<label class="f">Icon</label><div class="wrap" id="emo">' + EMOJI.map(function (e) {
+      return '<button class="chip emo" data-emo="' + e + '" aria-pressed="' + (e === icon) + '">' + e + '</button>';
     }).join('') + '</div>' +
-    '<label class="f" style="margin-top:18px">Add a category</label><div class="seg" id="nct"><button data-t="exp" aria-pressed="true">Expense</button><button data-t="inc" aria-pressed="false">Income</button></div>' +
-    '<div style="display:flex;gap:8px"><input class="t" id="nc" placeholder="e.g. 🏋️ Gym"><button class="btn sm" id="ac">Add</button></div>';
+    '<label class="f" for="cnm">Name</label><div style="display:flex;gap:8px"><input class="t" id="cico" style="width:64px;text-align:center" value="' + esc(icon) + '" aria-label="Icon"><input class="t" id="cnm" value="' + esc(label) + '"></div>' +
+    (c.type === 'inc' ? '<label class="f" for="ckind">Counts as</label><select class="t" id="ckind">' + Object.keys(KL).map(function (k) { return '<option value="' + k + '"' + (c.kind === k ? ' selected' : '') + '>' + KL[k] + '</option>'; }).join('') + '</select>' : '') +
+    '<label class="f">Subcategories</label><div class="panel" id="subs">' + (function () {
+      var ss = subsFor(name);
+      if (!ss.length) return '<div class="note" style="padding:10px 0">None yet. Anything you type in the subcategory box on a transaction is remembered here.</div>';
+      return ss.map(function (x) {
+        return '<div class="row"><div class="l"><b>' + esc(x) + '</b><span>' + subUse(name, x) + ' transaction' + (subUse(name, x) === 1 ? '' : 's') + '</span></div>' +
+          '<div style="display:flex;gap:6px"><button class="chip sm" data-rensub="' + esc(x) + '">Rename</button><button class="chip sm" data-rmsub="' + esc(x) + '">Remove</button></div></div>';
+      }).join('');
+    })() + '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:10px"><input class="t" id="nsb" placeholder="Add a subcategory"><button class="btn sm ghost" id="asb">Add</button></div>' +
+    '<div class="actions">' + (use.n ? '' : '<button class="btn danger" id="cdel">Delete</button>') + '<button class="btn" id="csave">Save</button></div>' +
+    (use.n ? '<p class="note">Renaming moves all ' + use.n + ' transactions with it. Rename it to an existing category to merge the two.</p>' : '');
+  openSheet('Edit ' + label, body, function (el) {
+    $('#emo', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-emo]'); if (!b) return;
+      $('#cico', el).value = b.dataset.emo;
+      el.querySelectorAll('#emo .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
+    });
+    $('#asb', el).addEventListener('click', function () {
+      var v = cleanSub($('#nsb', el).value); if (!v) return;
+      rememberSub(name, v); mark('meta'); closeSheet(); catEditSheet(name);
+    });
+    el.querySelectorAll('[data-rensub]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var v = (prompt('Rename subcategory', b.dataset.rensub) || '').trim();
+        if (!v || v === b.dataset.rensub) return;
+        renameSub(name, b.dataset.rensub, v); closeSheet(); render(); catEditSheet(name);
+      });
+    });
+    el.querySelectorAll('[data-rmsub]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var used = subUse(name, b.dataset.rmsub);
+        if (used && !confirm('Clear this subcategory from ' + used + ' transaction' + (used === 1 ? '' : 's') + '?')) return;
+        renameSub(name, b.dataset.rmsub, ''); closeSheet(); render(); catEditSheet(name);
+      });
+    });
+    var del = $('#cdel', el);
+    if (del) del.addEventListener('click', function () {
+      S.meta.cats = S.meta.cats.filter(function (x) { return x.name !== name; });
+      delete S.meta.subcats[name];
+      S.meta.budgets = S.meta.budgets.filter(function (b) { return b.key !== 'cat:' + name; });
+      mark('meta'); closeSheet(); render(); catSheet();
+    });
+    $('#csave', el).addEventListener('click', function () {
+      var ic = $('#cico', el).value.trim(), nm = $('#cnm', el).value.trim();
+      if (!nm) { toast('Give it a name'); return; }
+      var full = (ic ? ic + ' ' : '') + nm;
+      var k = $('#ckind', el); if (k) { c.kind = k.value; mark('meta'); }
+      var r = renameCat(name, full);
+      closeSheet(); render(); toast(r === 'merged' ? 'Merged into ' + nm : 'Saved'); catSheet();
+    });
+  });
+}
+function catSheet() {
+  function catRows(type) {
+    return S.meta.cats.filter(function (c) { return c.type === type; }).map(function (c) {
+      var u = catUse(c.name), ss = subsFor(c.name).length;
+      return '<button class="row" data-editcat="' + esc(c.name) + '"><span class="av">' + esc(avatar(c.name)) + '</span><div class="l"><b>' + esc(plain(c.name)) + '</b><span>' +
+        u.n + ' transaction' + (u.n === 1 ? '' : 's') + (ss ? ', ' + ss + ' subcategor' + (ss === 1 ? 'y' : 'ies') : '') +
+        (type === 'inc' ? ', counts as ' + ({ earned: 'earned', other: 'gift or bonus', reimb: 'payback' }[c.kind] || 'other') : '') +
+        '</span></div><div class="r mut">' + money(u.amt, 0) + '</div></button>';
+    }).join('');
+  }
+  var body = '<label class="f" style="margin-top:0">Tags work across categories</label><div class="wrap">' + S.meta.tags.map(function (t) { return '<span class="chip">' + esc(t) + '</span>'; }).join('') + '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:8px"><input class="t" id="nt" placeholder="New tag, e.g. Holiday"><button class="btn sm ghost" id="at">Add</button></div>' +
+    '<label class="f" style="margin-top:20px">Spending categories</label><div class="panel">' + catRows('exp') + '</div>' +
+    '<label class="f" style="margin-top:20px">Income categories</label><div class="panel">' + catRows('inc') + '</div>' +
+    '<p class="note">Tap any category to change its icon or name, manage its subcategories, or merge it into another. Paybacks are subtracted from spending rather than counted as income.</p>' +
+    '<label class="f" style="margin-top:18px">Add a category</label><div class="seg" id="nct"><button data-t="exp" aria-pressed="true">Spending</button><button data-t="inc" aria-pressed="false">Income</button></div>' +
+    '<div style="display:flex;gap:8px"><input class="t" id="nci" style="width:64px;text-align:center" placeholder="🏋️" aria-label="Icon"><input class="t" id="nc" placeholder="e.g. Gym"><button class="btn sm" id="ac">Add</button></div>';
   openSheet('Categories and tags', body, function (el) {
     var nct = 'exp';
     $('#nct', el).addEventListener('click', function (e) { var b = e.target.closest('[data-t]'); if (!b) return; nct = b.dataset.t; el.querySelectorAll('#nct button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
-    $('#at', el).addEventListener('click', function () { var v = $('#nt', el).value.trim(); if (v && S.meta.tags.indexOf(v) < 0) { S.meta.tags.push(v); mark('meta'); catSheet(); render(); } });
-    $('#ac', el).addEventListener('click', function () { var v = $('#nc', el).value.trim(); if (v && !catObj(v)) { S.meta.cats.push({ name: v, type: nct, kind: nct === 'inc' ? 'earned' : undefined }); mark('meta'); catSheet(); render(); } });
-    el.querySelectorAll('[data-ck]').forEach(function (s) { s.addEventListener('change', function () { var c = catObj(s.dataset.ck); if (c) { c.kind = s.value; mark('meta'); render(); } }); });
-    el.querySelectorAll('[data-rmsub]').forEach(function (b) {
-      b.addEventListener('click', function () { var p = b.dataset.rmsub.split('||'); removeKnownSub(p[0], p[1]); mark('meta'); catSheet(); render(); });
+    $('#at', el).addEventListener('click', function () { var v = $('#nt', el).value.trim(); if (v && S.meta.tags.indexOf(v) < 0) { S.meta.tags.push(v); mark('meta'); closeSheet(); render(); catSheet(); } });
+    $('#ac', el).addEventListener('click', function () {
+      var ic = $('#nci', el).value.trim(), nm = $('#nc', el).value.trim(); if (!nm) return;
+      var full = (ic ? ic + ' ' : '') + nm;
+      if (!catObj(full)) { S.meta.cats.push({ name: full, type: nct, kind: nct === 'inc' ? 'earned' : undefined }); mark('meta'); closeSheet(); render(); catSheet(); }
     });
+    el.querySelectorAll('[data-editcat]').forEach(function (b) { b.addEventListener('click', function () { catEditSheet(b.dataset.editcat); }); });
   });
 }
 
