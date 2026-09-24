@@ -971,8 +971,22 @@ function movementRows() {
       sub: (t.from || '?') + ' \u2192 ' + (t.to || '?'), right: money(t.amt), av: '\u21c4',
       attr: 'data-edit-xfer="' + esc(t.id) + '"', text: (t.note || '') + ' ' + (t.from || '') + ' ' + (t.to || '') });
   });
+  var lumps = {};
   S.bills.forEach(function (b) {
     (b.payments || []).forEach(function (pm) {
+      if (!pm.payId) return;
+      var L = lumps[pm.payId] = lumps[pm.payId] || { d: pm.d, amt: 0, note: pm.note, bills: [] };
+      L.amt = r2(L.amt + pm.amt); L.d = pm.d; L.bills.push(periodLabel(b.from));
+    });
+  });
+  Object.keys(lumps).forEach(function (k) {
+    var L = lumps[k];
+    out.push({ d: L.d, kind: 'bill', title: L.note || 'PayLater payment', sub: 'Covers ' + L.bills.join(' and ') + (L.bills.length > 1 ? ' bills' : ' bill'),
+      right: '\u2212' + money(L.amt), av: '\uD83D\uDCB3', attr: 'data-act="paylater"', text: 'paylater ' + (L.note || '') });
+  });
+  S.bills.forEach(function (b) {
+    (b.payments || []).forEach(function (pm) {
+      if (pm.payId) return;
       out.push({ d: pm.d, kind: 'bill', title: 'PayLater payment', sub: (pm.note || periodLabel(b.from) + ' bill'), right: money(pm.amt), av: '\u2713',
         attr: 'data-act="paylater"', text: 'paylater ' + (pm.note || '') });
     });
@@ -2197,16 +2211,24 @@ function checkSheet() {
   function accRows() {
     if (!S.meta.accounts.length) return '<div class="note" style="padding:10px 0">Add each place you keep money you can spend: bank accounts, cash, GrabPay wallet. Add GrabPay Later as money you owe. Leave brokerage and prop firm accounts out, they are tracked separately.</div>';
     return S.meta.accounts.map(function (a) {
-      return '<div class="row"><div class="l"><b>' + esc(a.name) + '</b><span>' + (a.liability ? 'Amount you owe' : 'Balance') + '</span></div>' +
+      var auto = a.liability && /pay ?later/i.test(a.name) && owedPL > 0.005;
+      return '<div class="row"><div class="l"><b>' + esc(a.name) + '</b><span>' + (auto ? 'From your bills, ' + money(owedPL) : a.liability ? 'Amount you owe' : 'Balance') + '</span></div>' +
         '<input class="t" style="width:120px;text-align:right" inputmode="decimal" data-acc="' + esc(a.name) + '" value="' + (vals[a.name] != null ? vals[a.name] : '') + '" placeholder="0.00"></div>';
     }).join('');
   }
   var qd = quietDays(30), owedPL = laterOwed();
+  // What you owe PayLater is already known from your bills, so it goes in by itself:
+  // without it the check looks short by exactly that amount.
+  if (owedPL > 0.005) {
+    var pla = S.meta.accounts.filter(function (a) { return a.liability && /pay ?later/i.test(a.name); })[0];
+    if (!pla) { pla = { name: 'GrabPay Later', liability: true, auto: true }; S.meta.accounts.push(pla); mark('meta'); }
+    if (vals[pla.name] == null) vals[pla.name] = owedPL;
+  }
   var body = '<p class="note" style="margin-top:0">Enter what you actually have right now. The app compares it with what your logs say you should have' + (prev ? ' since your last check on ' + dayLabel(prev.d) : '') + '.</p>' +
     '<div class="panel" id="accs">' + accRows() + '</div>' +
     '<div style="display:flex;gap:8px;margin-top:10px"><input class="t" id="an" placeholder="e.g. DBS, Cash, GrabPay Later"><button class="btn sm ghost" id="aa">Add</button></div>' +
     '<label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-top:8px"><input type="checkbox" id="al"> This is money I owe, like GrabPay Later</label>' +
-    (owedPL > 0 ? '<p class="note">Your logs say ' + money(owedPL) + ' is outstanding on PayLater. <button class="chip sm" id="usepl">Fill it in</button></p>' : '') +
+    (owedPL > 0 ? '<p class="note">PayLater purchases count as spending on the day you make them, but the cash only leaves when you pay the bill. Entering what you owe keeps both sides right, so it is filled in for you.</p>' : '') +
     '<div id="calc" class="panel" style="margin-top:16px;padding:10px 14px"></div>' +
     (qd.length ? '<p class="note">Days in the last month with no spending logged: ' + qd.slice(0, 12).map(function (d) { return dayLabel(d); }).join(', ') + (qd.length > 12 ? ' and ' + (qd.length - 12) + ' more' : '') + '. A gap usually hides here.</p>' : '') +
     '<div class="actions" id="acts"></div>';
@@ -2231,13 +2253,6 @@ function checkSheet() {
     }
     refresh();
     el.addEventListener('input', function (e) { if (e.target.matches('[data-acc]')) refresh(); });
-    var up = $('#usepl', el);
-    if (up) up.addEventListener('click', function () {
-      readVals();
-      var acc = S.meta.accounts.filter(function (a) { return a.liability && /pay ?later/i.test(a.name); })[0];
-      if (!acc) { acc = { name: 'GrabPay Later', liability: true }; S.meta.accounts.push(acc); mark('meta'); }
-      vals[acc.name] = owedPL; $('#accs', el).innerHTML = accRows(); refresh();
-    });
     $('#aa', el).addEventListener('click', function () {
       var n = $('#an', el).value.trim(); if (!n || S.meta.accounts.some(function (a) { return a.name === n; })) return;
       readVals(); S.meta.accounts.push({ name: n, liability: $('#al', el).checked }); mark('meta');
@@ -2315,10 +2330,57 @@ function upcoming(n) {
   }
   return out;
 }
+function openBills() {
+  return periods().slice().sort().map(function (f) {
+    var b = billFor(f);
+    if (!b) b = { id: uid(), from: f, n: 1, fee: 0, first: '', payments: [], _new: true };
+    return b;
+  }).filter(function (b) { return billLeft(b) > 0.005; });
+}
+function bulkPaySheet() {
+  var bills = openBills(), owed = r2(sum(bills, billLeft));
+  var body = '<div class="kv" style="margin-top:0"><span>Outstanding across ' + bills.length + ' bill' + (bills.length === 1 ? '' : 's') + '</span><span>' + money(owed) + '</span></div>' +
+    '<div class="amt-in"><span>$</span><input id="bp" inputmode="decimal" value="' + (owed || '') + '" aria-label="Amount paid"></div>' +
+    '<label class="f" for="bpd">Date paid</label><input class="t" type="date" id="bpd" value="' + today() + '">' +
+    '<label class="f" for="bpn">Note</label><input class="t" id="bpn" placeholder="e.g. paid from DBS">' +
+    '<label class="f">How it will be applied</label><div class="panel" id="alloc"></div>' +
+    '<p class="note">Oldest bill first. This records the money leaving your account; the purchases were already counted on the days you made them.</p>' +
+    '<div class="actions"><button class="btn" id="bpgo">Record payment</button></div>';
+  openSheet('Pay PayLater', body, function (el) {
+    function plan() {
+      var left = parseFloat($('#bp', el).value); if (isNaN(left) || left < 0) left = 0;
+      var out = [];
+      bills.forEach(function (b) {
+        var due = billLeft(b), take = Math.min(due, left);
+        if (take > 0.005) { out.push({ b: b, amt: r2(take) }); left = r2(left - take); }
+      });
+      return { rows: out, over: r2(left) };
+    }
+    function draw() {
+      var p = plan();
+      $('#alloc', el).innerHTML = (p.rows.length ? p.rows.map(function (r) {
+        return '<div class="row"><div class="l"><b>' + periodLabel(r.b.from) + '</b><span>' + (billLeft(r.b) - r.amt < 0.005 ? 'Cleared' : money(r2(billLeft(r.b) - r.amt)) + ' left after this') + '</span></div><div class="r">' + money(r.amt) + '</div></div>';
+      }).join('') : '<div class="empty" style="padding:14px">Nothing to apply it to.</div>') +
+        (p.over > 0.005 ? '<div class="row"><div class="l"><b>Not needed</b><span>More than you owe, so it stays unrecorded</span></div><div class="r">' + money(p.over) + '</div></div>' : '');
+    }
+    $('#bp', el).addEventListener('input', draw); draw();
+    $('#bpgo', el).addEventListener('click', function () {
+      var p = plan(), d = $('#bpd', el).value || today(), note = $('#bpn', el).value.trim(), payId = uid();
+      if (!p.rows.length) { toast('Nothing to pay'); return; }
+      p.rows.forEach(function (r) {
+        if (r.b._new) { delete r.b._new; S.bills.push(r.b); }
+        r.b.payments = r.b.payments || [];
+        r.b.payments.push({ id: uid(), payId: payId, d: d, amt: r.amt, note: note || 'PayLater payment' });
+      });
+      mark('bills'); closeSheet(); render(); toast('Recorded ' + money(sum(p.rows, function (r) { return r.amt; })));
+    });
+  });
+}
 function payLaterSheet() {
   var owed = laterOwed(), nx = nextPayment(), up = upcoming(6), ps = periods();
   var body = '<div class="kv"><span>Outstanding on PayLater</span><span>' + money(owed) + '</span>' +
-    '<span>Next payment</span><span>' + (nx ? money(nx.amt) + ' on ' + dayLabel(nx.d) : 'Nothing scheduled') + '</span></div>';
+    '<span>Next payment</span><span>' + (nx ? money(nx.amt) + ' on ' + dayLabel(nx.d) : 'Nothing scheduled') + '</span></div>' +
+    (owed > 0 ? '<div class="actions" style="margin:10px 0 4px"><button class="btn" id="paynow">Record a payment</button></div>' : '');
   if (up.some(function (u) { return u.amt > 0; })) {
     body += '<label class="f">Committed over the next 6 months</label><div class="panel">' + up.map(function (u) {
       return '<div class="row"><div class="l"><b>' + monthLabel(u.m) + '</b></div><div class="r">' + (u.amt ? money(u.amt) : '–') + '</div></div>';
@@ -2335,6 +2397,7 @@ function payLaterSheet() {
     '<p class="note">Grab bills a whole period at once. Set the day your bill period starts so purchases fall into the right bill. Your purchases and payments stay separate records either way.</p>';
   openSheet('PayLater', body, function (el) {
     el.querySelectorAll('[data-bill]').forEach(function (btn) { btn.addEventListener('click', function () { billSheet(btn.dataset.bill); }); });
+    var pn = $('#paynow', el); if (pn) pn.addEventListener('click', function () { bulkPaySheet(); });
     $('#cyc', el).addEventListener('change', function () {
       var v = parseInt(this.value, 10); if (!(v >= 1 && v <= 28)) { this.value = cycleDay(); return; }
       S.meta.plCycle = v; mark('meta'); closeSheet(); render(); payLaterSheet();
