@@ -1219,35 +1219,50 @@ function applyImport(res) {
 var deferredInstall = null;
 window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault(); deferredInstall = e; render(); });
 function isStandalone() { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }
+function installChecks() {
+  var out = [];
+  out.push({ k: 'Served over HTTPS', ok: location.protocol === 'https:' || location.hostname === 'localhost', fix: 'Open the Netlify or GitHub Pages address, not a local file.' });
+  out.push({ k: 'Opened in Chrome or Safari itself', ok: !/(FBAN|FBAV|Instagram|Line\/|Twitter|WebView|wv\))/i.test(navigator.userAgent), fix: 'Browsers inside other apps cannot install. Open the link in Chrome or Safari.' });
+  var manifest = document.querySelector('link[rel="manifest"]');
+  out.push({ k: 'Manifest linked', ok: !!manifest, fix: 'manifest.webmanifest is missing from the site.' });
+  return Promise.all([
+    manifest ? fetch(manifest.href).then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; }) : Promise.resolve(null),
+    navigator.serviceWorker ? navigator.serviceWorker.getRegistration().catch(function () { return null; }) : Promise.resolve(null),
+    fetch('icons/icon-192.png', { method: 'HEAD' }).then(function (r) { return r.ok; }).catch(function () { return false; })
+  ]).then(function (r) {
+    var mf = r[0], reg = r[1], icon = r[2];
+    out.push({ k: 'Manifest loads and is valid', ok: !!mf, fix: 'The file did not load or is not valid JSON. Re-upload manifest.webmanifest.' });
+    out.push({ k: 'Icons reachable', ok: icon, fix: 'The icons folder is missing from the site. Upload icons/icon-192.png and icon-512.png.' });
+    out.push({ k: 'Service worker registered', ok: !!reg, fix: 'sw.js did not register. Check it sits next to index.html.' });
+    out.push({ k: 'Service worker active', ok: !!(reg && (reg.active || navigator.serviceWorker.controller)), fix: 'Reload the page once more, then try again.' });
+    out.push({ k: 'Chrome offered the install prompt', ok: !!deferredInstall, fix: 'Chrome sometimes waits until you have used the site briefly. Reload, tap around for 30 seconds, then reopen this screen.' });
+    return out;
+  }).catch(function () { return out; });
+}
 function installSheet() {
   var ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
   var body = deferredInstall
     ? '<p style="margin-top:0">Install the app so it opens from your home screen, full screen and offline.</p><div class="actions"><button class="btn" id="doinst">Install</button></div>'
     : ios
-      ? '<p style="margin-top:0">On iPhone, install it from Safari:</p><ol style="padding-left:20px;line-height:1.9"><li>Open this page in <b>Safari</b>, not in another app\'s browser.</li><li>Tap the <b>Share</b> button at the bottom.</li><li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol><p class="note">It then opens full screen, with no address bar, and works offline.</p>'
-      : '<p style="margin-top:0">In Chrome, open the <b>\u22ee</b> menu and choose <b>Install app</b> or <b>Add to Home screen</b>. If you do not see it, reload the page once and try again.</p>';
+      ? '<p style="margin-top:0">On iPhone, install it from Safari:</p><ol style="padding-left:20px;line-height:1.9"><li>Open this page in <b>Safari</b>, not inside another app.</li><li>Tap <b>Share</b> at the bottom.</li><li>Choose <b>Add to Home Screen</b>, then <b>Add</b>.</li></ol><p class="note">On iPhone that is the install. It then opens full screen with no address bar.</p>'
+      : '<p style="margin-top:0">In Chrome, open the <b>\u22ee</b> menu and choose <b>Install app</b>. If it only offers <b>Add to Home screen</b> as a shortcut, something below is failing.</p>';
+  body += '<label class="f">Installability check</label><div class="panel" id="ichk"><div class="empty" style="padding:14px">Checking\u2026</div></div>';
   openSheet('Install on your phone', body, function (el) {
     var b = $('#doinst', el);
     if (b) b.addEventListener('click', function () {
       var p = deferredInstall; deferredInstall = null; closeSheet();
       p.prompt(); p.userChoice.then(function (r) { toast(r.outcome === 'accepted' ? 'Installing' : 'Maybe later'); render(); });
     });
+    installChecks().then(function (list) {
+      var box = $('#ichk', el); if (!box) return;
+      box.innerHTML = list.map(function (c) {
+        return '<div class="row"><div class="l"><b>' + (c.ok ? '\u2713 ' : '\u2717 ') + esc(c.k) + '</b>' + (c.ok ? '' : '<span>' + esc(c.fix) + '</span>') + '</div></div>';
+      }).join('');
+      var bad = list.filter(function (c) { return !c.ok; });
+      if (!bad.length && !deferredInstall) box.innerHTML += '<div class="row"><div class="l"><span>Everything passes. Chrome may still be waiting on its engagement rule: use the site for a minute, then check the \u22ee menu again.</span></div></div>';
+    });
   });
 }
-function exportData() {
-  var blob = new Blob([JSON.stringify(S)], { type: 'application/json' }), a = document.createElement('a');
-  a.href = URL.createObjectURL(blob); a.download = 'ledger-backup-' + today() + '.json'; document.body.appendChild(a); a.click();
-  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500); toast('Backup downloaded');
-}
-function csvCell(v) { var x = String(v == null ? '' : v); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; }
-function download(name, text, type) {
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([text], { type: type || 'text/csv;charset=utf-8' }));
-  a.download = name; document.body.appendChild(a); a.click();
-  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-}
-var TX_COLS = ['id', 'date', 'type', 'amount', 'category', 'subcategory', 'note', 'tags', 'paid with'];
-var INV_COLS = ['id', 'date', 'account', 'group', 'action', 'amount', 'note'];
 function exportCsv(kind) {
   var rows;
   if (kind === 'inv') {
