@@ -1,13 +1,64 @@
-// Keeps the app opening offline. Pages and scripts: try the network, fall back to the last cached copy.
-const CACHE = 'ledger-v8';
-const SHELL = ['./', './index.html', './config.js', './manifest.webmanifest', './icons/icon-192.png'];
-self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
-self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
-self.addEventListener('fetch', e => {
-  const u = new URL(e.request.url);
-  if (e.request.method !== 'GET' || u.hostname.endsWith('supabase.co')) return; // never cache your data API
-  e.respondWith(fetch(e.request).then(r => {
-    if (r.ok || r.type === 'opaque') { const c = r.clone(); caches.open(CACHE).then(ca => ca.put(e.request, c)); }
-    return r;
-  }).catch(() => caches.match(e.request).then(m => m || caches.match('./index.html'))));
-});
+{
+  "name": "Ethan's Ledger",
+  "short_name": "Ledger",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F2F4F8",
+  "theme_color": "#F2F4F8",
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "description": "Personal finance tracker: spending, PayLater bills, investment and poker results.",
+  "categories": [
+    "finance",
+    "productivity"
+  ],
+  "shortcuts": [
+    {
+      "name": "Add a transaction",
+      "short_name": "Add",
+      "url": "./?add=1",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "Insights",
+      "short_name": "Insights",
+      "url": "./?tab=insights",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ],
+  "id": "./",
+  "prefer_related_applications": false
+}
