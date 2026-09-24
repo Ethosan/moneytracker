@@ -939,11 +939,12 @@ function renderMore() {
   var names = Object.keys(ppl).sort(function (a, b) { return Math.abs(ppl[b]) - Math.abs(ppl[a]); });
   var open = names.filter(function (n) { return Math.abs(ppl[n]) > 0.005; });
   var owedToMe = sum(open.filter(function (n) { return ppl[n] > 0; }), function (n) { return ppl[n]; }), iOwe = -sum(open.filter(function (n) { return ppl[n] < 0; }), function (n) { return ppl[n]; });
-  h += '<section class="blk"><h2>Money between friends <button data-act="add-debt">Add</button></h2><div class="panel">';
+  h += '<section class="blk"><h2>People and shared money <button data-act="add-debt">Add</button></h2><div class="panel">';
   h += '<div class="kv" style="padding-top:8px"><span>Owed to you</span><span class="pos">' + money(owedToMe) + '</span><span>You owe</span><span class="neg">' + money(iOwe) + '</span></div>';
   if (!open.length) h += '<div class="note" style="padding:0 0 10px">Everyone is square.</div>';
   open.forEach(function (n) {
-    h += '<button class="row" data-person="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>' + (ppl[n] > 0 ? 'Owes you' : 'You owe') + '</span></div><div class="r ' + (ppl[n] > 0 ? 'pos' : 'neg') + '">' + money(Math.abs(ppl[n])) + '</div></button>';
+    var held = S.debts.some(function (d) { return d.person === n && (d.k === 'held' || d.k === 'returned'); });
+    h += '<button class="row" data-person="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>' + (ppl[n] > 0 ? 'Owes you' : held ? 'Their money you are holding' : 'You owe') + '</span></div><div class="r ' + (ppl[n] > 0 ? 'pos' : 'neg') + '">' + money(Math.abs(ppl[n])) + '</div></button>';
   });
   h += '</div></section>';
   // subs
@@ -1253,6 +1254,7 @@ function ledgerSheet(opts) {
     '<label class="f">What happened</label><div class="seg" id="fl">' + flows() + '</div>' +
     '<div class="amt-in"><span>$</span><input id="amt" inputmode="decimal" placeholder="0.00" value="' + (e.amt || '') + '" aria-label="Amount"></div>' +
     '<label class="f">Whose money</label><div class="wrap" id="who">' + whoChips() + '</div>' +
+    '<div id="offbox" hidden><label style="display:flex;gap:9px;align-items:center;font-size:13.5px;margin-top:10px"><input type="checkbox" id="offset" checked> <span id="offlbl"></span></label></div>' +
     '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(e.note) + '">' +
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + e.d + '">' +
     '<div class="actions">' + (opts.entry ? '<button class="btn danger" id="del">Delete</button>' : '') + '<button class="btn" id="save">' + (opts.entry ? 'Save changes' : 'Log it') + '</button></div>';
@@ -1271,10 +1273,23 @@ function ledgerSheet(opts) {
       var b = ev.target.closest('[data-who]'); if (!b) return;
       if (b.dataset.who === '__new') { var n = (prompt('Whose money is this?') || '').trim(); if (!n) return; e.who = n; }
       else e.who = b.dataset.who;
-      $('#who', el).innerHTML = whoChips();
+      $('#who', el).innerHTML = whoChips(); drawOffset();
     });
+    function heldBal(n) { return r2(sum(S.debts.filter(function (d) { return d.person === n; }), function (d) { return d.amt; })); }
+    function drawOffset() {
+      var box = $('#offbox', el); if (!box) return;
+      var on = e.who && e.who !== 'me';
+      box.hidden = !on;
+      if (on) {
+        var bal = heldBal(e.who);
+        $('#offlbl', el).textContent = e.f === 'out'
+          ? 'Their share comes back to me, so I owe ' + e.who + ' this again'
+          : 'This uses money ' + e.who + ' already gave me' + (bal < -0.005 ? ' (holding ' + money(-bal) + ')' : '');
+      }
+    }
+    drawOffset();
     $('#fl', el).addEventListener('click', function (ev) {
-      var b = ev.target.closest('[data-f]'); if (!b) return; e.f = b.dataset.f; el.querySelectorAll('#fl button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
+      var b = ev.target.closest('[data-f]'); if (!b) return; e.f = b.dataset.f; el.querySelectorAll('#fl button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); drawOffset();
     });
     $('#save', el).addEventListener('click', function () {
       var a = parseFloat($('#amt', el).value);
@@ -1286,9 +1301,17 @@ function ledgerSheet(opts) {
       if (!e.venue) { toast('Choose an account'); return; }
       e.amt = r2(a); e.note = $('#note', el).value.trim(); e.d = $('#dt', el).value || today();
       S.ledger = S.ledger.filter(function (x) { return x.id !== e.id; }); S.ledger.push(e); mark('ledger');
+      // Their capital moves from "money I am holding" to "their share of this account",
+      // so it must not be counted as a debt as well.
+      S.debts = S.debts.filter(function (d) { return d.ledgerId !== e.id; });
+      if (e.who && e.who !== 'me' && e.f !== 'bal' && $('#offset', el) && $('#offset', el).checked) {
+        S.debts.push({ id: uid(), ledgerId: e.id, d: e.d, person: e.who, amt: e.f === 'in' ? r2(e.amt) : r2(-e.amt),
+          note: (e.f === 'in' ? 'Invested into ' + e.venue + ' for them' : 'Their share withdrawn from ' + e.venue), k: 'held', src: 'app' });
+      }
+      mark('debts');
       closeSheet(); render(); toast('Logged');
     });
-    if (opts.entry) $('#del', el).addEventListener('click', function () { if (!confirm('Delete this entry?')) return; S.ledger = S.ledger.filter(function (x) { return x.id !== e.id; }); mark('ledger'); closeSheet(); render(); });
+    if (opts.entry) $('#del', el).addEventListener('click', function () { if (!confirm('Delete this entry?')) return; S.ledger = S.ledger.filter(function (x) { return x.id !== e.id; }); S.debts = S.debts.filter(function (d) { return d.ledgerId !== e.id; }); mark('debts'); mark('ledger'); closeSheet(); render(); });
   });
 }
 function venueSheet(v) {
@@ -1344,7 +1367,7 @@ function debtSheet(person) {
       var p = $('#per', el).value.trim(), a = parseFloat($('#amt', el).value);
       if (!p) { toast('Add a name'); return; } if (!(a > 0)) { toast('Enter an amount'); return; }
       var sgn = DEBT_ACTS.filter(function (x) { return x[0] === act; })[0][2];
-      S.debts.push({ id: uid(), d: $('#dt', el).value || today(), person: p, amt: r2(a * sgn), note: $('#note', el).value.trim(), src: 'app' }); mark('debts');
+      S.debts.push({ id: uid(), d: $('#dt', el).value || today(), person: p, amt: r2(a * sgn), note: $('#note', el).value.trim(), k: act, src: 'app' }); mark('debts');
       closeSheet(); render(); toast('Saved');
     });
     el.querySelectorAll('[data-dd]').forEach(function (b) { b.addEventListener('click', function () { if (!confirm('Delete this entry?')) return; S.debts = S.debts.filter(function (d) { return d.id !== b.dataset.dd; }); mark('debts'); closeSheet(); render(); }); });
@@ -1358,10 +1381,20 @@ function settleSheet(person) {
   var body = '<div class="kv" style="margin-top:0"><span>Balance</span><span>' + (bal > 0 ? esc(person) + ' owes you ' : 'You owe ' + esc(person) + ' ') + money(Math.abs(bal)) + '</span></div>' +
     '<label class="f">Amount actually ' + (bal > 0 ? 'received' : 'paid') + '</label><div class="amt-in"><span>$</span><input id="sa" inputmode="decimal" value="' + Math.abs(bal) + '" aria-label="Amount"></div>' +
     '<label class="f" for="sd">Date</label><input class="t" type="date" id="sd" value="' + today() + '">' +
-    '<p class="note" id="smsg"></p><div class="actions"><button class="btn" id="sgo">Settle</button></div>';
+    '<label class="f">If it does not cover the balance</label><div class="seg" id="sm"><button data-sm="close" aria-pressed="true">Call it settled</button><button data-sm="part" aria-pressed="false">Leave the rest owing</button></div>' +
+    '<p class="note" id="smsg"></p><div class="actions"><button class="btn" id="sgo">Record it</button></div>';
   openSheet('Settle up with ' + person, body, function (el) {
+    var mode = 'close';
+    $('#sm', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-sm]'); if (!b) return; mode = b.dataset.sm;
+      el.querySelectorAll('#sm button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); msg();
+    });
     function msg() {
       var a = parseFloat($('#sa', el).value), diff = r2(Math.abs(bal) - (isNaN(a) ? 0 : a));
+      if (mode === 'part' && Math.abs(diff) > 0.005) {
+        $('#smsg', el).textContent = money(Math.abs(diff)) + (diff > 0 ? ' stays on the balance for later.' : ' extra, so the balance flips the other way.');
+        return;
+      }
       $('#smsg', el).textContent = Math.abs(diff) < 0.005 ? 'Settles exactly. Nothing left over.'
         : bal > 0
           ? (diff > 0 ? money(diff) + ' short. The shortfall is added to your spending and the balance is cleared.' : money(-diff) + ' extra. It is recorded as a small gain and the balance is cleared.')
@@ -1372,7 +1405,8 @@ function settleSheet(person) {
       var a = parseFloat($('#sa', el).value), d = $('#sd', el).value || today();
       if (isNaN(a) || a < 0) { toast('Enter an amount'); return; }
       var paid = r2(a), diff = r2(Math.abs(bal) - paid);
-      S.debts.push({ id: uid(), d: d, person: person, amt: bal > 0 ? -paid : paid, note: 'Settled up', src: 'app' });
+      S.debts.push({ id: uid(), d: d, person: person, amt: bal > 0 ? -paid : paid, note: mode === 'part' ? 'Part payment' : 'Settled up', src: 'app' });
+      if (mode === 'part') { mark('debts'); closeSheet(); render(); toast('Recorded'); return; }
       if (Math.abs(diff) > 0.005) {
         S.debts.push({ id: uid(), d: d, person: person, amt: bal > 0 ? -diff : diff, note: 'Difference written off', src: 'app' });
         var short = (bal > 0 && diff > 0) || (bal < 0 && diff < 0);
