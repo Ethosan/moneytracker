@@ -962,7 +962,7 @@ function movementRows() {
         ? money(x.paid) + (Math.abs(x.diff || 0) < 0.005 ? ', settled exactly' : x.diff > 0 ? ', ' + money(x.diff) + ' short, added to spending' : ', ' + money(-x.diff) + ' extra, kept as a gain')
         : x.k === 'part' ? money(x.paid) + ' part payment, the rest stays owing'
         : (x.note && !/settled|written off|part payment/i.test(x.note) ? x.note : (x.amt > 0 ? 'Balance moved your way' : 'Balance moved their way')),
-      right: (x.amt > 0 ? '+' : '\u2212') + money(Math.abs(x.amt)), cls: x.amt > 0 ? 'pos' : 'neg', av: '\u21c4', attr: 'data-person="' + esc(x.person) + '"',
+      right: (x.amt > 0 ? '\u2212' : '+') + money(Math.abs(x.amt)), cls: x.amt > 0 ? '' : 'pos', av: '\u21c4', attr: 'data-person="' + esc(x.person) + '"',
       text: x.person + ' ' + (x.note || '') });
   });
   allTx().forEach(function (t) {
@@ -1110,6 +1110,14 @@ function peopleSection() {
     var held = S.debts.some(function (d) { return d.person === n && (d.k === 'held' || d.k === 'returned'); });
     h += '<button class="row" data-person="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>' + (ppl[n] > 0 ? 'Owes you' : held ? 'Their money you are holding' : 'You owe') + '</span></div><div class="r ' + (ppl[n] > 0 ? 'pos' : 'neg') + '">' + money(Math.abs(ppl[n])) + '</div></button>';
   });
+  var square = names.filter(function (n) { return Math.abs(ppl[n]) <= 0.005; });
+  if (square.length) {
+    h += '<details class="fold"' + (UI.folds.square ? ' open' : '') + ' data-fold="square"><summary>' + square.length + ' settled up</summary>' +
+      square.map(function (n) {
+        var last = S.debts.filter(function (d) { return d.person === n; }).sort(function (a, b) { return a.d < b.d ? 1 : -1; })[0];
+        return '<button class="row" data-person="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>Square' + (last ? ', last ' + dayLabel(last.d) : '') + '</span></div><div class="r mut">$0.00</div></button>';
+      }).join('') + '</details>';
+  }
   h += '</div></section>';
   return h;
 }
@@ -1610,13 +1618,16 @@ function venueSheet(v) {
   });
 }
 
-var DEBT_ACTS = [['lent', 'I lent them', 1], ['repaid', 'They paid me back', -1], ['borrowed', 'I borrowed', -1], ['paid', 'I paid them back', 1],
-  ['held', 'They gave me money to invest or hold', -1], ['returned', 'I gave their money back', 1]];
+// sign is the change to what they owe you; the label says what happens to your money
+var DEBT_ACTS = [
+  ['lent', 'I lent them', 1, 'out'], ['repaid', 'They paid me back', -1, 'in'],
+  ['borrowed', 'I borrowed', -1, 'in'], ['paid', 'I paid them back', 1, 'out'],
+  ['held', 'They gave me money to invest or hold', -1, 'in'], ['returned', 'I gave their money back', 1, 'out']];
 function debtSheet(person) {
   var act = 'lent', ppl = {}; S.debts.forEach(function (d) { ppl[d.person] = 1; });
   var hist = person ? S.debts.filter(function (d) { return d.person === person; }).sort(function (a, b) { return a.d < b.d ? 1 : -1; }) : [];
   var body = '<label class="f" for="per">Person</label><input class="t" id="per" list="pl" value="' + esc(person || '') + '"><datalist id="pl">' + Object.keys(ppl).map(function (p) { return '<option value="' + esc(p) + '">'; }).join('') + '</datalist>' +
-    '<label class="f">What happened</label><div class="wrap" id="da">' + DEBT_ACTS.map(function (a) { return '<button class="chip" data-a="' + a[0] + '" aria-pressed="' + (a[0] === act) + '">' + a[1] + '</button>'; }).join('') + '</div>' +
+    '<label class="f">What happened</label><div class="wrap" id="da">' + DEBT_ACTS.map(function (a) { return '<button class="chip" data-a="' + a[0] + '" aria-pressed="' + (a[0] === act) + '">' + a[1] + ' \u00b7 ' + (a[3] === 'out' ? 'money out' : 'money in') + '</button>'; }).join('') + '</div>' +
     '<div class="amt-in" style="margin-top:12px"><span>$</span><input id="amt" inputmode="decimal" placeholder="0.00" aria-label="Amount"></div>' +
     '<label class="f" for="note">Note</label><input class="t" id="note">' +
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + today() + '">' +
@@ -1630,8 +1641,10 @@ function debtSheet(person) {
   }
   if (hist.length) {
     body += '<label class="f" style="margin-top:20px">History (tap to delete)</label><div class="panel">' + hist.map(function (d) {
-      return '<button class="row" data-dd="' + esc(d.id) + '"><div class="l"><b>' + esc(d.note || (d.amt > 0 ? 'They owe more' : 'They owe less')) + '</b><span>' + dayLabel(d.d) + '</span></div><div class="r">' + (d.amt > 0 ? '+' : '−') + money(Math.abs(d.amt)) + '</div></button>';
-    }).join('') + '</div><p class="note">+ means the balance moved in your favour.</p>';
+      var lbl = d.k === 'settle' ? 'Settled up' : d.k === 'part' ? 'Part payment' : d.note || (d.amt > 0 ? 'They owe more' : 'They owe less');
+      return '<button class="row" data-dd="' + esc(d.id) + '"><div class="l"><b>' + esc(lbl) + '</b><span>' + dayLabel(d.d) + ', money ' + (d.amt > 0 ? 'out of' : 'in to') + ' your account</span></div>' +
+        '<div class="r ' + (d.amt > 0 ? '' : 'pos') + '">' + (d.amt > 0 ? '\u2212' : '+') + money(Math.abs(d.amt)) + '</div></button>';
+    }).join('') + '</div><p class="note">Amounts show what happened to your money. Money you lend or pay out is a minus; money coming back is a plus. The balance at the top is what is still between you.</p>';
   }
   openSheet(person || 'Money between friends', body, function (el) {
     $('#da', el).addEventListener('click', function (e) { var b = e.target.closest('[data-a]'); if (!b) return; act = b.dataset.a; el.querySelectorAll('#da .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
