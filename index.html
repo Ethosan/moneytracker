@@ -344,6 +344,52 @@ label.f{margin:16px 2px 8px}
 .row .r.mut{color:var(--muted);font-weight:500}
 .chip.emo{padding:0;width:44px;justify-content:center;font-size:19px}
 .chip.emo[aria-pressed="true"]{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}
+
+/* ---------- polish pass ---------- */
+/* pace line in the summary card */
+.pace{margin-top:14px;display:grid;gap:7px}
+.pace span{font-size:13px;color:var(--hero-muted)}
+.pace b{color:var(--hero-ink);font-weight:600}
+.pbar{height:4px;border-radius:999px;background:rgba(255,255,255,.14);overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--hero-ink);opacity:.7;border-radius:999px}
+/* quick repeat chips */
+.quick h2{font-size:15px!important;color:var(--muted)}
+.chip.qa{gap:8px;padding:0 14px 0 10px}
+.chip.qa span{font-size:16px}
+.chip.qa em{font-style:normal;color:var(--muted);font-weight:500;font-size:12.5px}
+/* undo in the toast */
+.toast.act{pointer-events:auto;display:flex;align-items:center;gap:12px;padding:8px 8px 8px 18px}
+.toast .undo{background:var(--accent);color:var(--accent-ink);border:0;border-radius:999px;padding:8px 14px;font-weight:700;min-height:36px}
+/* health */
+.healthy{text-align:center;padding:26px 8px 8px;display:grid;gap:6px;justify-items:center}
+.healthy b{font-size:17px}
+.healthy span{font-size:13.5px;color:var(--muted);max-width:32ch}
+.tick{width:56px;height:56px;border-radius:50%;background:var(--gain-soft);position:relative;margin-bottom:6px;animation:pop .45s cubic-bezier(.2,1.4,.4,1)}
+.tick::after{content:"";position:absolute;left:19px;top:14px;width:12px;height:22px;border:solid var(--gain);border-width:0 4px 4px 0;transform:rotate(45deg);animation:draw .35s .2s both}
+@keyframes pop{from{transform:scale(.4);opacity:0}to{transform:none;opacity:1}}
+@keyframes draw{from{clip-path:inset(100% 0 0 0)}to{clip-path:inset(0)}}
+/* motion: rows arrive in a short cascade, the summary tape grows in */
+.panel>.row,.panel>button.row,.legend li{animation:rise .32s cubic-bezier(.2,.8,.2,1) both}
+.panel>:nth-child(2){animation-delay:.03s}.panel>:nth-child(3){animation-delay:.06s}.panel>:nth-child(4){animation-delay:.09s}
+.panel>:nth-child(5){animation-delay:.12s}.panel>:nth-child(n+6){animation-delay:.15s}
+.legend li:nth-child(2){animation-delay:.04s}.legend li:nth-child(3){animation-delay:.08s}.legend li:nth-child(n+4){animation-delay:.12s}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.tape{transform-origin:left;animation:grow .6s cubic-bezier(.2,.8,.2,1) both}
+@keyframes grow{from{transform:scaleX(0)}to{transform:none}}
+.hero .big span{display:inline-block}
+@media (prefers-reduced-motion:reduce){.panel>.row,.panel>button.row,.legend li,.tape,.tick,.tick::after{animation:none!important}}
+
+.quick{margin:0 0 14px!important}
+.quick h2{margin:0 0 8px!important}
+/* desktop: category list sits beside the summary; quick repeats run full width under both */
+@media (min-width:1024px){
+  main>*{order:3}
+  main>header.top,main>.banner:not(.quiet){order:0}
+  main>.hero,main>.legend-wrap{order:1}
+  main>.quick{order:2;grid-column:1 / -1}
+  main>.quick .chips{flex-wrap:nowrap;overflow-x:auto}
+}
+@media (min-width:1024px){ main>.hero{align-self:stretch;display:flex;flex-direction:column;justify-content:center} }
 </style>
 </head>
 <body>
@@ -516,7 +562,17 @@ var MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 
 function monthLabel(m, short) { var i = +m.slice(5, 7) - 1; return short ? MN[i] : ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][i] + ' ' + m.slice(0, 4); }
 function dayLabel(d) { var dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short' }); }
 function sum(a, f) { var s = 0; for (var i = 0; i < a.length; i++) s += f ? f(a[i]) : a[i]; return s; }
-function toast(msg) { var t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on'); }, 1800); }
+var undoSnap = null;
+function snapshot() { undoSnap = JSON.stringify(S); }
+function toastUndo(msg) {
+  var t = $('#toast'); t.innerHTML = esc(msg) + ' <button id="undo" class="undo">Undo</button>'; t.classList.add('on', 'act');
+  $('#undo').onclick = function () {
+    if (!undoSnap) return; S = JSON.parse(undoSnap); undoSnap = null; normalize(); markAll(); render();
+    t.classList.remove('on', 'act'); toast('Restored');
+  };
+  clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on', 'act'); undoSnap = null; }, 5000);
+}
+function toast(msg) { $('#toast').classList.remove('act'); var t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on'); }, 1800); }
 
 // ---------- state ----------
 var DEFAULT_CATS = [
@@ -530,9 +586,49 @@ function freshMeta() {
   return { cats: DEFAULT_CATS.map(function (c) { return { name: c[0], type: c[1], kind: c[2] }; }), tags: ['Alaina'], budgets: [], subs: [], venues: {}, accounts: [], rules: [], subcats: {}, basis: 'cash' };
 }
 var S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [] };
-function normalize() { S.bills = S.bills || []; S.bills.forEach(function (b) { if (!b.from && b.month) b.from = b.month + '-01'; }); S.inbox = S.inbox || []; S.checks = S.checks || []; S.meta.accounts = S.meta.accounts || []; S.meta.rules = S.meta.rules || []; S.meta.venues = S.meta.venues || {};
-  S.meta.subcats = S.meta.subcats || {};
-  allTx().forEach(function (t) { rememberSub(t.cat, t.sub); }); }
+var SCHEMA = 3;
+function num(v) { var n = typeof v === 'number' ? v : parseFloat(v); return isFinite(n) ? r2(n) : 0; }
+// Runs on every load and after every sync. It only ever repairs shape (missing
+// fields, text amounts, rows filed under the wrong month, repeated ids); it
+// never decides what your money means, so it is safe to run as often as needed.
+function normalize() {
+  S.meta = S.meta || freshMeta();
+  ['bills', 'inbox', 'checks', 'ledger', 'debts'].forEach(function (k) { if (!Array.isArray(S[k])) S[k] = []; });
+  S.tx = S.tx && typeof S.tx === 'object' ? S.tx : {};
+  var m = S.meta;
+  m.cats = Array.isArray(m.cats) && m.cats.length ? m.cats : freshMeta().cats;
+  m.tags = Array.isArray(m.tags) ? m.tags : ['Alaina'];
+  ['budgets', 'subs', 'accounts', 'rules'].forEach(function (k) { if (!Array.isArray(m[k])) m[k] = []; });
+  m.venues = m.venues || {}; m.subcats = m.subcats || {};
+  S.bills.forEach(function (b) { if (!b.from && b.month) b.from = b.month + '-01'; b.payments = Array.isArray(b.payments) ? b.payments : []; b.payments.forEach(function (p) { p.amt = num(p.amt); if (!p.id) p.id = uid(); }); });
+  // transactions: one bucket per month, ids unique, amounts numeric and positive
+  var seen = {}, fixed = {}, moved = 0;
+  Object.keys(S.tx).forEach(function (k) {
+    (S.tx[k] || []).forEach(function (t) {
+      if (!t || !t.d || !/^\d{4}-\d{2}-\d{2}$/.test(t.d)) return;
+      if (!t.id || seen[t.id]) t.id = uid();
+      seen[t.id] = 1;
+      t.amt = Math.abs(num(t.amt)); if (!t.amt) return;
+      t.tags = Array.isArray(t.tags) ? t.tags : [];
+      t.sub = cleanSub(t.sub);
+      if (t.split) { t.split.mine = Math.min(num(t.split.mine), t.amt); if (!t.split.person) delete t.split; }
+      if (monthOf(t.d) !== k) moved++;
+      (fixed[monthOf(t.d)] = fixed[monthOf(t.d)] || []).push(t);
+    });
+  });
+  S.tx = fixed;
+  ['ledger', 'debts'].forEach(function (k) {
+    var ids = {};
+    S[k] = S[k].filter(function (e) { return e && e.d; }).map(function (e) {
+      if (!e.id || ids[e.id]) e.id = uid(); ids[e.id] = 1; e.amt = num(e.amt); return e;
+    });
+  });
+  S.ledger = S.ledger.filter(function (e) { return e.f === 'bal' || e.amt > 0; });
+  if (!catObj('\u2753 Unaccounted')) m.cats.push({ name: '\u2753 Unaccounted', type: 'exp' });
+  allTx().forEach(function (t) { rememberSub(t.cat, t.sub); });
+  S.v = SCHEMA;
+  return moved;
+}
 var UI = { folds: {}, acct: 'inv', tab: 'home', month: monthOf(today()), filter: 'all', q: '', all: false };
 var LS_KEY = 'ledger-state-v1';
 var store = { mode: 'connecting', col: null, dirty: {}, timer: null, writing: false };
@@ -578,6 +674,61 @@ function bodyFor(key) {
   if (key === 'bills') return { entries: S.bills };
   var m = key.slice(3); return (S.tx[m] && S.tx[m].length) ? { items: S.tx[m] } : null;
 }
+
+// ---------- three-way merge, so a phone and a laptop never overwrite each other ----------
+// base[doc] holds the ids that doc had the last time this device synced it. Compared
+// with local and remote, that tells an item added elsewhere (keep it) from one deleted
+// here (drop it) from one deleted elsewhere (drop it too). Where both sides edited the
+// same item, this device's version wins.
+var BASE_KEY = 'ledger-base-v1';
+store.base = (function () { try { return JSON.parse(localStorage.getItem(BASE_KEY) || '{}'); } catch (e) { return {}; } })();
+function saveBase() { try { localStorage.setItem(BASE_KEY, JSON.stringify(store.base)); } catch (e) { } }
+function listOf(doc, body) {
+  if (!body) return [];
+  if (doc.indexOf('tx-') === 0 || doc === 'inbox') return body.items || [];
+  if (doc === 'meta') return [];
+  return body.entries || [];
+}
+function idsOf(doc, body) { return listOf(doc, body).map(function (x) { return x.id; }); }
+function mergeList(local, remote, base) {
+  var L = {}, R = {}, B = {}, out = [];
+  local.forEach(function (x) { L[x.id] = x; });
+  remote.forEach(function (x) { R[x.id] = x; });
+  (base || []).forEach(function (id) { B[id] = 1; });
+  local.forEach(function (x) { if (R[x.id] || !B[x.id]) out.push(x); }); // B && !R: deleted on the other device
+  remote.forEach(function (x) { if (!L[x.id] && !B[x.id]) out.push(x); }); // new on the other device
+  return out;
+}
+function mergeBy(a, b, key) {
+  var seen = {}, out = [];
+  (a || []).concat(b || []).forEach(function (x) { var k = key(x); if (!seen[k]) { seen[k] = 1; out.push(x); } });
+  return out;
+}
+function mergeMeta(local, remote) {
+  if (!remote) return local;
+  var m = JSON.parse(JSON.stringify(local));
+  m.cats = mergeBy(local.cats, remote.cats, function (c) { return c.name; });
+  m.tags = mergeBy(local.tags, remote.tags, function (t) { return t; });
+  m.subs = mergeBy(local.subs, remote.subs, function (x) { return x.id; });
+  m.accounts = mergeBy(local.accounts, remote.accounts, function (x) { return x.name; });
+  m.budgets = mergeBy(local.budgets, remote.budgets, function (x) { return x.key; });
+  m.rules = mergeBy(local.rules, remote.rules, function (x) { return x.match + '>' + x.tag; });
+  m.venues = Object.assign({}, remote.venues || {}, local.venues || {});
+  m.subcats = JSON.parse(JSON.stringify(local.subcats || {}));
+  Object.keys(remote.subcats || {}).forEach(function (c) {
+    m.subcats[c] = mergeBy(m.subcats[c] || [], remote.subcats[c], function (x) { return x; }).sort();
+  });
+  return m;
+}
+// Fold a remote document into local state for one doc id.
+function absorb(doc, remoteBody) {
+  if (doc === 'meta') { S.meta = mergeMeta(S.meta, remoteBody); return; }
+  var local = listOf(doc, bodyFor(doc) || { items: [], entries: [] });
+  var merged = mergeList(local, listOf(doc, remoteBody), store.base[doc]);
+  if (doc.indexOf('tx-') === 0) { var m = doc.slice(3); if (merged.length) S.tx[m] = merged; else delete S.tx[m]; }
+  else if (doc === 'inbox') S.inbox = merged;
+  else S[doc] = merged;
+}
 function saveDirty() { try { localStorage.setItem('ledger-dirty', JSON.stringify(Object.keys(store.dirty))); } catch (e) { } }
 function flush() {
   if (store.mode !== 'cloud' || store.writing) return;
@@ -588,11 +739,15 @@ function flush() {
     var k = keys.shift();
     if (!k) { store.writing = false; saveDirty(); setSync('Synced'); if (Object.keys(store.dirty).length) schedule(); return; }
     delete store.dirty[k];
-    var body = bodyFor(k), t = store.sb.from('ledger_docs');
-    var p = body ? t.upsert({ user_id: store.uid, id: k, body: body, updated_at: new Date().toISOString() }, { onConflict: 'user_id,id' })
-      : t.delete().eq('user_id', store.uid).eq('id', k);
-    p.then(function (r) {
+    var t = store.sb.from('ledger_docs');
+    var p = t.select('body').eq('user_id', store.uid).eq('id', k).maybeSingle().then(function (r) {
       if (r.error) throw r.error;
+      if (r.data && r.data.body) { absorb(k, r.data.body); normalize(); saveLocal(); }
+      var body = bodyFor(k), tb = store.sb.from('ledger_docs');
+      return (body ? tb.upsert({ user_id: store.uid, id: k, body: body, updated_at: new Date().toISOString() }, { onConflict: 'user_id,id' })
+        : tb.delete().eq('user_id', store.uid).eq('id', k)).then(function (w) { if (w.error) throw w.error; store.base[k] = idsOf(k, body); saveBase(); });
+    });
+    p.then(function () {
       store.err = null; next();
     }).catch(function (e) {
       store.dirty[k] = true; store.writing = false; saveDirty();
@@ -648,8 +803,14 @@ function connect() {
       if (res.error) throw res.error;
       try { (JSON.parse(localStorage.getItem('ledger-dirty') || '[]')).forEach(function (k) { store.dirty[k] = true; }); } catch (e) { }
       var hadLocalEdits = Object.keys(store.dirty).length > 0;
-      if (res.data.length && !hadLocalEdits) { S = docsToState(res.data); normalize(); saveLocal(); }
-      else if (!res.data.length && (allTx().length || S.ledger.length)) markAll();
+      if (res.data.length && !hadLocalEdits) {
+        S = docsToState(res.data); normalize(); saveLocal();
+        res.data.forEach(function (d) { store.base[d.id] = idsOf(d.id, d.body); }); saveBase();
+      } else if (res.data.length) {
+        // edits made offline on this device: fold the cloud copy in rather than choosing one side
+        res.data.forEach(function (d) { absorb(d.id, d.body); });
+        normalize(); saveLocal(); markAll();
+      } else if (allTx().length || S.ledger.length) markAll();
       store.mode = 'cloud'; setSync('Synced'); render(); flush();
     });
   }).catch(function (e) {
@@ -662,6 +823,16 @@ function connect() {
       // something is wrong at the other end; retrying forever would just hide it
       store.mode = 'error'; setSync('Sync problem'); render();
     }
+  });
+}
+document.addEventListener('visibilitychange', function () {
+  if (document.visibilityState === 'visible' && store.mode === 'cloud' && !store.writing && !Object.keys(store.dirty).length) pull();
+});
+function pull() {
+  store.sb.from('ledger_docs').select('id,body').then(function (res) {
+    if (res.error || !res.data) return;
+    res.data.forEach(function (d) { absorb(d.id, d.body); store.base[d.id] = idsOf(d.id, d.body); });
+    normalize(); saveLocal(); saveBase(); render();
   });
 }
 window.addEventListener('online', function () { if (store.mode === 'cloud') flush(); else if (store.mode === 'cloud-offline') connect(); });
@@ -803,6 +974,56 @@ function dupeSheet() {
     });
   });
 }
+
+// ---------- data health: finds anything inconsistent, fixes what is safe to fix ----------
+function auditData() {
+  var out = [], txIds = {}, ledIds = {};
+  allTx().forEach(function (t) { txIds[t.id] = t; });
+  S.ledger.forEach(function (e) { ledIds[e.id] = e; });
+  var orphans = S.debts.filter(function (d) { return (d.txId && !txIds[d.txId]) || (d.ledgerId && !ledIds[d.ledgerId]); });
+  if (orphans.length) out.push({ sev: 'fix', key: 'orphan', title: orphans.length + ' balance' + (orphans.length > 1 ? 's point' : ' points') + ' at deleted entries',
+    sub: 'Left behind when a split purchase or investment was deleted. They inflate what people owe.', fix: function () { var o = {}; orphans.forEach(function (d) { o[d.id] = 1; }); S.debts = S.debts.filter(function (d) { return !o[d.id]; }); mark('debts'); } });
+  var badSplit = allTx().filter(function (t) { return t.split && (!t.split.person || !S.debts.some(function (d) { return d.txId === t.id; })) && t.amt > t.split.mine; });
+  if (badSplit.length) out.push({ sev: 'fix', key: 'split', title: badSplit.length + ' split purchase' + (badSplit.length > 1 ? 's are' : ' is') + ' missing the balance owed to you',
+    sub: 'Rebuilds what each person owes from the split itself.', fix: function () { badSplit.forEach(function (t) { syncSplitDebt(t); }); } });
+  var cats = {}; S.meta.cats.forEach(function (c) { cats[c.name] = 1; });
+  var missingCats = {}; allTx().forEach(function (t) { if ((t.t === 'exp' || t.t === 'inc') && t.cat && !cats[t.cat]) missingCats[t.cat] = t.t; });
+  var mc = Object.keys(missingCats);
+  if (mc.length) out.push({ sev: 'fix', key: 'cats', title: mc.length + ' categor' + (mc.length > 1 ? 'ies are' : 'y is') + ' used but not in your list', sub: mc.join(', '),
+    fix: function () { mc.forEach(function (n) { S.meta.cats.push({ name: n, type: missingCats[n], kind: missingCats[n] === 'inc' ? 'other' : undefined }); }); mark('meta'); } });
+  var badBud = S.meta.budgets.filter(function (b) { return b.key.indexOf('cat:') === 0 && !cats[b.key.slice(4)]; });
+  if (badBud.length) out.push({ sev: 'fix', key: 'bud', title: badBud.length + ' budget' + (badBud.length > 1 ? 's' : '') + ' for categories that no longer exist', sub: 'They can never be spent against.',
+    fix: function () { S.meta.budgets = S.meta.budgets.filter(function (b) { return badBud.indexOf(b) < 0; }); mark('meta'); } });
+  var xf = allTx().filter(function (t) { return t.t === 'xfer' && (!t.from || !t.to || t.from === t.to); });
+  if (xf.length) out.push({ sev: 'look', key: 'xfer', title: xf.length + ' transfer' + (xf.length > 1 ? 's are' : ' is') + ' missing an account', sub: 'Open it in Activity and pick both ends.' });
+  var future = allTx().filter(function (t) { return t.d > addDays(today(), 1); });
+  if (future.length) out.push({ sev: 'look', key: 'future', title: future.length + ' transaction' + (future.length > 1 ? 's are' : ' is') + ' dated in the future', sub: future.slice(0, 3).map(function (t) { return (t.note || plain(t.cat)) + ', ' + dayLabel(t.d); }).join('; ') });
+  var over = S.bills.filter(function (b) { return billPaid(b) - billDue(b) > 0.01; });
+  if (over.length) out.push({ sev: 'look', key: 'over', title: over.length + ' PayLater bill' + (over.length > 1 ? 's show' : ' shows') + ' more paid than owed', sub: over.map(function (b) { return periodLabel(b.from); }).join(', ') + '. A purchase may be missing, or a payment is on the wrong bill.' });
+  var dup = doubleCounts();
+  if (dup.length) out.push({ sev: 'look', key: 'dup', title: dup.length + ' repayment' + (dup.length > 1 ? 's look' : ' looks') + ' recorded twice', sub: 'Once as income and once against a balance.', open: 'dupes' });
+  var stale = S.inbox.filter(function (r) { return r.d < addDays(today(), -90); });
+  if (stale.length) out.push({ sev: 'look', key: 'inbox', title: stale.length + ' imported row' + (stale.length > 1 ? 's have' : ' has') + ' waited over 90 days', sub: 'Review or clear them so they stop matching against new imports.', open: 'inbox' });
+  return out;
+}
+function addDays(d, n) { var x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() + n); return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); }
+function healthSheet() {
+  var list = auditData(), fixable = list.filter(function (x) { return x.fix; });
+  var body = !list.length
+    ? '<div class="healthy"><div class="tick" aria-hidden="true"></div><b>Everything is consistent</b><span>' + allTx().length + ' transactions, ' + S.ledger.length + ' investment entries and ' + S.debts.length + ' balance records checked.</span></div>'
+    : '<p style="margin-top:0">' + list.length + ' thing' + (list.length > 1 ? 's' : '') + ' found. ' + (fixable.length ? fixable.length + ' can be fixed safely in one go; the rest need a look from you.' : 'Each needs a look from you.') + '</p>' +
+      '<div class="panel">' + list.map(function (x, i) {
+        return '<div class="row"><span class="av ' + (x.fix ? 'mv' : '') + '">' + (x.fix ? '\u2699' : '!') + '</span><div class="l"><b>' + esc(x.title) + '</b><span style="white-space:normal">' + esc(x.sub || '') + '</span></div>' +
+          (x.fix ? '<button class="chip sm" data-hfix="' + i + '">Fix</button>' : x.open ? '<button class="chip sm" data-act="' + x.open + '">Open</button>' : '') + '</div>';
+      }).join('') + '</div>' +
+      (fixable.length > 1 ? '<div class="actions"><button class="btn" id="hall">Fix all ' + fixable.length + '</button></div>' : '');
+  openSheet('Data health', body, function (el) {
+    el.querySelectorAll('[data-hfix]').forEach(function (b) {
+      b.addEventListener('click', function () { list[+b.dataset.hfix].fix(); normalize(); render(); healthSheet(); toast('Fixed'); });
+    });
+    var all = $('#hall', el); if (all) all.addEventListener('click', function () { fixable.forEach(function (x) { x.fix(); }); normalize(); render(); healthSheet(); toast('Fixed ' + fixable.length); });
+  });
+}
 // ---------- rendering ----------
 var ICON = {
   home: '<span class="ms" aria-hidden="true">donut_large</span>', list: '<span class="ms" aria-hidden="true">receipt_long</span>',
@@ -824,8 +1045,33 @@ function monthSwitch() {
 }
 var SEGS = ['var(--seg1)', 'var(--seg2)', 'var(--seg3)', 'var(--seg4)', 'var(--seg5)'];
 
+// Where this month is heading, from the pace so far. Only meaningful mid-month.
+function paceLine(m, st, avg) {
+  if (m !== monthOf(today())) return '';
+  var day = +today().slice(8, 10), dim = new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
+  if (day < 5 || day >= dim) return '';
+  var proj = st.net / day * dim, usual = avg ? sum(Object.keys(avg).filter(function (k) { return k !== '__n'; }), function (k) { return avg[k]; }) : 0;
+  var pct = Math.min(100, day / dim * 100);
+  return '<div class="pace"><div class="pbar"><i style="width:' + pct + '%"></i></div><span>Day ' + day + ' of ' + dim + '. On pace for <b>' + money(proj, 0) + '</b>' +
+    (usual ? ', against your usual ' + money(usual, 0) : '') + '</span></div>';
+}
+function frequentNotes() {
+  var since = addDays(today(), -60), g = {};
+  allTx().forEach(function (t) {
+    if (t.t !== 'exp' || !t.note || t.d < since || t.split) return;
+    var k = t.note.trim().toLowerCase(), o = g[k] || (g[k] = { n: 0, t: t });
+    o.n++; if (t.d > o.t.d) o.t = t;
+  });
+  return Object.keys(g).map(function (k) { return g[k]; }).filter(function (o) { return o.n > 1; })
+    .sort(function (a, b) { return b.n - a.n; }).slice(0, 6);
+}
 function renderHome() {
   var m = UI.month, st = monthStats(m), avg = priorAvg(m);
+  var freq = m === monthOf(today()) ? frequentNotes() : [];
+  var quick = '';
+  if (freq.length) quick = '<section class="blk quick"><h2>Log again</h2><div class="chips">' + freq.map(function (o, i) {
+    return '<button class="chip qa" data-quick="' + i + '"><span>' + esc(avatar(o.t.cat)) + '</span>' + esc(o.t.note.length > 22 ? o.t.note.slice(0, 21) + '\u2026' : o.t.note) + '<em>' + money(o.t.amt) + '</em></button>';
+  }).join('') + '</div></section>';
   var cats = Object.keys(st.byCat).sort(function (a, b) { return st.byCat[b] - st.byCat[a]; });
   var h = '<header class="top">' + monthSwitch() + '' + hdRight() + '</header>';
   if (!allTx().length && !S.ledger.length) {
@@ -837,7 +1083,7 @@ function renderHome() {
   if (S.inbox.length) h += '<button class="banner" data-act="inbox"><b>' + S.inbox.length + ' statement rows to review</b><span>Tag Alaina rides and add them</span></button>';
   h += '<div class="hero"><div class="lbl">Spent in ' + monthLabel(m, true) + ', after paybacks</div>' +
     '<div class="big"><small>$</small><span data-count="' + Math.round(st.net) + '">' + Math.round(st.net).toLocaleString('en-SG') + '</span></div>' +
-    '<div class="sub">' + money(st.spend, 0) + ' out, ' + money(st.reimb, 0) + ' paid back by friends</div>';
+    '<div class="sub">' + money(st.spend, 0) + ' out, ' + money(st.reimb, 0) + ' paid back by friends</div>' + paceLine(m, st, avg);
   if (cats.length) {
     // tape: Alaina-tagged share drawn as its own hatched segment
     var tape = '', i = 0;
@@ -846,7 +1092,7 @@ function renderHome() {
     if (st.alaina > 0) tape += '<i class="al" style="width:' + (st.alaina / st.spend * 100) + '%" title="Alaina"></i>';
     cats.forEach(function (c, k) { if (rest[c] > 0.005) tape += '<i style="width:' + (rest[c] / st.spend * 100) + '%;background:' + SEGS[Math.min(k, 4)] + '"></i>'; });
     h += '<div class="tape" role="img" aria-label="Spending by category">' + tape + '</div>';
-    h += '</div><div class="panel legend-wrap"><ul class="legend">';
+    h += '</div>' + quick + '<div class="panel legend-wrap"><ul class="legend">';
     if (st.alaina > 0) h += '<li><span class="sw" style="background:var(--rose-soft);--c:var(--rose)"><span class="ms" style="font-size:20px;color:var(--rose);font-variation-settings:\'FILL\' 1">favorite</span></span><span>With Alaina <span class="note" style="display:inline;margin:0">all categories</span></span><span></span><span class="amt" style="color:var(--rose)">' + money(st.alaina, 0) + '</span></li>';
     cats.slice(0, 7).forEach(function (c, k) {
       var d = avg ? st.byCat[c] - (avg[c] || 0) : null, cls = d == null ? 'flat' : d > 5 ? 'up' : d < -5 ? 'down' : 'flat';
@@ -1203,6 +1449,7 @@ function renderMore() {
     '<button class="row" data-act="budgets"><div class="l"><b>Budgets</b><span>' + S.meta.budgets.length + ' set</span></div><div class="r">›</div></button>' +
     '<button class="row" data-act="basis"><div class="l"><b>Investment accounting</b><span>' + (cashBasis() ? 'Cash basis, balances not counted' : 'Balances count as your money') + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="cats"><div class="l"><b>Categories and tags</b><span>' + S.meta.cats.length + ' categories, ' + S.meta.tags.length + ' tags</span></div><div class="r">›</div></button>' +
+    '<button class="row" data-act="health"><div class="l"><b>Data health</b><span>' + (function () { var n = auditData().length; return n ? n + ' thing' + (n > 1 ? 's' : '') + ' to check' : 'Everything is consistent'; })() + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="sync"><div class="l"><b>Sync status</b><span>' +
     (store.mode === 'cloud' ? 'Synced with Supabase' : store.mode === 'error' ? 'Not syncing: ' + esc(store.err || 'unknown problem') : store.mode === 'cloud-offline' ? 'Offline, changes are waiting' : 'Saved in this browser only') +
     '</span></div><div class="r">\u203a</div></button>' +
@@ -1417,7 +1664,7 @@ function txSheet(existing, asNew) {
       rememberSub(t.cat, t.sub); mark('meta'); markMonth(m);
       closeSheet(); render(); toast(existing ? 'Saved' : 'Added');
     });
-    if (existing) $('#del', el).addEventListener('click', function () { if (!confirm('Delete this transaction?')) return; removeTx(existing); closeSheet(); render(); toast('Deleted'); });
+    if (existing) $('#del', el).addEventListener('click', function () { snapshot(); removeTx(existing); closeSheet(); render(); toastUndo('Transaction deleted'); });
   });
 }
 function accountNames() {
@@ -1607,7 +1854,7 @@ function ledgerSheet(opts) {
       mark('debts');
       closeSheet(); render(); toast('Logged');
     });
-    if (opts.entry) $('#del', el).addEventListener('click', function () { if (!confirm('Delete this entry?')) return; S.ledger = S.ledger.filter(function (x) { return x.id !== e.id; }); S.debts = S.debts.filter(function (d) { return d.ledgerId !== e.id; }); mark('debts'); mark('ledger'); closeSheet(); render(); });
+    if (opts.entry) $('#del', el).addEventListener('click', function () { snapshot(); S.ledger = S.ledger.filter(function (x) { return x.id !== e.id; }); S.debts = S.debts.filter(function (d) { return d.ledgerId !== e.id; }); mark('debts'); mark('ledger'); closeSheet(); render(); toastUndo('Entry deleted'); });
   });
 }
 function venueSheet(v) {
@@ -1654,7 +1901,7 @@ function debtSheet(person) {
     }
   }
   if (hist.length) {
-    body += '<label class="f" style="margin-top:20px">History (tap to delete)</label><div class="panel">' + hist.map(function (d) {
+    body += '<label class="f" style="margin-top:20px">History (tap to delete, you can undo)</label><div class="panel">' + hist.map(function (d) {
       var lbl = d.k === 'settle' ? 'Settled up' : d.k === 'part' ? 'Part payment' : d.note || (d.amt > 0 ? 'They owe more' : 'They owe less');
       return '<button class="row" data-dd="' + esc(d.id) + '"><div class="l"><b>' + esc(lbl) + '</b><span>' + dayLabel(d.d) + ', money ' + (d.amt > 0 ? 'out of' : 'in to') + ' your account</span></div>' +
         '<div class="r ' + (d.amt > 0 ? '' : 'pos') + '">' + (d.amt > 0 ? '\u2212' : '+') + money(Math.abs(d.amt)) + '</div></button>';
@@ -1671,7 +1918,7 @@ function debtSheet(person) {
       S.debts.push({ id: uid(), d: $('#dt', el).value || today(), person: p, amt: r2(a * sgn), note: $('#note', el).value.trim(), k: act, src: 'app' }); mark('debts');
       closeSheet(); render(); toast('Saved');
     });
-    el.querySelectorAll('[data-dd]').forEach(function (b) { b.addEventListener('click', function () { if (!confirm('Delete this entry?')) return; S.debts = S.debts.filter(function (d) { return d.id !== b.dataset.dd; }); mark('debts'); closeSheet(); render(); }); });
+    el.querySelectorAll('[data-dd]').forEach(function (b) { b.addEventListener('click', function () { snapshot(); S.debts = S.debts.filter(function (d) { return d.id !== b.dataset.dd; }); mark('debts'); closeSheet(); render(); toastUndo('Entry deleted'); }); });
   });
 }
 
@@ -2930,6 +3177,11 @@ function onClick(e) {
   var b;
   if ((b = t.closest('[data-tab]'))) { UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
+  if ((b = t.closest('[data-quick]'))) {
+    var q = frequentNotes()[+b.dataset.quick];
+    if (q) txSheet({ id: uid(), d: today(), t: 'exp', amt: q.t.amt, cat: q.t.cat, sub: q.t.sub || '', note: q.t.note, tags: (q.t.tags || []).slice(), pm: q.t.pm, src: 'app' }, true);
+    return;
+  }
   if ((b = t.closest('[data-range]'))) { UI.range = +b.dataset.range; render(); return; }
   if ((b = t.closest('[data-filter]'))) { UI.filter = b.dataset.filter; render(); return; }
   if ((b = t.closest('[data-edit-xfer]'))) { var xf = findTx(b.dataset.editXfer); if (xf) xferSheet(xf); return; }
@@ -2954,6 +3206,7 @@ function onClick(e) {
     if (a === 'prev') { UI.month = addMonth(UI.month, -1); render(); }
     else if (a === 'accttab') render();
     else if (a === 'dupes') dupeSheet();
+    else if (a === 'health') healthSheet();
     else if (a === 'next') { UI.month = addMonth(UI.month, 1); render(); }
     else if (a === 'add-tx') txSheet();
     else if (a === 'add-ledger') ledgerSheet();
