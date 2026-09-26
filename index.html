@@ -1022,7 +1022,23 @@ function auditData() {
   var future = allTx().filter(function (t) { return t.d > addDays(today(), 1); });
   if (future.length) out.push({ sev: 'look', key: 'future', title: future.length + ' transaction' + (future.length > 1 ? 's are' : ' is') + ' dated in the future', sub: future.slice(0, 3).map(function (t) { return (t.note || plain(t.cat)) + ', ' + dayLabel(t.d); }).join('; ') });
   var over = S.bills.filter(function (b) { return billPaid(b) - billDue(b) > 0.01; });
-  if (over.length) out.push({ sev: 'look', key: 'over', title: over.length + ' PayLater bill' + (over.length > 1 ? 's show' : ' shows') + ' more paid than owed', sub: over.map(function (b) { return periodLabel(b.from); }).join(', ') + '. A purchase may be missing, or a payment is on the wrong bill.' });
+  if (over.length) out.push({ sev: 'fix', key: 'over', title: over.length + ' PayLater bill' + (over.length > 1 ? 's show' : ' shows') + ' more paid than owed',
+    sub: over.map(function (b) { return billProv(b) + ', ' + periodLabel(b.from) + ': ' + money(r2(billPaid(b) - billDue(b))) + ' extra'; }).join('; ') + '. Usually interest or a fee. Fix records each difference as a charge on that bill.',
+    fix: function () {
+      over.forEach(function (b) {
+        var diff = r2(billPaid(b) - billDue(b)); if (diff <= 0.005) return;
+        var last = (b.payments || []).slice().sort(function (x, y) { return x.d < y.d ? 1 : -1; })[0];
+        var t = { id: uid(), d: last ? last.d : today(), t: 'exp', amt: diff, cat: FEE_CAT(), sub: 'Unexplained charge', note: 'Paid to ' + billProv(b) + ' beyond your purchases', tags: [], src: 'app' };
+        var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
+        b.fee = r2((b.fee || 0) + diff); b.feeTxs = (b.feeTxs || []).concat(t.id);
+      });
+      mark('bills');
+    } });
+  var badPay = [];
+  S.bills.forEach(function (b) { (b.payments || []).forEach(function (p) { if (payDateProblem(p.d, [b])) badPay.push({ b: b, p: p }); }); });
+  if (badPay.length) out.push({ sev: 'look', key: 'paydate', title: badPay.length + ' PayLater payment' + (badPay.length > 1 ? 's have' : ' has') + ' an impossible date',
+    sub: badPay.slice(0, 3).map(function (x) { return billProv(x.b) + ' ' + money(x.p.amt) + ' on ' + dayYear(x.p.d) + ' ' + payDateProblem(x.p.d, [x.b]); }).join('; ') + '. Usually the wrong year. Open it from Activity and fix the date.',
+    open: 'paylater' });
   var dup = doubleCounts();
   if (dup.length) out.push({ sev: 'look', key: 'dup', title: dup.length + ' repayment' + (dup.length > 1 ? 's look' : ' looks') + ' recorded twice', sub: 'Once as income and once against a balance.', open: 'dupes' });
   var stale = S.inbox.filter(function (r) { return r.d < addDays(today(), -90); });
@@ -1202,7 +1218,7 @@ function txRow(t) {
   if (t.split && t.split.mine === 0) sub = 'Bought for ' + t.split.person + ', none of it yours';
   if (t.calc && isSum(t.calc)) { var np = sumParts(t.calc).length; sub = (sub ? sub + ' \u00b7 ' : '') + (np > 1 && !/[*/()]/.test(t.calc) ? np + ' items: ' + sumParts(t.calc).join(' + ') : t.calc); }
   if (t._inst) sub = 'Instalment ' + t._inst + ' of ' + money(t._full) + (sub ? ' \u00b7 ' + sub : '');
-  else if (t.inst && t.inst.n > 1) sub = (sub ? sub + ' \u00b7 ' : '') + t.inst.n + ' instalments of ' + money(r2(t.amt / t.inst.n));
+  else if (t.inst && t.inst.n > 1) sub = (sub ? sub + ' \u00b7 ' : '') + t.inst.n + ' instalments of ' + money(r2((t.amt + (t.inst.fee || 0)) / t.inst.n)) + (t.inst.fee ? ' incl. ' + money(t.inst.fee) + ' interest' : '');
   return '<button class="row" data-edit-tx="' + esc(t.id) + '"><span class="av' + ((t.tags || []).indexOf('Alaina') > -1 ? ' al' : '') + '">' + esc(avatar(t.cat)) + '</span>' +
     '<div class="l"><b>' + esc(title) + tags + '</b>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div>' +
     (t.split && t.split.mine === 0
@@ -1258,7 +1274,7 @@ function movementRows() {
   Object.keys(lumps).forEach(function (k) {
     var L = lumps[k];
     out.push({ d: L.d, kind: 'bill', title: 'Paid ' + L.prov, sub: (L.from ? L.from + ' \u2192 ' + L.prov + '. ' : '') + 'Covers ' + L.bills.join(' and ') + (L.bills.length > 1 ? ' bills' : ' bill') + (L.note && !/payment$/i.test(L.note) ? '. ' + L.note : ''),
-      right: '\u2212' + money(L.amt), av: '\uD83D\uDCB3', attr: 'data-plopen="' + esc(L.prov) + '"', text: 'paylater ' + (L.note || '') });
+      right: '\u2212' + money(L.amt), av: '\uD83D\uDCB3', attr: 'data-lump="' + esc(k) + '"', text: 'paylater ' + (L.note || '') });
   });
   S.bills.forEach(function (b) {
     (b.payments || []).forEach(function (pm) {
@@ -1636,6 +1652,8 @@ function txSheet(existing, asNew) {
     '<div id="instbox"' + (t.pm === 'later' ? '' : ' hidden') + '><label class="f">How it gets paid</label><div class="seg" id="instn">' +
       [1, 3, 4, 6, 12].map(function (n) { return '<button data-in="' + n + '" aria-pressed="' + (((t.inst && t.inst.n) || 1) === n) + '">' + (n === 1 ? 'Next month' : n + ' months') + '</button>'; }).join('') + '</div>' +
       '<div class="seg" id="insts"' + (t.inst && t.inst.n > 1 ? '' : ' hidden') + '><button data-is="0" aria-pressed="' + !(t.inst && t.inst.start) + '">First in this bill</button><button data-is="1" aria-pressed="' + !!(t.inst && t.inst.start) + '">First in next bill</button></div>' +
+      '<div id="instfeebox"' + (t.inst && t.inst.n > 1 ? '' : ' hidden') + '><label class="f" for="instfee">Interest or fee on this plan, in total</label>' +
+      '<input class="t" id="instfee" inputmode="decimal" value="' + (t.inst && t.inst.fee ? t.inst.fee : '') + '" placeholder="0.00 if it is interest-free"></div>' +
       '<p class="note" id="instmsg" style="margin-top:0"></p></div>' +
     '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="What was it?" autocomplete="off">' +
     '<div class="wrap" id="nsug" style="margin-top:7px"></div>' +
@@ -1669,10 +1687,11 @@ function txSheet(existing, asNew) {
     $('#sub', el).addEventListener('input', function () { t.sub = cleanSub(this.value); });
     function drawInst() {
       var n = (t.inst && t.inst.n) || 1, a = calcVal($('#amt', el).value);
-      $('#insts', el).hidden = n < 2;
+      $('#insts', el).hidden = n < 2; $('#instfeebox', el).hidden = n < 2;
+      var fee = calcVal(($('#instfee', el) || {}).value); if (!(fee > 0)) fee = 0;
       el.querySelectorAll('#instn button').forEach(function (x) { x.setAttribute('aria-pressed', +x.dataset.in === n); });
       el.querySelectorAll('#insts button').forEach(function (x) { x.setAttribute('aria-pressed', +x.dataset.is === ((t.inst && t.inst.start) || 0)); });
-      $('#instmsg', el).textContent = n < 2 ? 'Paid in full with the next ' + provOf(t) + ' bill, like a ride.' : (a > 0 ? n + ' monthly instalments of ' + money(r2(a / n)) + '. ' : '') +
+      $('#instmsg', el).textContent = n < 2 ? 'Paid in full with the next ' + provOf(t) + ' bill, like a ride.' : (a > 0 ? n + ' monthly instalments of ' + money(r2((a + fee) / n)) + (fee ? ', including ' + money(fee) + ' interest (' + (fee / a * 100).toFixed(1) + '% on top)' : '') + '. ' : '') +
         'The full amount counts as spending today and is owed to ' + provOf(t) + ' straight away; each bill then asks for one instalment.';
     }
     $('#instn', el).addEventListener('click', function (e) {
@@ -1683,7 +1702,7 @@ function txSheet(existing, asNew) {
     $('#insts', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-is]'); if (!b || !t.inst) return; t.inst.start = +b.dataset.is; drawInst();
     });
-    el.addEventListener('input', function (e) { if (e.target.id === 'amt') drawInst(); });
+    el.addEventListener('input', function (e) { if (e.target.id === 'amt' || e.target.id === 'instfee') drawInst(); });
     drawInst();
     var spWho = t.split ? t.split.person : '';
     function whoList() {
@@ -1756,6 +1775,7 @@ function txSheet(existing, asNew) {
       t.amt = r2(a); t.note = $('#note', el).value.trim(); t.d = $('#dt', el).value || today();
       t.sub = cleanSub($('#sub', el).value);
       var ex = exprOf($('#amt', el)); if (ex) t.calc = ex.replace(/\s+/g, ''); else delete t.calc;
+      if (t.inst && t.inst.n > 1) { var ifee = calcVal($('#instfee', el).value); if (ifee > 0) t.inst.fee = r2(ifee); else delete t.inst.fee; }
       var mineV = parseFloat(($('#mine', el) || {}).value);
       if (!$('#spbox', el).hidden && mineV >= 0 && mineV < t.amt) {
         if (!spWho) { toast('Say who owes you the rest'); return; }
@@ -1763,6 +1783,7 @@ function txSheet(existing, asNew) {
       } else t.split = null;
       if (existing) removeTx(existing);
       syncSplitDebt(t);
+      syncInstFee(t);
       var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t);
       rememberSub(t.cat, t.sub); mark('meta'); markMonth(m);
       closeSheet(); render(); toast(existing ? 'Saved' : 'Added');
@@ -1916,6 +1937,17 @@ function moveSheet() {
   });
 }
 // Keep the People ledger in step with a split: the part you covered is owed to you.
+// Interest on an instalment plan is real spending, so it gets its own Finance fees line,
+// dated with the purchase. It is not billed on its own: the instalments already include it.
+function syncInstFee(t) {
+  allTx().filter(function (x) { return x.feeOf === t.id; }).forEach(function (x) {
+    var m = monthOf(x.d); S.tx[m] = (S.tx[m] || []).filter(function (y) { return y.id !== x.id; }); if (!S.tx[m].length) delete S.tx[m]; markMonth(m);
+  });
+  if (t.pm === 'later' && t.inst && t.inst.fee > 0) {
+    var f = { id: uid(), feeOf: t.id, d: t.d, t: 'exp', amt: t.inst.fee, cat: FEE_CAT(), sub: 'Interest', note: 'Interest on ' + (t.note || plain(t.cat)) + ', ' + provOf(t), tags: [], src: 'app' };
+    var m = monthOf(f.d); (S.tx[m] = S.tx[m] || []).push(f); markMonth(m);
+  }
+}
 function syncSplitDebt(t) {
   S.debts = S.debts.filter(function (d) { return d.txId !== t.id; });
   if (t.split && t.amt > t.split.mine) {
@@ -1924,6 +1956,9 @@ function syncSplitDebt(t) {
   mark('debts');
 }
 function removeTx(t) {
+  if (!t.feeOf) allTx().filter(function (x) { return x.feeOf === t.id; }).forEach(function (x) {
+    var fm = monthOf(x.d); S.tx[fm] = (S.tx[fm] || []).filter(function (y) { return y.id !== x.id; }); if (!S.tx[fm].length) delete S.tx[fm]; markMonth(fm);
+  });
   if (S.debts.some(function (d) { return d.txId === t.id; })) { S.debts = S.debts.filter(function (d) { return d.txId !== t.id; }); mark('debts'); }
   var m = monthOf(t.d), a = S.tx[m] || [];
   for (var i = 0; i < a.length; i++) if (a[i].id === t.id) { a.splice(i, 1); break; }
@@ -2800,9 +2835,9 @@ function periodLabel(from, prov) {
 // You still owe the full amount from day one; each bill only asks for its share.
 function instShares(t, prov) {
   var n = t.inst && t.inst.n > 1 ? t.inst.n : 1, first = periodStart(t.d, prov), off = t.inst && t.inst.start ? 1 : 0;
-  var each = r2(t.amt / n), out = [];
+  var total = r2(t.amt + ((t.inst && t.inst.fee) || 0)), each = r2(total / n), out = [];
   for (var k = 0; k < n; k++) {
-    out.push({ from: addMonth(monthOf(first), k + off) + first.slice(7), amt: k === n - 1 ? r2(t.amt - each * (n - 1)) : each, k: k + 1, n: n });
+    out.push({ from: addMonth(monthOf(first), k + off) + first.slice(7), amt: k === n - 1 ? r2(total - each * (n - 1)) : each, k: k + 1, n: n });
   }
   return out;
 }
@@ -2884,6 +2919,8 @@ function bulkPaySheet(prov) {
     '<label class="f" for="bpf">Paid from</label>' + acctSelect('bpf', UI.plFrom || '', 'Choose an account', true) +
     '<label class="f" for="bpn">Note</label><input class="t" id="bpn" placeholder="optional">' +
     '<label class="f">How it will be applied</label><div class="panel" id="alloc"></div>' +
+    '<div id="overbox" hidden><label class="f">The extra you paid</label><div class="seg" id="overm"><button data-om="fee" aria-pressed="true">It was a fee or interest</button><button data-om="skip" aria-pressed="false">Leave it out</button></div>' +
+    '<p class="note" id="overmsg" style="margin-top:0"></p></div>' +
     '<p class="note">Oldest bill first. This records the money leaving your account; the purchases were already counted on the days you made them.</p>' +
     '<div class="actions"><button class="btn" id="bpgo">Record payment</button></div>';
   openSheet('Pay ' + prov, body, function (el) {
@@ -2901,21 +2938,149 @@ function bulkPaySheet(prov) {
       $('#alloc', el).innerHTML = (p.rows.length ? p.rows.map(function (r) {
         return '<div class="row"><div class="l"><b>' + periodLabel(r.b.from, prov) + '</b><span>' + (billLeft(r.b) - r.amt < 0.005 ? 'Cleared' : money(r2(billLeft(r.b) - r.amt)) + ' left after this') + '</span></div><div class="r">' + money(r.amt) + '</div></div>';
       }).join('') : '<div class="empty" style="padding:14px">Nothing to apply it to.</div>') +
-        (p.over > 0.005 ? '<div class="row"><div class="l"><b>Not needed</b><span>More than you owe, so it stays unrecorded</span></div><div class="r">' + money(p.over) + '</div></div>' : '');
+        (p.over > 0.005 ? '<div class="row"><div class="l"><b>More than your purchases explain</b><span>' + (overMode === 'fee' ? 'Recorded as a fee paid to ' + esc(prov) : 'Left out') + '</span></div><div class="r' + (overMode === 'fee' ? ' neg' : ' mut') + '">' + money(p.over) + '</div></div>' : '');
+      $('#overbox', el).hidden = !(p.over > 0.005);
+      $('#overmsg', el).textContent = overMode === 'fee'
+        ? 'Counts as spending under Finance fees, so you can see what ' + prov + ' has charged you over time. Late charges and card handling fees usually explain it.'
+        : 'Not recorded anywhere. Your balance check will then show this amount as a gap.';
     }
     wireAcct(el, 'bpf');
+    var overMode = 'fee';
+    $('#overm', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-om]'); if (!b) return; overMode = b.dataset.om;
+      el.querySelectorAll('#overm button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); draw();
+    });
     $('#bp', el).addEventListener('input', draw); draw();
     $('#bpgo', el).addEventListener('click', function () {
       var p = plan(), d = $('#bpd', el).value || today(), note = $('#bpn', el).value.trim(), payId = uid(), from = $('#bpf', el).value;
       if (from === '__new') from = '';
       UI.plFrom = from;
-      if (!p.rows.length) { toast('Nothing to pay'); return; }
+      if (!p.rows.length && !(p.over > 0.005 && overMode === 'fee')) { toast('Nothing to pay'); return; }
+      var dp = payDateProblem(d, p.rows.map(function (r) { return r.b; }));
+      if (dp && !confirm('The date ' + dayYear(d) + ' ' + dp + '. Save it anyway?')) return;
       p.rows.forEach(function (r) {
         if (r.b._new) { delete r.b._new; S.bills.push(r.b); }
         r.b.payments = r.b.payments || [];
         r.b.payments.push({ id: uid(), payId: payId, d: d, amt: r.amt, from: from, note: note || prov + ' payment' });
       });
-      mark('bills'); closeSheet(); render(); toast('Recorded ' + money(sum(p.rows, function (r) { return r.amt; })));
+      if (p.over > 0.005 && overMode === 'fee') {
+        // attach the fee to the newest bill it could belong to, so that bill balances exactly
+        var mine = S.bills.filter(function (b) { return billProv(b) === prov; }).sort(function (a, b) { return a.from < b.from ? 1 : -1; });
+        var tb = p.rows.length ? p.rows[p.rows.length - 1].b : mine[0];
+        if (!tb) { tb = { id: uid(), from: periodStart(d, prov), prov: prov, n: 1, fee: 0, first: '', payments: [] }; S.bills.push(tb); }
+        if (tb._new) { delete tb._new; S.bills.push(tb); }
+        var c = '\uD83D\uDCB3 Finance fees'; if (!catObj(c)) { S.meta.cats.push({ name: c, type: 'exp' }); mark('meta'); }
+        var ft = { id: uid(), payId: payId, d: d, t: 'exp', amt: p.over, cat: c, sub: prov, note: 'Charged by ' + prov + ' beyond your purchases', tags: [], src: 'app' };
+        var fm = monthOf(d); (S.tx[fm] = S.tx[fm] || []).push(ft); markMonth(fm);
+        tb.fee = r2((tb.fee || 0) + p.over); tb.feeTxs = (tb.feeTxs || []).concat(ft.id);
+        tb.payments = tb.payments || [];
+        tb.payments.push({ id: uid(), payId: payId, d: d, amt: p.over, from: from, note: 'Fee or interest' });
+      }
+      mark('bills'); closeSheet(); render();
+      toast('Recorded ' + money(sum(p.rows, function (r) { return r.amt; }) + (overMode === 'fee' ? p.over : 0)) + (p.over > 0.005 && overMode === 'fee' ? ', including ' + money(p.over) + ' in fees' : ''));
+    });
+  });
+}
+function FEE_CAT() { var c = '\uD83D\uDCB3 Finance fees'; if (!catObj(c)) { S.meta.cats.push({ name: c, type: 'exp' }); mark('meta'); } return c; }
+function providerCharges(prov) {
+  var out = [], seen = {};
+  S.bills.filter(function (b) { return billProv(b) === prov; }).forEach(function (b) {
+    var ids = (b.feeTxs || []).concat(b.feeTx ? [b.feeTx] : []), got = 0;
+    ids.forEach(function (id) {
+      var t = findTx(id); if (!t || seen[id]) return; seen[id] = 1; got += t.amt;
+      out.push({ d: t.d, amt: t.amt, kind: t.sub && t.sub !== prov ? t.sub : 'Fee', label: t.note || 'Fee', from: b.from });
+    });
+    if ((b.fee || 0) - got > 0.005) out.push({ d: b.first || b.from, amt: r2(b.fee - got), kind: 'Fee', label: 'Fee on the ' + periodLabel(b.from) + ' bill', from: b.from });
+  });
+  allTx().forEach(function (t) {
+    if (t.pm === 'later' && provOf(t) === prov && t.inst && t.inst.fee > 0)
+      out.push({ d: t.d, amt: t.inst.fee, kind: 'Interest', label: 'Interest on ' + (t.note || plain(t.cat)) + ', ' + t.inst.n + ' instalments' });
+  });
+  return out.sort(function (a, b) { return a.d < b.d ? 1 : -1; });
+}
+function provPurchases(prov) { return r2(sum(allTx().filter(function (t) { return t.t === 'exp' && t.pm === 'later' && provOf(t) === prov; }), function (t) { return t.amt; })); }
+// A charge seen on a statement: late fee, interest, processing fee. It is owed on
+// that bill and counts as spending under Finance fees.
+function feeSheet(prov, from) {
+  var ps = periods(prov), kinds = ['Interest', 'Late fee', 'Processing fee', 'Other charge'], kind = 'Interest';
+  // default to the bill for today's period; failing that, the oldest bill still open
+  var nowP = periodStart(today(), prov), open = openBills(prov).map(function (b) { return b.from; });
+  from = from || (ps.indexOf(nowP) > -1 ? nowP : open[0] || ps[ps.length - 1] || nowP);
+  if (ps.indexOf(from) < 0) ps = [from].concat(ps);
+  var body = calcField('famt', '') +
+    '<label class="f">What it was</label><div class="wrap" id="fk">' + kinds.map(function (k) { return '<button class="chip" data-fk="' + k + '" aria-pressed="' + (k === kind) + '">' + k + '</button>'; }).join('') + '</div>' +
+    '<label class="f" for="fbill">On which bill</label><select class="t" id="fbill">' + (ps.length ? ps : [from]).map(function (f) { return '<option value="' + f + '"' + (f === from ? ' selected' : '') + '>' + periodLabel(f, prov) + '</option>'; }).join('') + '</select>' +
+    '<label class="f" for="fd">Date charged</label><input class="t" type="date" id="fd" value="' + today() + '">' +
+    '<label class="f" for="fn">Note</label><input class="t" id="fn" placeholder="optional, e.g. 1.5% monthly interest">' +
+    '<p class="note">Adds to what you owe on that bill and counts as spending under Finance fees, so it shows up in what ' + esc(prov) + ' has cost you.</p>' +
+    '<div class="actions"><button class="btn" id="fgo">Add charge</button></div>';
+  openSheet('Add a fee or interest', body, function (el) {
+    wireCalc(el, 'famt');
+    $('#fk', el).addEventListener('click', function (e) { var b = e.target.closest('[data-fk]'); if (!b) return; kind = b.dataset.fk; el.querySelectorAll('#fk .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
+    $('#fgo', el).addEventListener('click', function () {
+      var a = calcVal($('#famt', el).value); if (!(a > 0)) { toast('Enter an amount'); return; }
+      var f = $('#fbill', el).value, d = $('#fd', el).value || today();
+      var b = billFor(f, prov); if (!b) { b = { id: uid(), from: f, prov: prov, n: 1, fee: 0, first: '', payments: [] }; S.bills.push(b); }
+      var t = { id: uid(), d: d, t: 'exp', amt: r2(a), cat: FEE_CAT(), sub: kind, note: ($('#fn', el).value.trim() || kind + ', ' + prov), tags: [], src: 'app' };
+      var m = monthOf(d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
+      b.fee = r2((b.fee || 0) + t.amt); b.feeTxs = (b.feeTxs || []).concat(t.id);
+      mark('bills'); closeSheet(); render(); payLaterSheet(prov); toast(kind + ' of ' + money(t.amt) + ' added');
+    });
+  });
+}
+function provFees(prov) { return r2(sum(S.bills.filter(function (b) { return billProv(b) === prov; }), function (b) { return b.fee || 0; })); }
+function costSection(prov) {
+  var ch = providerCharges(prov), tot = r2(sum(ch, function (c) { return c.amt; })), bought = provPurchases(prov);
+  var h = '<label class="f">What ' + esc(prov) + ' has cost you</label><div class="panel cost">';
+  h += '<div class="kv" style="margin:10px 0"><span>Bought on it</span><span>' + money(bought) + '</span>' +
+    '<span>Fees and interest on top</span><span class="' + (tot > 0 ? 'neg' : '') + '">' + money(tot) + '</span>' +
+    (bought > 0 && tot > 0 ? '<span>Extra cost</span><span class="neg">' + (tot / bought * 100).toFixed(1) + '% of what you bought</span>' : '') + '</div>';
+  if (ch.length) {
+    h += '<details class="fold"' + (UI.folds['cost' + prov] ? ' open' : '') + ' data-fold="cost' + esc(prov) + '"><summary>' + ch.length + ' charge' + (ch.length === 1 ? '' : 's') + '</summary>' +
+      ch.map(function (c) { return '<div class="row"><div class="l"><b>' + esc(c.kind) + '</b><span>' + dayLabel(c.d) + ', ' + esc(c.label) + '</span></div><div class="r neg">' + money(c.amt) + '</div></div>'; }).join('') + '</details>';
+  } else h += '<div class="note" style="padding:0 0 10px">No fees or interest recorded yet.</div>';
+  return h + '<div class="actions" style="margin:6px 0 12px"><button class="btn sm ghost" id="addfee">Add a fee or interest</button></div></div>';
+}
+function lumpParts(payId) {
+  var parts = [];
+  S.bills.forEach(function (b) { (b.payments || []).forEach(function (p) { if (p.payId === payId) parts.push({ b: b, p: p }); }); });
+  return parts;
+}
+// A date that cannot be right: after today, or before the bill period it pays for.
+function dayYear(d) { return dayLabel(d) + ' ' + d.slice(0, 4); }
+function payDateProblem(d, bills) {
+  if (d > addDays(today(), 1)) return 'is in the future';
+  var early = bills.filter(function (b) { return d < b.from; });
+  if (early.length) return 'is before the ' + periodLabel(early[0].from, billProv(early[0])) + ' bill it pays for even started';
+  return '';
+}
+function lumpSheet(payId) {
+  var parts = lumpParts(payId); if (!parts.length) return;
+  var p0 = parts[0].p, prov = billProv(parts[0].b), tot = r2(sum(parts, function (x) { return x.p.amt; }));
+  var fee = allTx().filter(function (t) { return t.payId === payId; })[0];
+  var body = '<div class="kv" style="margin-top:0"><span>Amount</span><span>' + money(tot) + '</span><span>Paid to</span><span>' + esc(prov) + '</span>' +
+    '<span>Covers</span><span>' + parts.map(function (x) { return periodLabel(x.b.from, prov); }).join(', ') + '</span></div>' +
+    '<label class="f" for="ld">Date paid</label><input class="t" type="date" id="ld" value="' + p0.d + '">' +
+    '<p class="warn" id="lwarn"></p>' +
+    '<label class="f" for="lf">Paid from</label>' + acctSelect('lf', p0.from || '', 'Choose an account', true) +
+    '<label class="f" for="ln">Note</label><input class="t" id="ln" value="' + esc(p0.note || '') + '">' +
+    '<p class="note">Changing the date only moves where this shows in your history. The amount stays applied to the same bills' + (fee ? ', and the ' + money(fee.amt) + ' fee recorded with it moves too' : '') + '.</p>' +
+    '<div class="actions"><button class="btn danger" id="ldel">Delete</button><button class="btn" id="lsave">Save</button></div>';
+  openSheet('Payment to ' + prov, body, function (el) {
+    wireAcct(el, 'lf');
+    function check() { var pr = payDateProblem($('#ld', el).value, parts.map(function (x) { return x.b; })); $('#lwarn', el).textContent = pr ? 'This date ' + pr + '. Check the year.' : ''; }
+    $('#ld', el).addEventListener('input', check); check();
+    $('#lsave', el).addEventListener('click', function () {
+      var d = $('#ld', el).value || p0.d, f = $('#lf', el).value; if (f === '__new') f = '';
+      parts.forEach(function (x) { x.p.d = d; x.p.from = f; x.p.note = $('#ln', el).value.trim() || x.p.note; });
+      if (fee && fee.d !== d) { removeTx(fee); fee.d = d; var m = monthOf(d); (S.tx[m] = S.tx[m] || []).push(fee); markMonth(m); }
+      mark('bills'); closeSheet(); render(); toast('Payment updated');
+    });
+    $('#ldel', el).addEventListener('click', function () {
+      snapshot();
+      parts.forEach(function (x) { x.b.payments = x.b.payments.filter(function (q) { return q.payId !== payId; }); });
+      if (fee) { parts.forEach(function (x) { x.b.fee = r2(Math.max(0, (x.b.fee || 0) - fee.amt)); x.b.feeTxs = (x.b.feeTxs || []).filter(function (id) { return id !== fee.id; }); }); removeTx(fee); }
+      mark('bills'); closeSheet(); render(); toastUndo('Payment deleted');
     });
   });
 }
@@ -2930,8 +3095,9 @@ function payLaterSheet(prov) {
     }).join('') + '<button data-prov="__new" aria-pressed="false">+ Add</button></div>' +
     '<div class="kv"><span>Outstanding on ' + esc(prov) + '</span><span>' + money(owed) + '</span>' +
     '<span>Next payment</span><span>' + (nx ? money(nx.amt) + ' on ' + dayLabel(nx.d) : 'Nothing scheduled') + '</span>' +
-    (provs.length > 1 ? '<span>All providers together</span><span>' + money(laterOwed()) + '</span>' : '') + '</div>' +
-    (owed > 0 ? '<div class="actions" style="margin:10px 0 4px"><button class="btn" id="paynow">Record a payment</button></div>' : '');
+    (provs.length > 1 ? '<span>All providers together</span><span>' + money(laterOwed()) + '</span>' : '') +
+'</div>' + costSection(prov) +
+    '<div class="actions" style="margin:10px 0 4px"><button class="btn' + (owed > 0 ? '' : ' ghost') + '" id="paynow">' + (owed > 0 ? 'Record a payment' : 'Record a payment or fee') + '</button></div>';
   if (up.some(function (u) { return u.amt > 0; })) {
     body += '<label class="f">Committed over the next 6 months</label><div class="panel">' + up.map(function (u) {
       return '<div class="row"><div class="l"><b>' + monthLabel(u.m) + '</b></div><div class="r">' + (u.amt ? money(u.amt) : '\u2013') + '</div></div>';
@@ -2960,6 +3126,8 @@ function payLaterSheet(prov) {
     });
     el.querySelectorAll('[data-bill]').forEach(function (btn) { btn.addEventListener('click', function () { billSheet(btn.dataset.bill, prov); }); });
     var pn = $('#paynow', el); if (pn) pn.addEventListener('click', function () { bulkPaySheet(prov); });
+    var af = $('#addfee', el); if (af) af.addEventListener('click', function () { feeSheet(prov); });
+    el.querySelectorAll('[data-fold]').forEach(function (d) { d.addEventListener('toggle', function () { UI.folds[d.dataset.fold] = d.open; }); });
     $('#cyc', el).addEventListener('change', function () {
       var v = parseInt(this.value, 10); if (!(v >= 1 && v <= 28)) { this.value = cycleDay(prov); return; }
       S.meta.plProviders = S.meta.plProviders || [];
@@ -3018,6 +3186,7 @@ function billSheet(from, prov) {
       });
       $('#delb', el).addEventListener('click', function () {
         if (!confirm('Delete this bill and its payment records? The purchases themselves stay.')) return;
+        (b.feeTxs || []).concat(b.feeTx ? [b.feeTx] : []).forEach(function (id) { var ft = findTx(id); if (ft) removeTx(ft); });
         S.bills = S.bills.filter(function (x) { return x.id !== b.id; }); save(); closeSheet(); payLaterSheet(prov);
       });
       $('#addp', el).addEventListener('click', function () { paymentSheet(b, null, draw); });
@@ -3058,6 +3227,7 @@ function paymentSheet(b, p, after) {
       var a = parseFloat($('#pa', el).value);
       if (!(a > 0)) { toast('Enter an amount'); return; }
       p.amt = r2(a); p.d = $('#pd', el).value || today(); p.note = $('#pnote', el).value.trim();
+      var dp2 = payDateProblem(p.d, [b]); if (dp2 && !confirm('The date ' + dayYear(p.d) + ' ' + dp2 + '. Save it anyway?')) return;
       p.from = $('#pfrom', el).value === '__new' ? '' : $('#pfrom', el).value; UI.plFrom = p.from;
       b.payments = (b.payments || []).filter(function (x) { return x.id !== p.id; }); b.payments.push(p);
       mark('bills'); render(); closeSheet(); if (after) after(); toast('Payment recorded');
@@ -3504,6 +3674,7 @@ function onClick(e) {
   if ((b = t.closest('[data-tab][data-acct]'))) { UI.acct = b.dataset.acct; }
   if ((b = t.closest('[data-tab]'))) { UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
+  if ((b = t.closest('[data-lump]'))) { lumpSheet(b.dataset.lump); return; }
   if ((b = t.closest('[data-plopen]'))) { payLaterSheet(b.dataset.plopen); return; }
   if ((b = t.closest('[data-quick]'))) {
     var q = frequentNotes()[+b.dataset.quick];
