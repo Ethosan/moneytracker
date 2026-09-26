@@ -1145,7 +1145,7 @@ function renderHome() {
   var plTx = (S.tx[m] || []).filter(function (t) { return t.t === 'exp' && t.pm === 'later'; });
   var plOwed = laterOwed(), plNext = nextPayment(), plMonth = r2(sum(plTx, function (t) { return t.amt; }));
   if (plOwed > 0 || plMonth > 0) {
-    h += '<section class="blk"><h2>PayLater <button data-act="paylater">Open</button></h2><div class="panel">' +
+    h += '<section class="blk"><h2>PayLater <button data-tab="pnl" data-acct="later">All providers</button></h2><div class="panel">' +
       '<div class="row"><div class="l"><b>Charged to PayLater in ' + monthLabel(m, true) + '</b><span>' + plTx.length + ' purchases, already counted as spending</span></div><div class="r">' + money(plMonth) + '</div></div>' +
       providers().filter(function (p) { return laterOwed(p.name) > 0.005; }).map(function (p) {
         var nx = nextPayment(p.name);
@@ -1229,19 +1229,19 @@ function movementRows() {
     (b.payments || []).forEach(function (pm) {
       if (!pm.payId) return;
       var L = lumps[pm.payId] = lumps[pm.payId] || { d: pm.d, amt: 0, note: pm.note, bills: [] };
-      L.amt = r2(L.amt + pm.amt); L.d = pm.d; L.prov = billProv(b); L.bills.push(periodLabel(b.from));
+      L.amt = r2(L.amt + pm.amt); L.d = pm.d; L.prov = billProv(b); L.from = pm.from || L.from; L.bills.push(periodLabel(b.from));
     });
   });
   Object.keys(lumps).forEach(function (k) {
     var L = lumps[k];
-    out.push({ d: L.d, kind: 'bill', title: L.note || L.prov + ' payment', sub: L.prov + ', covers ' + L.bills.join(' and ') + (L.bills.length > 1 ? ' bills' : ' bill'),
-      right: '\u2212' + money(L.amt), av: '\uD83D\uDCB3', attr: 'data-act="paylater"', text: 'paylater ' + (L.note || '') });
+    out.push({ d: L.d, kind: 'bill', title: 'Paid ' + L.prov, sub: (L.from ? L.from + ' \u2192 ' + L.prov + '. ' : '') + 'Covers ' + L.bills.join(' and ') + (L.bills.length > 1 ? ' bills' : ' bill') + (L.note && !/payment$/i.test(L.note) ? '. ' + L.note : ''),
+      right: '\u2212' + money(L.amt), av: '\uD83D\uDCB3', attr: 'data-plopen="' + esc(L.prov) + '"', text: 'paylater ' + (L.note || '') });
   });
   S.bills.forEach(function (b) {
     (b.payments || []).forEach(function (pm) {
       if (pm.payId) return;
-      out.push({ d: pm.d, kind: 'bill', title: billProv(b) + ' payment', sub: (pm.note || periodLabel(b.from) + ' bill'), right: money(pm.amt), av: '\u2713',
-        attr: 'data-act="paylater"', text: 'paylater ' + (pm.note || '') });
+      out.push({ d: pm.d, kind: 'bill', title: 'Paid ' + billProv(b), sub: (pm.from ? pm.from + ' \u2192 ' + billProv(b) + '. ' : '') + (pm.note || periodLabel(b.from) + ' bill'), right: money(pm.amt), av: '\u2713',
+        attr: 'data-plopen="' + esc(billProv(b)) + '"', text: 'paylater ' + billProv(b) + ' ' + (pm.note || '') });
     });
   });
   return out;
@@ -1685,8 +1685,9 @@ function accountNames() {
   S.ledger.forEach(function (e) { if (e.acct && ns.indexOf(e.acct) < 0) ns.push(e.acct); });
   return ns;
 }
-function acctSelect(id, chosen, blank) {
+function acctSelect(id, chosen, blank, spendable) {
   var ns = accountNames();
+  if (spendable) ns = ns.filter(function (n) { var a = S.meta.accounts.filter(function (x) { return x.name === n; })[0]; return !(a && a.liability); });
   return '<select class="t" id="' + id + '"><option value="">' + esc(blank || 'Not tracked') + '</option>' +
     ns.map(function (n) { return '<option' + (n === chosen ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') +
     '<option value="__new">New account\u2026</option></select>';
@@ -1739,14 +1740,17 @@ function moveSheet() {
     '<button class="row" data-mv="inv"><div class="l"><b>To or from an investment account</b><span>Broker, crypto, prop firm or poker</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-mv="own"><div class="l"><b>Between my own accounts</b><span>Bank to cash, wallet top-up, recorded with both ends</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-mv="ppl"><div class="l"><b>Someone gave me money, or I gave them some</b><span>Loans, shared costs, money you hold for someone</span></div><div class="r">\u203a</div></button>' +
-    '<button class="row" data-mv="bill"><div class="l"><b>Paying a PayLater bill</b><span>Goes against the bill, never counted as spending</span></div><div class="r">\u203a</div></button></div>';
+    providers().map(function (p) {
+      var o = laterOwed(p.name);
+      return '<button class="row" data-mv="bill" data-mvp="' + esc(p.name) + '"><div class="l"><b>Pay ' + esc(p.name) + '</b><span>' + (o > 0 ? money(o) + ' owed. Goes against its bills, never counted as spending' : 'Nothing owed right now') + '</span></div><div class="r">\u203a</div></button>';
+    }).join('') + '</div>';
   openSheet('Move money', body, function (el) {
     el.querySelectorAll('[data-mv]').forEach(function (b) {
       b.addEventListener('click', function () {
         var k = b.dataset.mv;
         if (k === 'inv') ledgerSheet();
         else if (k === 'ppl') debtSheet();
-        else if (k === 'bill') payLaterSheet();
+        else if (k === 'bill') bulkPaySheet(b.dataset.mvp);
         else xferSheet();
       });
     });
@@ -2635,7 +2639,8 @@ function bulkPaySheet(prov) {
   var body = '<div class="kv" style="margin-top:0"><span>Outstanding across ' + bills.length + ' bill' + (bills.length === 1 ? '' : 's') + '</span><span>' + money(owed) + '</span></div>' +
     '<div class="amt-in"><span>$</span><input id="bp" inputmode="decimal" value="' + (owed || '') + '" aria-label="Amount paid"></div>' +
     '<label class="f" for="bpd">Date paid</label><input class="t" type="date" id="bpd" value="' + today() + '">' +
-    '<label class="f" for="bpn">Note</label><input class="t" id="bpn" placeholder="e.g. paid from DBS">' +
+    '<label class="f" for="bpf">Paid from</label>' + acctSelect('bpf', UI.plFrom || '', 'Choose an account', true) +
+    '<label class="f" for="bpn">Note</label><input class="t" id="bpn" placeholder="optional">' +
     '<label class="f">How it will be applied</label><div class="panel" id="alloc"></div>' +
     '<p class="note">Oldest bill first. This records the money leaving your account; the purchases were already counted on the days you made them.</p>' +
     '<div class="actions"><button class="btn" id="bpgo">Record payment</button></div>';
@@ -2656,14 +2661,17 @@ function bulkPaySheet(prov) {
       }).join('') : '<div class="empty" style="padding:14px">Nothing to apply it to.</div>') +
         (p.over > 0.005 ? '<div class="row"><div class="l"><b>Not needed</b><span>More than you owe, so it stays unrecorded</span></div><div class="r">' + money(p.over) + '</div></div>' : '');
     }
+    wireAcct(el, 'bpf');
     $('#bp', el).addEventListener('input', draw); draw();
     $('#bpgo', el).addEventListener('click', function () {
-      var p = plan(), d = $('#bpd', el).value || today(), note = $('#bpn', el).value.trim(), payId = uid();
+      var p = plan(), d = $('#bpd', el).value || today(), note = $('#bpn', el).value.trim(), payId = uid(), from = $('#bpf', el).value;
+      if (from === '__new') from = '';
+      UI.plFrom = from;
       if (!p.rows.length) { toast('Nothing to pay'); return; }
       p.rows.forEach(function (r) {
         if (r.b._new) { delete r.b._new; S.bills.push(r.b); }
         r.b.payments = r.b.payments || [];
-        r.b.payments.push({ id: uid(), payId: payId, d: d, amt: r.amt, note: note || prov + ' payment' });
+        r.b.payments.push({ id: uid(), payId: payId, d: d, amt: r.amt, from: from, note: note || prov + ' payment' });
       });
       mark('bills'); closeSheet(); render(); toast('Recorded ' + money(sum(p.rows, function (r) { return r.amt; })));
     });
@@ -2696,7 +2704,7 @@ function payLaterSheet(prov) {
   });
   body += '</div><label class="f" for="cyc">' + esc(prov) + ' statement period starts on day</label><input class="t" id="cyc" inputmode="numeric" value="' + cycleDay(prov) + '">' +
     '<p class="note">Each provider bills its own period, so purchases fall into the right bill. Purchases count as spending on the day you make them; paying a bill is never counted again.</p>';
-  openSheet('PayLater', body, function (el) {
+  openSheet(prov, body, function (el) {
     $('#plsel', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-prov]'); if (!b) return;
       if (b.dataset.prov === '__new') {
@@ -2798,14 +2806,17 @@ function paymentSheet(b, p, after) {
   p = p ? Object.assign({}, p) : { id: uid(), d: today(), amt: nx ? r2(nx.amt - nx.part) : billLeft(b), note: '' };
   var body = '<div class="amt-in"><span>$</span><input id="pa" inputmode="decimal" value="' + (p.amt || '') + '" aria-label="Amount paid"></div>' +
     '<label class="f" for="pd">Date paid</label><input class="t" type="date" id="pd" value="' + p.d + '">' +
-    '<label class="f" for="pnote">Note</label><input class="t" id="pnote" value="' + esc(p.note) + '" placeholder="e.g. paid from DBS, auto-deducted">' +
+    '<label class="f" for="pfrom">Paid from</label>' + acctSelect('pfrom', p.from || UI.plFrom || '', 'Choose an account', true) +
+    '<label class="f" for="pnote">Note</label><input class="t" id="pnote" value="' + esc(p.note) + '" placeholder="e.g. auto-deducted">' +
     '<p class="note">This records the money leaving your account. It is not counted as new spending, because the purchases were counted on the days you made them.</p>' +
     '<div class="actions">' + (isNew ? '' : '<button class="btn danger" id="pdel">Delete</button>') + '<button class="btn" id="psave">' + (isNew ? 'Record payment' : 'Save') + '</button></div>';
   openSheet(isNew ? 'Record a payment' : 'Edit payment', body, function (el) {
+    wireAcct(el, 'pfrom');
     $('#psave', el).addEventListener('click', function () {
       var a = parseFloat($('#pa', el).value);
       if (!(a > 0)) { toast('Enter an amount'); return; }
       p.amt = r2(a); p.d = $('#pd', el).value || today(); p.note = $('#pnote', el).value.trim();
+      p.from = $('#pfrom', el).value === '__new' ? '' : $('#pfrom', el).value; UI.plFrom = p.from;
       b.payments = (b.payments || []).filter(function (x) { return x.id !== p.id; }); b.payments.push(p);
       mark('bills'); render(); closeSheet(); if (after) after(); toast('Payment recorded');
     });
@@ -3248,6 +3259,7 @@ function onClick(e) {
   var t = e.target;
   if (t.closest('[data-close]')) { closeSheet(); return; }
   var b;
+  if ((b = t.closest('[data-tab][data-acct]'))) { UI.acct = b.dataset.acct; }
   if ((b = t.closest('[data-tab]'))) { UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-plopen]'))) { payLaterSheet(b.dataset.plopen); return; }
