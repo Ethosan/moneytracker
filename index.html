@@ -421,6 +421,13 @@ label.f{margin:16px 2px 8px}
 .pill{display:inline-flex;align-items:center;gap:0}
 .chip em.cnt{font-style:normal;font-size:12px;color:var(--muted);margin-left:4px}
 .chip[aria-pressed="true"] em.cnt{color:inherit;opacity:.75}
+.icon.sm{width:40px;height:40px}
+.icon.sm .ms{font-size:21px}
+.row.hist.undone b,.row.hist.undone span{text-decoration:line-through;opacity:.55}
+.row.hist.sys b{color:var(--muted);font-weight:500}
+#instn{flex-wrap:wrap}
+.btn[disabled]{opacity:.38;pointer-events:none;box-shadow:none}
+.row.hist .l span{white-space:normal}
 </style>
 </head>
 <body>
@@ -593,17 +600,120 @@ var MN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 
 function monthLabel(m, short) { var i = +m.slice(5, 7) - 1; return short ? MN[i] : ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][i] + ' ' + m.slice(0, 4); }
 function dayLabel(d) { var dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short' }); }
 function sum(a, f) { var s = 0; for (var i = 0; i < a.length; i++) s += f ? f(a[i]) : a[i]; return s; }
-var undoSnap = null;
-function snapshot() { undoSnap = JSON.stringify(S); }
-function toastUndo(msg) {
-  var t = $('#toast'); t.innerHTML = esc(msg) + ' <button id="undo" class="undo">Undo</button>'; t.classList.add('on', 'act');
-  $('#undo').onclick = function () {
-    if (!undoSnap) return; S = JSON.parse(undoSnap); undoSnap = null; normalize(); markAll(); render();
-    t.classList.remove('on', 'act'); toast('Restored');
-  };
-  clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on', 'act'); undoSnap = null; }, 5000);
+// Every change is recorded as one history entry holding the previous version of just the
+// parts that changed (a month of transactions, People, PayLater...). Undo steps back
+// through them in order; undoing is itself recorded, so it can be redone.
+var HIST = { shadow: {}, list: [], label: '', timer: null, KEY: 'ledger-hist-v1', MAX: 40 };
+try { HIST.list = JSON.parse(localStorage.getItem(HIST.KEY) || '[]'); } catch (e) { HIST.list = []; }
+function histDocs() {
+  var d = ['meta', 'ledger', 'debts', 'bills', 'checks', 'inbox'], seen = {};
+  Object.keys(S.tx).forEach(function (m) { d.push('tx-' + m); });
+  Object.keys(HIST.shadow).forEach(function (k) { if (k.indexOf('tx-') === 0) d.push(k); });
+  return d.filter(function (k) { if (seen[k]) return false; seen[k] = 1; return true; });
 }
-function toast(msg) { $('#toast').classList.remove('act'); var t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on'); }, 1800); }
+function histSnap() { HIST.shadow = {}; histDocs().forEach(function (d) { HIST.shadow[d] = JSON.stringify(bodyFor(d)); }); }
+function histSave() {
+  while (HIST.list.length > HIST.MAX) HIST.list.pop();
+  for (var i = 0; i < 4; i++) {
+    try { localStorage.setItem(HIST.KEY, JSON.stringify(HIST.list)); return; }
+    catch (e) { HIST.list = HIST.list.slice(0, Math.max(5, Math.floor(HIST.list.length / 2))); }
+  }
+}
+var DOC_NAME = { meta: 'Settings', ledger: 'Investments', debts: 'People', bills: 'PayLater', checks: 'Balance counts', inbox: 'Imports' };
+function docName(d) { return DOC_NAME[d] || (d.indexOf('tx-') === 0 ? monthLabel(d.slice(3)) : d); }
+function histDescribe(changed) {
+  var parts = [];
+  Object.keys(changed).forEach(function (d) {
+    if (d.indexOf('tx-') !== 0) { parts.push(docName(d)); return; }
+    var was = JSON.parse(changed[d] || 'null'), now = bodyFor(d);
+    var a = {}, b = {}; ((was && was.items) || []).forEach(function (t) { a[t.id] = JSON.stringify(t); });
+    ((now && now.items) || []).forEach(function (t) { b[t.id] = JSON.stringify(t); });
+    var add = 0, del = 0, ed = 0;
+    Object.keys(b).forEach(function (id) { if (!a[id]) add++; else if (a[id] !== b[id]) ed++; });
+    Object.keys(a).forEach(function (id) { if (!b[id]) del++; });
+    var bits = []; if (add) bits.push(add + ' added'); if (ed) bits.push(ed + ' edited'); if (del) bits.push(del + ' deleted');
+    // a single entry changed: name it, which is far easier to recognise later
+    if (add + ed + del === 1) {
+      var id = Object.keys(b).filter(function (k) { return !a[k] || a[k] !== b[k]; })[0] || Object.keys(a).filter(function (k) { return !b[k]; })[0];
+      var it = JSON.parse(b[id] || a[id]);
+      parts.push((it.note || plain(it.cat) || 'Entry') + ' ' + money(it.amt) + ' ' + (add ? 'added' : ed ? 'edited' : 'deleted'));
+      return;
+    }
+    parts.push(docName(d) + (bits.length ? ': ' + bits.join(', ') : ''));
+  });
+  return parts.join(' \u00b7 ');
+}
+function histCommit() {
+  HIST.timer = null;
+  var changed = {}, n = 0;
+  histDocs().forEach(function (d) {
+    var now = JSON.stringify(bodyFor(d)), was = HIST.shadow[d] === undefined ? 'null' : HIST.shadow[d];
+    if (now !== was) { changed[d] = was; n++; }
+  });
+  if (!n) { HIST.label = ''; HIST.pending = null; return; }
+  var what = histDescribe(changed);
+  Object.keys(changed).forEach(function (d) { HIST.shadow[d] = JSON.stringify(bodyFor(d)); });
+  var fresh = HIST.label && (HIST.pending || Date.now() - (HIST.labelT || 0) < 2000);
+  var e = { id: uid(), t: Date.now(), label: fresh ? HIST.label : 'Edited', what: what, docs: changed };
+  if (HIST.pending) { e.kind = HIST.pending.kind; e.of = HIST.pending.of; }
+  HIST.list.unshift(e); HIST.label = ''; HIST.pending = null;
+  histSave();
+}
+function histTouch() { if (HIST.ready) { clearTimeout(HIST.timer); HIST.timer = setTimeout(histCommit, 0); } }
+function setBody(d, body) {
+  if (d === 'meta') { if (body) S.meta = body; }
+  else if (d.indexOf('tx-') === 0) { var m = d.slice(3); if (body && body.items && body.items.length) S.tx[m] = body.items; else delete S.tx[m]; }
+  else if (d === 'inbox') S.inbox = body ? body.items || [] : [];
+  else S[d] = body ? body.entries || [] : [];
+  mark(d);
+}
+function histApply(e, kind) {
+  if (HIST.timer) histCommit(); // settle anything in flight first
+  HIST.pending = { kind: kind, of: e.id };
+  HIST.label = (kind === 'redo' ? 'Redo: ' : 'Undo: ') + e.label.replace(/^(Undo|Redo): /, '');
+  Object.keys(e.docs).forEach(function (d) { setBody(d, JSON.parse(e.docs[d])); });
+  e.undone = kind !== 'redo';
+  if (kind === 'redo') { var orig = HIST.list.filter(function (x) { return x.id === e.of; })[0]; if (orig) orig.undone = false; }
+  normalize(); histCommit(); render();
+}
+// the newest change that has not been undone (skipping the undo records themselves)
+function histLast() { return HIST.list.filter(function (e) { return !e.undone && e.kind !== 'undo' && e.kind !== 'redo'; })[0] || null; }
+function histRedoable() { var top = HIST.list[0]; return top && top.kind === 'undo' && !top.undone ? top : null; }
+function undoLast() { var e = histLast(); if (!e) { toast('Nothing to undo'); return; } histApply(e, 'undo'); toast('Undid: ' + e.label); }
+function redoLast() { var u = histRedoable(); if (!u) { toast('Nothing to redo'); return; } histApply(u, 'redo'); toast('Redone'); }
+function snapshot() { /* kept for older call sites: history records every change automatically */ }
+function agoLabel(t) {
+  var s = Math.round((Date.now() - t) / 1000);
+  return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : dayLabel(new Date(t).toISOString().slice(0, 10));
+}
+function historySheet() {
+  var list = HIST.list, last = histLast(), redo = histRedoable();
+  var body = '<div class="actions" style="margin-top:0"><button class="btn ghost" id="hredo"' + (redo ? '' : ' disabled') + '>Redo</button><button class="btn" id="hundo"' + (last ? '' : ' disabled') + '>Undo last change</button></div>' +
+    (list.length ? '<div class="panel" style="margin-top:14px">' + list.map(function (e) {
+      var sys = e.kind === 'undo' || e.kind === 'redo';
+      return '<div class="row hist' + (e.undone ? ' undone' : '') + (sys ? ' sys' : '') + '"><div class="l"><b>' + esc(e.label) + '</b><span>' + agoLabel(e.t) + (e.what ? ' \u00b7 ' + esc(e.what) : '') + '</span></div>' +
+        (!e.undone && !sys ? '<button class="chip sm" data-hback="' + e.id + '">Undo to here</button>' : e.undone ? '<span class="note" style="margin:0">undone</span>' : '') + '</div>';
+    }).join('') + '</div>' : '<div class="empty">No changes recorded yet on this device.</div>') +
+    '<p class="note">The last ' + HIST.MAX + ' changes made on this device. "Undo to here" steps back through everything newer as well, in order, so nothing is left half-undone.' +
+    (matchMedia('(pointer: fine)').matches ? ' Shortcut: Ctrl or \u2318 + Z, and Shift to redo.' : '') + '</p>';
+  openSheet('Change history', body, function (el) {
+    $('#hundo', el).addEventListener('click', function () { closeSheet(); undoLast(); historySheet(); });
+    $('#hredo', el).addEventListener('click', function () { closeSheet(); redoLast(); historySheet(); });
+    el.querySelectorAll('[data-hback]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var target = b.dataset.hback, steps = 0;
+        while (true) { var e = histLast(); if (!e) break; histApply(e, 'undo'); steps++; if (e.id === target) break; }
+        closeSheet(); toast('Undid ' + steps + ' change' + (steps === 1 ? '' : 's')); historySheet();
+      });
+    });
+  });
+}
+function toastUndo(msg) { HIST.label = msg; HIST.labelT = Date.now();
+  var t = $('#toast'); t.innerHTML = esc(msg) + ' <button id="undo" class="undo">Undo</button>'; t.classList.add('on', 'act');
+  $('#undo').onclick = function () { t.classList.remove('on', 'act'); undoLast(); };
+  clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on', 'act'); }, 5000);
+}
+function toast(msg) { if (msg && !/^Undid|^Redone|^Nothing to/.test(msg)) { HIST.label = msg; HIST.labelT = Date.now(); } $('#toast').classList.remove('act'); var t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on'); }, 1800); }
 
 // ---------- state ----------
 var DEFAULT_CATS = [
@@ -666,6 +776,8 @@ function normalize() {
     allTx().forEach(function (t) { if ((t.t === 'exp' || t.t === 'inc') && t.pm !== 'later' && !t.acct) { t.acct = first; touched[monthOf(t.d)] = 1; } });
     if (typeof store !== 'undefined' && store.dirty) { Object.keys(touched).forEach(function (k) { store.dirty['tx-' + k] = true; }); store.dirty.meta = true; }
   }
+  S.bills.forEach(function (b) { (b.payments || []).forEach(function (p) { if (!p.payId) p.payId = p.id; }); });
+  if (typeof reallocAll === 'function' && S.bills.length && reallocAll() && typeof store !== 'undefined' && store.dirty) store.dirty.bills = true;
   S.v = SCHEMA;
   return moved;
 }
@@ -702,7 +814,11 @@ function loadLocal() {
   try { var raw = localStorage.getItem(LS_KEY); if (raw) { var o = JSON.parse(raw); if (o && o.meta) S = o; } } catch (e) { }
   normalize();
 }
-function mark(key) { store.dirty[key] = true; saveLocal(); saveDirty(); schedule(); }
+function mark(key) {
+  store.dirty[key] = true;
+  if ((key === 'bills' || key.indexOf('tx-') === 0) && typeof reallocAll === 'function' && reallocAll()) store.dirty.bills = true;
+  saveLocal(); saveDirty(); schedule(); histTouch();
+}
 function markMonth(m) { mark('tx-' + m); }
 function schedule() { clearTimeout(store.timer); store.timer = setTimeout(flush, 700); }
 function bodyFor(key) {
@@ -808,7 +924,7 @@ function flush() {
     var t = store.sb.from('ledger_docs');
     var p = t.select('body').eq('user_id', store.uid).eq('id', k).maybeSingle().then(function (r) {
       if (r.error) throw r.error;
-      if (r.data && r.data.body) { absorb(k, r.data.body); normalize(); saveLocal(); }
+      if (r.data && r.data.body) { absorb(k, r.data.body); normalize(); saveLocal(); histSnap(); }
       var body = bodyFor(k), tb = store.sb.from('ledger_docs');
       return (body ? tb.upsert({ user_id: store.uid, id: k, body: body, updated_at: new Date().toISOString() }, { onConflict: 'user_id,id' })
         : tb.delete().eq('user_id', store.uid).eq('id', k)).then(function (w) { if (w.error) throw w.error; store.base[k] = idsOf(k, body); saveBase(); });
@@ -870,11 +986,11 @@ function connect() {
       try { (JSON.parse(localStorage.getItem('ledger-dirty') || '[]')).forEach(function (k) { store.dirty[k] = true; }); } catch (e) { }
       var hadLocalEdits = Object.keys(store.dirty).length > 0;
       if (res.data.length && !hadLocalEdits) {
-        S = docsToState(res.data); normalize(); saveLocal();
+        S = docsToState(res.data); normalize(); saveLocal(); histSnap();
         res.data.forEach(function (d) { store.base[d.id] = idsOf(d.id, d.body); }); saveBase();
       } else if (res.data.length) {
         // edits made offline on this device: fold the cloud copy in rather than choosing one side
-        res.data.forEach(function (d) { absorb(d.id, d.body); });
+        res.data.forEach(function (d) { absorb(d.id, d.body); }); histSnap();
         normalize(); saveLocal(); markAll();
       } else if (allTx().length || S.ledger.length) markAll();
       store.mode = 'cloud'; setSync('Synced'); render(); flush();
@@ -898,9 +1014,14 @@ function pull() {
   store.sb.from('ledger_docs').select('id,body').then(function (res) {
     if (res.error || !res.data) return;
     res.data.forEach(function (d) { absorb(d.id, d.body); store.base[d.id] = idsOf(d.id, d.body); });
-    normalize(); saveLocal(); saveBase(); render();
+    normalize(); saveLocal(); saveBase(); histSnap(); render();
   });
 }
+document.addEventListener('keydown', function (e) {
+  if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
+  var tg = e.target; if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable)) return;
+  e.preventDefault(); if (e.shiftKey) redoLast(); else undoLast();
+});
 window.addEventListener('online', function () { if (store.mode === 'cloud') flush(); else if (store.mode === 'cloud-offline') connect(); });
 function renderLogin() {
   return '<main class="login"><div class="hero"><div class="lbl">Ethan\'s Ledger</div><div class="big" style="font-size:40px">Sign in</div><div class="sub">Your data syncs to your own Supabase database.</div></div>' +
@@ -1110,7 +1231,8 @@ function healthSheet() {
 var ICON = {
   home: '<span class="ms" aria-hidden="true">donut_large</span>', list: '<span class="ms" aria-hidden="true">receipt_long</span>',
   pnl: '<span class="ms" aria-hidden="true">trending_up</span>', ins: '<span class="ms" aria-hidden="true">insights</span>',
-  more: '<span class="ms" aria-hidden="true">more_horiz</span>'
+  more: '<span class="ms" aria-hidden="true">more_horiz</span>',
+  history: '<span class="ms" aria-hidden="true">history</span>'
 };
 function avatar(cat) { var m = String(cat || '').match(/^(\p{Extended_Pictographic}\uFE0F?)/u); return m ? m[1] : String(cat || '?').charAt(0).toUpperCase(); }
 function nav() {
@@ -1119,7 +1241,7 @@ function nav() {
     '<button class="add" data-act="add-tx" aria-label="Add transaction"><span class="ms" aria-hidden="true">add</span></button>' + b('insights', 'Insights', 'ins') + b('pnl', 'Accounts', 'pnl') + '</div></nav>';
 }
 function hdRight() {
-  return '<div class="hr"><span class="sync" id="sync"></span>' + (UI.tab === 'more' ? '' : '<button class="icon" data-tab="more" aria-label="More">' + ICON.more + '</button>') + '</div>';
+  return '<div class="hr"><span class="sync" id="sync"></span>' + (HIST.list.length ? '<button class="icon sm" data-act="history" aria-label="Change history">' + ICON.history + '</button>' : '') + (UI.tab === 'more' ? '' : '<button class="icon" data-tab="more" aria-label="More">' + ICON.more + '</button>') + '</div>';
 }
 function monthSwitch() {
   return '<div class="monthsw"><button data-act="prev" aria-label="Previous month">‹</button><span>' + monthLabel(UI.month) +
@@ -1681,6 +1803,7 @@ function localTheme() { try { return localStorage.getItem('ledger-theme') || '';
 function applyTheme() { var t = localTheme(); if (t) document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme'); }
 
 function render() {
+  if (!HIST.ready) { histSnap(); HIST.ready = true; }
   if (store.mode === 'auth') { $('#app').innerHTML = renderLogin(); wireLogin(); return; }
   var v = UI.tab === 'activity' ? renderActivity() : UI.tab === 'pnl' ? renderAccounts() : UI.tab === 'more' ? renderMore() : UI.tab === 'insights' ? renderInsights() : renderHome();
   $('#app').innerHTML = '<main>' + v + '</main>' + nav();
@@ -1775,7 +1898,9 @@ function txSheet(existing, asNew) {
     '<p class="note" id="spmsg"></p></div>' +
     '<label class="f" id="pml">' + (t.t === 'inc' ? 'Received into' : 'Paid with') + '</label><div class="wrap" id="pm">' + payChips(t) + '</div>' +
     '<div id="instbox"' + (t.pm === 'later' ? '' : ' hidden') + '><label class="f">How it gets paid</label><div class="seg" id="instn">' +
-      [1, 3, 4, 6, 12].map(function (n) { return '<button data-in="' + n + '" aria-pressed="' + (((t.inst && t.inst.n) || 1) === n) + '">' + (n === 1 ? 'Next month' : n + ' months') + '</button>'; }).join('') + '</div>' +
+      [1, 3, 4, 6, 12].map(function (n) { return '<button data-in="' + n + '" aria-pressed="' + (((t.inst && t.inst.n) || 1) === n) + '">' + (n === 1 ? 'Next month' : n + ' months') + '</button>'; }).join('') +
+      '<button data-in="custom" aria-pressed="' + (t.inst && [1, 3, 4, 6, 12].indexOf(t.inst.n) < 0) + '">Custom</button></div>' +
+      '<div id="instcbox"' + (t.inst && [1, 3, 4, 6, 12].indexOf(t.inst.n) < 0 ? '' : ' hidden') + ' style="display:flex;gap:8px;align-items:center;margin:8px 0 4px"><input class="t" id="instc" inputmode="numeric" style="max-width:110px" value="' + (t.inst && [1, 3, 4, 6, 12].indexOf(t.inst.n) < 0 ? t.inst.n : '') + '" placeholder="e.g. 8" aria-label="Number of months"><span class="note" style="margin:0">months</span></div>' +
       '<div class="seg" id="insts"' + (t.inst && t.inst.n > 1 ? '' : ' hidden') + '><button data-is="0" aria-pressed="' + !(t.inst && t.inst.start) + '">First in this bill</button><button data-is="1" aria-pressed="' + !!(t.inst && t.inst.start) + '">First in next bill</button></div>' +
       '<div id="instfeebox"' + (t.inst && t.inst.n > 1 ? '' : ' hidden') + '><label class="f" for="instfee">Interest or fee on this plan, in total</label>' +
       '<input class="t" id="instfee" inputmode="decimal" value="' + (t.inst && t.inst.fee ? t.inst.fee : '') + '" placeholder="0.00 if it is interest-free"></div>' +
@@ -1816,13 +1941,21 @@ function txSheet(existing, asNew) {
       var n = (t.inst && t.inst.n) || 1, a = calcVal($('#amt', el).value);
       $('#insts', el).hidden = n < 2; $('#instfeebox', el).hidden = n < 2;
       var fee = calcVal(($('#instfee', el) || {}).value); if (!(fee > 0)) fee = 0;
-      el.querySelectorAll('#instn button').forEach(function (x) { x.setAttribute('aria-pressed', +x.dataset.in === n); });
+      var custom = n > 1 && [3, 4, 6, 12].indexOf(n) < 0 || UI.instCustom;
+      el.querySelectorAll('#instn button').forEach(function (x) { x.setAttribute('aria-pressed', x.dataset.in === 'custom' ? !!custom : (!custom && +x.dataset.in === n)); });
+      $('#instcbox', el).hidden = !custom;
       el.querySelectorAll('#insts button').forEach(function (x) { x.setAttribute('aria-pressed', +x.dataset.is === ((t.inst && t.inst.start) || 0)); });
       $('#instmsg', el).textContent = n < 2 ? 'Paid in full with the next ' + provOf(t) + ' bill, like a ride.' : (a > 0 ? n + ' monthly instalments of ' + money(r2((a + fee) / n)) + (fee ? ', including ' + money(fee) + ' interest (' + (fee / a * 100).toFixed(1) + '% on top)' : '') + '. ' : '') +
         'The full amount counts as spending today and is owed to ' + provOf(t) + ' straight away; each bill then asks for one instalment.';
     }
+    UI.instCustom = !!(t.inst && [1, 3, 4, 6, 12].indexOf(t.inst.n) < 0);
+    $('#instc', el).addEventListener('input', function () {
+      var v = parseInt(this.value, 10); if (v >= 2 && v <= 60) t.inst = { n: v, start: (t.inst && t.inst.start) || 0, fee: t.inst && t.inst.fee }; drawInst();
+    });
     $('#instn', el).addEventListener('click', function (e) {
-      var b = e.target.closest('[data-in]'); if (!b) return; var n = +b.dataset.in;
+      var b = e.target.closest('[data-in]'); if (!b) return;
+      if (b.dataset.in === 'custom') { UI.instCustom = true; drawInst(); $('#instc', el).focus(); return; }
+      UI.instCustom = false; var n = +b.dataset.in;
       if (n < 2) delete t.inst; else t.inst = { n: n, start: (t.inst && t.inst.start) || 0 };
       drawInst();
     });
@@ -3184,6 +3317,53 @@ function upcoming(n, prov) {
   }
   return out;
 }
+// Payments are applied by date, not by the order you typed them in: all of a provider's
+// payments are laid out oldest first and fill its bills oldest first. This reruns whenever
+// payments or purchases change, so entering an earlier payment later still lands on the
+// earlier bill, and the later one moves forward.
+function reallocProv(prov) {
+  var mine = S.bills.filter(function (b) { return billProv(b) === prov; });
+  var groups = {}, order = 0;
+  mine.forEach(function (b) {
+    (b.payments || []).forEach(function (p) {
+      var k = p.payId || p.id, g = groups[k];
+      if (!g) g = groups[k] = { payId: k, d: p.d, amt: 0, from: p.from, note: p.note, n: order++ };
+      g.amt = r2(g.amt + p.amt); if (p.d < g.d) g.d = p.d;
+    });
+  });
+  var pays = Object.keys(groups).map(function (k) { return groups[k]; })
+    .sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : a.n - b.n; });
+  if (!pays.length) return false;
+  var froms = periods(prov).slice().sort();
+  var bills = froms.map(function (f) { return billFor(f, prov) || { id: uid(), from: f, prov: prov, n: 1, fee: 0, first: '', payments: [], _new: true }; });
+  mine.forEach(function (b) { if (froms.indexOf(b.from) < 0) bills.push(b); }); // bills whose purchases were all removed keep their slot
+  bills.sort(function (a, b) { return a.from < b.from ? -1 : 1; });
+  var room = bills.map(function (b) { return Math.max(0, billDue(b)); }), out = bills.map(function () { return []; }), i = 0;
+  pays.forEach(function (g) {
+    var left = g.amt;
+    while (left > 0.005) {
+      while (i < bills.length - 1 && room[i] <= 0.005) i++;
+      var take = i === bills.length - 1 ? left : Math.min(left, room[i]); // the newest bill takes any excess
+      out[i].push({ id: uid(), payId: g.payId, d: g.d, amt: r2(take), from: g.from, note: g.note });
+      room[i] = r2(room[i] - take); left = r2(left - take);
+    }
+  });
+  function sig(list) { return JSON.stringify(list.map(function (b) { return [b.from, (b.payments || []).map(function (p) { return [p.payId || p.id, p.d, p.amt, p.from || '', p.note || '']; }).sort()]; })); }
+  var before = sig(mine.slice().sort(function (a, b) { return a.from < b.from ? -1 : 1; }));
+  var after = sig(bills.filter(function (b, k) { return !b._new || out[k].length; }).map(function (b, k) { return { from: b.from, payments: out[bills.indexOf(b)] }; }));
+  if (before === after) return false;
+  bills.forEach(function (b, k) {
+    b.payments = out[k];
+    if (b._new) { delete b._new; if (out[k].length) S.bills.push(b); }
+  });
+  return true;
+}
+function reallocAll() {
+  if (reallocAll.busy) return false; reallocAll.busy = true;
+  var changed = false;
+  try { providers().forEach(function (p) { if (reallocProv(p.name)) changed = true; }); } finally { reallocAll.busy = false; }
+  return changed;
+}
 function openBills(prov) {
   prov = prov || GRAB;
   return periods(prov).slice().sort().map(function (f) {
@@ -3342,11 +3522,12 @@ function lumpSheet(payId) {
   var fee = allTx().filter(function (t) { return t.payId === payId; })[0];
   var body = '<div class="kv" style="margin-top:0"><span>Amount</span><span>' + money(tot) + '</span><span>Paid to</span><span>' + esc(prov) + '</span>' +
     '<span>Covers</span><span>' + parts.map(function (x) { return periodLabel(x.b.from, prov); }).join(', ') + '</span></div>' +
+    '<label class="f" for="la">Amount paid</label><input class="t" id="la" inputmode="decimal" value="' + tot + '">' +
     '<label class="f" for="ld">Date paid</label><input class="t" type="date" id="ld" value="' + p0.d + '">' +
     '<p class="warn" id="lwarn"></p>' +
     '<label class="f" for="lf">Paid from</label>' + acctSelect('lf', p0.from || '', 'Choose an account', true) +
     '<label class="f" for="ln">Note</label><input class="t" id="ln" value="' + esc(p0.note || '') + '">' +
-    '<p class="note">Changing the date only moves where this shows in your history. The amount stays applied to the same bills' + (fee ? ', and the ' + money(fee.amt) + ' fee recorded with it moves too' : '') + '.</p>' +
+    '<p class="note">Payments are applied to bills in date order, oldest first, so changing the date or amount can move which bill this pays' + (fee ? '. The ' + money(fee.amt) + ' fee recorded with it moves with the date' : '') + '.</p>' +
     '<div class="actions"><button class="btn danger" id="ldel">Delete</button><button class="btn" id="lsave">Save</button></div>';
   openSheet('Payment to ' + prov, body, function (el) {
     wireAcct(el, 'lf');
@@ -3355,6 +3536,10 @@ function lumpSheet(payId) {
     $('#lsave', el).addEventListener('click', function () {
       var d = $('#ld', el).value || p0.d, f = $('#lf', el).value; if (f === '__new') f = '';
       parts.forEach(function (x) { x.p.d = d; x.p.from = f; x.p.note = $('#ln', el).value.trim() || x.p.note; });
+      var na = calcVal($('#la', el).value);
+      if (na > 0 && Math.abs(na - tot) > 0.005) { // keep one part with the new total; the date order spreads it again
+        parts.forEach(function (x, k) { if (k === 0) x.p.amt = r2(na); else x.b.payments = x.b.payments.filter(function (q) { return q !== x.p; }); });
+      }
       if (fee && fee.d !== d) { removeTx(fee); fee.d = d; var m = monthOf(d); (S.tx[m] = S.tx[m] || []).push(fee); markMonth(m); }
       mark('bills'); closeSheet(); render(); toast('Payment updated');
     });
@@ -3477,7 +3662,7 @@ function billSheet(from, prov) {
         txSheet({ id: uid(), d: periodEnd(from) > today() ? today() : periodEnd(from), t: 'exp', amt: 0, cat: '', sub: '', note: '', tags: [], pm: 'later', plp: prov, src: 'app' }, true);
       });
       el.querySelectorAll('[data-pmt]').forEach(function (btn) {
-        btn.addEventListener('click', function () { paymentSheet(b, (b.payments || []).filter(function (p) { return p.id === btn.dataset.pmt; })[0], draw); });
+        btn.addEventListener('click', function () { var pp = (b.payments || []).filter(function (p) { return p.id === btn.dataset.pmt; })[0]; if (pp) { closeSheet(); lumpSheet(pp.payId || pp.id); } });
       });
       el.querySelectorAll('[data-edit-tx]').forEach(function (btn) {
         btn.addEventListener('click', function (e) { e.stopPropagation(); var t = findTx(btn.dataset.editTx); if (t) txSheet(t); });
@@ -3497,6 +3682,7 @@ function paymentSheet(b, p, after) {
   var isNew = !p, sch = billSchedule(b), nx = null;
   sch.forEach(function (x) { if (!nx && !x.paid) nx = x; });
   p = p ? Object.assign({}, p) : { id: uid(), d: today(), amt: nx ? r2(nx.amt - nx.part) : billLeft(b), note: '' };
+  if (!p.payId) p.payId = p.id;
   var body = '<div class="amt-in"><span>$</span><input id="pa" inputmode="decimal" value="' + (p.amt || '') + '" aria-label="Amount paid"></div>' +
     '<label class="f" for="pd">Date paid</label><input class="t" type="date" id="pd" value="' + p.d + '">' +
     '<label class="f" for="pfrom">Paid from</label>' + acctSelect('pfrom', p.from || UI.plFrom || '', 'Choose an account', true) +
@@ -3994,6 +4180,7 @@ function onClick(e) {
     else if (a === 'clrwal') { UI.fwal = ''; render(); }
     else if (a === 'catclear') { UI.fcat = ''; UI.fsub = ''; render(); }
     else if (a === 'addwallet') { var nw = (prompt('Name the wallet, e.g. YouTrip, PayLah, UOB') || '').trim(); if (nw) { ensureWallet(nw); render(); toast(nw + ' added'); } }
+    else if (a === 'history') historySheet();
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
     else if (a === 'next') { UI.month = addMonth(UI.month, 1); render(); }
