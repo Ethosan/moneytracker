@@ -413,6 +413,11 @@ label.f{margin:16px 2px 8px}
 .calcpad button:active{transform:scale(.96)}
 .chip.on{background:var(--accent);color:var(--accent-ink)}
 .chip.x{min-width:44px;justify-content:center;padding:0;margin-left:-4px;color:var(--muted)}
+.banner.hint{margin:4px 0 14px;border:1px dashed color-mix(in srgb,var(--accent) 45%,var(--line))}
+#acctseg{overflow-x:auto;scrollbar-width:none}
+#acctseg button{white-space:nowrap;flex:1 0 auto;padding:9px 12px}
+#pm .chip.pl{border:1px dashed color-mix(in srgb,var(--muted) 45%,transparent);background:transparent}
+#pm .chip.pl[aria-pressed="true"]{background:var(--ink);border-color:var(--ink)}
 </style>
 </head>
 <body>
@@ -649,10 +654,18 @@ function normalize() {
   S.ledger = S.ledger.filter(function (e) { return e.f === 'bal' || e.amt > 0; });
   if (!catObj('\u2753 Unaccounted')) m.cats.push({ name: '\u2753 Unaccounted', type: 'exp' });
   allTx().forEach(function (t) { rememberSub(t.cat, t.sub); });
+  if (!m.walletsV1) {
+    // one-time: everything paid by cash or bank so far is filed under the Cash wallet
+    m.walletsV1 = 1;
+    ['Cash', 'GrabPay wallet'].forEach(function (n) { if (!m.accounts.some(function (a) { return a.name === n; })) m.accounts.push({ name: n, liability: false }); });
+    var touched = {};
+    allTx().forEach(function (t) { if ((t.t === 'exp' || t.t === 'inc') && t.pm !== 'later' && !t.acct) { t.acct = 'Cash'; touched[monthOf(t.d)] = 1; } });
+    if (typeof store !== 'undefined' && store.dirty) { Object.keys(touched).forEach(function (k) { store.dirty['tx-' + k] = true; }); store.dirty.meta = true; }
+  }
   S.v = SCHEMA;
   return moved;
 }
-var UI = { folds: {}, acct: 'inv', tab: 'home', month: monthOf(today()), filter: 'all', q: '', all: false };
+var UI = { folds: {}, acct: 'bal', tab: 'home', month: monthOf(today()), filter: 'all', q: '', all: false };
 var LS_KEY = 'ledger-state-v1';
 var store = { mode: 'connecting', col: null, dirty: {}, timer: null, writing: false };
 
@@ -1215,6 +1228,7 @@ function txRow(t) {
   var sub = t.note ? plain(t.cat) : '';
   if (t.sub) sub = sub ? sub + ' \u00b7 ' + t.sub : t.sub;
   if (t.pm === 'later') { var pn = provOf(t); sub = sub ? sub + ' \u00b7 ' + pn : pn; }
+  else if (t.acct && t.acct !== 'Cash' && t.t !== 'xfer') sub = sub ? sub + ' \u00b7 ' + t.acct : t.acct;
   if (t.split && t.split.mine === 0) sub = 'Bought for ' + t.split.person + ', none of it yours';
   if (t.calc && isSum(t.calc)) { var np = sumParts(t.calc).length; sub = (sub ? sub + ' \u00b7 ' : '') + (np > 1 && !/[*/()]/.test(t.calc) ? np + ' items: ' + sumParts(t.calc).join(' + ') : t.calc); }
   if (t._inst) sub = 'Instalment ' + t._inst + ' of ' + money(t._full) + (sub ? ' \u00b7 ' + sub : '');
@@ -1351,12 +1365,15 @@ function renderActivity() {
     if (q && ((t.note || '') + ' ' + t.cat + ' ' + (t.sub || '')).toLowerCase().indexOf(q) < 0) return false;
     return true;
   });
+  var movAll = movs.length;
   movs = (!UI.fcat && (f === 'all' || f === 'mov')) ? movs.filter(function (r) { return !q || r.text.toLowerCase().indexOf(q) > -1; }) : [];
   var items = tx.map(function (t) { return { d: t.d, tx: t }; }).concat(movs.map(function (r) { return { d: r.d, mv: r }; }))
     .sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
   var tot = sum(tx, function (t) { return t.t === 'exp' ? ea(t) : 0; });
   h += '<div class="note" style="margin:0 2px 4px">' + tx.length + ' transaction' + (tx.length === 1 ? '' : 's') + (movs.length ? ', ' + movs.length + ' movement' + (movs.length === 1 ? '' : 's') : '') +
     (UI.all ? ' across all months' : '') + ', ' + money(tot) + ' spent</div>';
+  if (movAll && !movs.length && (UI.fcat || f === 'exp' || f === 'inc' || f.indexOf('tag:') === 0 || f.indexOf('cat:') === 0))
+    h += '<button class="banner quiet hint" data-act="showmov"><b>' + movAll + ' repayment' + (movAll === 1 ? '' : 's') + ' and transfer' + (movAll === 1 ? '' : 's') + ' hidden by this filter</b><span>PayLater payments, loans and moves between accounts. Tap to show them</span></button>';
   if (!items.length) return h + '<div class="empty">Nothing matches. Tap + to add something.</div>';
   var day = null, html = '';
   items.forEach(function (it) {
@@ -1517,11 +1534,12 @@ function balanceSection() {
   return h;
 }
 function renderAccounts() {
-  var tabs = [['inv', 'Investments'], ['later', 'PayLater'], ['ppl', 'People'], ['subs', 'Subscriptions']];
+  var tabs = [['bal', 'Balances'], ['inv', 'Invest'], ['later', 'PayLater'], ['ppl', 'People'], ['subs', 'Subs']];
   var h = '<header class="top"><h1>Accounts</h1>' + hdRight() + '</header>' +
     '<div class="seg" id="acctseg">' + tabs.map(function (t) {
       return '<button data-acct="' + t[0] + '" aria-pressed="' + (UI.acct === t[0]) + '">' + t[1] + '</button>';
     }).join('') + '</div>';
+  if (UI.acct === 'bal') return h + balancesSection();
   if (UI.acct === 'ppl') return h + peopleSection() + balanceSection();
   if (UI.acct === 'subs') return h + subsSection();
   if (UI.acct === 'later') return h + payLaterSection() + balanceSection();
@@ -1618,10 +1636,25 @@ function noteSuggest(q, cat, type) {
     return b.n - a.n || (a.last < b.last ? 1 : -1);
   }).slice(0, 6);
 }
+// Wallets you spend from (Cash, GrabPay wallet...) plus PayLater providers, as one choice.
+function wallets() {
+  var w = S.meta.accounts.filter(function (a) { return !a.liability; }).map(function (a) { return a.name; });
+  ['GrabPay wallet', 'Cash'].forEach(function (n) { if (w.indexOf(n) < 0) w.unshift(n); });
+  var i = w.indexOf('Cash'); if (i > 0) { w.splice(i, 1); w.unshift('Cash'); }
+  return w;
+}
+function ensureWallet(n) { if (n && !S.meta.accounts.some(function (a) { return a.name === n; })) { S.meta.accounts.push({ name: n, liability: false }); mark('meta'); } }
+function payChips(t) {
+  var cur = t.pm === 'later' ? 'later:' + provOf(t) : 'acct:' + (t.acct || 'Cash');
+  var h = wallets().map(function (w) { return '<button class="chip" data-pay="acct:' + esc(w) + '" aria-pressed="' + (cur === 'acct:' + w) + '">' + esc(w) + '</button>'; }).join('');
+  if (t.t !== 'inc') h += providers().map(function (p) { return '<button class="chip pl" data-pay="later:' + esc(p.name) + '" aria-pressed="' + (cur === 'later:' + p.name) + '">' + esc(p.name) + '</button>'; }).join('');
+  return h + '<button class="chip" data-pay="new">+ Wallet</button>';
+}
 function txSheet(existing, asNew) {
   if (asNew) { var seed = existing; existing = null; }
   var t = existing ? JSON.parse(JSON.stringify(existing)) : asNew ? seed : { id: uid(), d: today(), t: 'exp', amt: 0, cat: '', sub: '', note: '', tags: [], src: 'app' };
   t.sub = cleanSub(t.sub);
+  if (!existing && t.pm !== 'later' && !t.acct) t.acct = S.meta.lastAcct || 'Cash';
   function subChips() {
     if (!t.cat) return '<p class="note" style="margin:0">Pick a category first.</p>';
     var ss = subsFor(t.cat);
@@ -1647,8 +1680,7 @@ function txSheet(existing, asNew) {
     '<div class="wrap" style="margin-top:7px"><button class="chip" id="mine0">None of it is mine</button><button class="chip" id="minehalf">Half</button></div>' +
     '<label class="f">Who owes you the rest</label><div class="wrap" id="spwho"></div>' +
     '<p class="note" id="spmsg"></p></div>' +
-    '<label class="f">Paid with</label><div class="wrap" id="pm"><button class="chip" data-pm="cash" aria-pressed="' + (t.pm !== 'later') + '">Cash or bank</button>' +
-      providers().map(function (p) { return '<button class="chip" data-pm="later" data-plp="' + esc(p.name) + '" aria-pressed="' + (t.pm === 'later' && provOf(t) === p.name) + '">' + esc(p.name) + '</button>'; }).join('') + '</div>' +
+    '<label class="f" id="pml">' + (t.t === 'inc' ? 'Received into' : 'Paid with') + '</label><div class="wrap" id="pm">' + payChips(t) + '</div>' +
     '<div id="instbox"' + (t.pm === 'later' ? '' : ' hidden') + '><label class="f">How it gets paid</label><div class="seg" id="instn">' +
       [1, 3, 4, 6, 12].map(function (n) { return '<button data-in="' + n + '" aria-pressed="' + (((t.inst && t.inst.n) || 1) === n) + '">' + (n === 1 ? 'Next month' : n + ' months') + '</button>'; }).join('') + '</div>' +
       '<div class="seg" id="insts"' + (t.inst && t.inst.n > 1 ? '' : ' hidden') + '><button data-is="0" aria-pressed="' + !(t.inst && t.inst.start) + '">First in this bill</button><button data-is="1" aria-pressed="' + !!(t.inst && t.inst.start) + '">First in next bill</button></div>' +
@@ -1666,6 +1698,8 @@ function txSheet(existing, asNew) {
       var b = e.target.closest('[data-t]'); if (!b) return;
       if (b.dataset.t === 'move') { closeSheet(); moveSheet(); return; }
       t.t = b.dataset.t; t.cat = '';
+      if (t.t === 'inc' && t.pm === 'later') { delete t.pm; delete t.plp; delete t.inst; t.acct = S.meta.lastAcct || 'Cash'; }
+      $('#pml', el).textContent = t.t === 'inc' ? 'Received into' : 'Paid with'; $('#pm', el).innerHTML = payChips(t); $('#instbox', el).hidden = t.pm !== 'later';
       el.querySelectorAll('#tt button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
       $('#cats', el).innerHTML = catChips();
     });
@@ -1753,7 +1787,8 @@ function txSheet(existing, asNew) {
             $('#cats', el).innerHTML = catChips();
             $('#sub', el).value = t.sub; $('#subchips', el).innerHTML = subChips();
             if ((o.tx.tags || []).indexOf('Alaina') > -1 && t.tags.indexOf('Alaina') < 0) { t.tags.push('Alaina'); $('#tags', el).innerHTML = tagChips(); }
-            if (o.tx.pm === 'later' && t.pm !== 'later') { t.pm = 'later'; t.plp = provOf(o.tx); el.querySelectorAll('#pm button').forEach(function (x) { x.setAttribute('aria-pressed', x.dataset.pm === 'later' && x.dataset.plp === t.plp); }); }
+            if (o.tx.pm === 'later') { t.pm = 'later'; t.plp = provOf(o.tx); delete t.acct; } else if (o.tx.acct) { delete t.pm; t.acct = o.tx.acct; }
+            $('#pm', el).innerHTML = payChips(t); $('#instbox', el).hidden = t.pm !== 'later';
             toast('Filled in from last time');
           }
           drawSug();
@@ -1763,9 +1798,11 @@ function txSheet(existing, asNew) {
     noteEl.addEventListener('input', drawSug);
     drawSug();
     $('#pm', el).addEventListener('click', function (e) {
-      var b = e.target.closest('[data-pm]'); if (!b) return; t.pm = b.dataset.pm;
-      if (t.pm === 'later') t.plp = b.dataset.plp; else { delete t.plp; delete t.inst; }
-      el.querySelectorAll('#pm button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
+      var b = e.target.closest('[data-pay]'); if (!b) return; var v = b.dataset.pay;
+      if (v === 'new') { var n = (prompt('Name the wallet or account, e.g. YouTrip, PayLah, UOB') || '').trim(); if (!n) return; ensureWallet(n); v = 'acct:' + n; }
+      if (v.indexOf('later:') === 0) { t.pm = 'later'; t.plp = v.slice(6); delete t.acct; }
+      else { delete t.pm; delete t.plp; delete t.inst; t.acct = v.slice(5); }
+      $('#pm', el).innerHTML = payChips(t);
       $('#instbox', el).hidden = t.pm !== 'later'; drawInst();
     });
     $('#save', el).addEventListener('click', function () {
@@ -1774,6 +1811,7 @@ function txSheet(existing, asNew) {
       if (!t.cat) { toast('Pick a category'); return; }
       t.amt = r2(a); t.note = $('#note', el).value.trim(); t.d = $('#dt', el).value || today();
       t.sub = cleanSub($('#sub', el).value);
+      if (t.pm === 'later') delete t.acct; else { t.acct = t.acct || 'Cash'; ensureWallet(t.acct); S.meta.lastAcct = t.acct; }
       var ex = exprOf($('#amt', el)); if (ex) t.calc = ex.replace(/\s+/g, ''); else delete t.calc;
       if (t.inst && t.inst.n > 1) { var ifee = calcVal($('#instfee', el).value); if (ifee > 0) t.inst.fee = r2(ifee); else delete t.inst.fee; }
       var mineV = parseFloat(($('#mine', el) || {}).value);
@@ -2529,7 +2567,7 @@ function exportCsv(kind) {
   } else {
     rows = [['ID', 'Date', 'Type', 'Amount', 'Category', 'Subcategory', 'Note', 'Tags', 'Paid with', 'From', 'To', 'Instalments']];
     allTx().sort(function (a, b) { return a.d < b.d ? -1 : 1; }).forEach(function (t) {
-      rows.push([t.id, t.d, t.t === 'exp' ? 'Expense' : t.t === 'inc' ? 'Income' : t.t === 'xfer' ? 'Transfer' : 'Adjustment', t.amt, t.cat || '', t.sub || '', t.note || '', (t.tags || []).join('; '), t.pm === 'later' ? provOf(t) : '', t.from || '', t.to || '', t.inst && t.inst.n > 1 ? t.inst.n + (t.inst.start ? ' from next bill' : '') : '']);
+      rows.push([t.id, t.d, t.t === 'exp' ? 'Expense' : t.t === 'inc' ? 'Income' : t.t === 'xfer' ? 'Transfer' : 'Adjustment', t.amt, t.cat || '', t.sub || '', t.note || '', (t.tags || []).join('; '), t.pm === 'later' ? provOf(t) : (t.acct || ''), t.from || '', t.to || '', t.inst && t.inst.n > 1 ? t.inst.n + (t.inst.start ? ' from next bill' : '') : '']);
     });
     download('ledger-transactions-' + today() + '.csv', rows.map(function (r) { return r.map(csvCell).join(','); }).join('\n'));
   }
@@ -2579,7 +2617,9 @@ function csvDiff(rows) {
         tags: get('tags').split(/[;,]/).map(function (x) { return x.trim(); }).filter(Boolean), src: 'csv'
       };
       var pw = get('paid with');
-      if (pw && !/^cash|bank/i.test(pw)) { t.pm = 'later'; t.plp = /^paylater$/i.test(pw) ? GRAB : pw; }
+      var isProv = pw && (providers().some(function (p) { return p.name.toLowerCase() === pw.toLowerCase(); }) || /pay ?later|spaylater|atome/i.test(pw));
+      if (isProv) { t.pm = 'later'; t.plp = /^paylater$/i.test(pw) ? GRAB : pw; }
+      else if (t.t === 'exp' || t.t === 'inc') t.acct = pw && !/^cash or bank$/i.test(pw) ? pw : 'Cash';
       if (t.t === 'xfer') { t.from = get('from'); t.to = get('to'); t.cat = ''; }
       var ins = parseInt(get('instalments'), 10);
       if (t.pm === 'later' && ins > 1) t.inst = { n: ins, start: /next/i.test(get('instalments')) ? 1 : 0 };
@@ -2718,6 +2758,55 @@ function flowsBetween(a, b) {
   });
   return n;
 }
+// Each account's balance = what you counted last time + everything since that names it.
+// Money that moved without naming an account is shown separately, so the total still
+// agrees with the balance check.
+function accountBalances() {
+  var lc = lastCheck(), since = lc ? lc.d : null, lines = (lc && lc.lines) || {};
+  var accs = S.meta.accounts.filter(function (a) { return !a.liability; }).map(function (a) { return a.name; });
+  var bal = {}, touched = {};
+  accs.forEach(function (n) { bal[n] = lines[n] != null ? +lines[n] : null; });
+  function mv(acct, amt, d) {
+    if (!since || d <= since || !acct || !(acct in bal)) return false;
+    bal[acct] = r2((bal[acct] || 0) + amt); touched[acct] = 1; return true;
+  }
+  var assigned = 0;
+  allTx().forEach(function (t) {
+    if (t.t === 'xfer') { mv(t.from, -t.amt, t.d); mv(t.to, t.amt, t.d); return; }
+    if (t.pm === 'later') return;
+    var amt = t.t === 'exp' ? -t.amt : t.amt;
+    if (mv(t.acct, amt, t.d)) assigned += amt;
+  });
+  S.ledger.forEach(function (e) { if (e.f === 'bal') return; var amt = e.f === 'out' ? e.amt : -e.amt; if (mv(e.acct, amt, e.d)) assigned += amt; });
+  var paidOut = 0;
+  S.bills.forEach(function (b) { (b.payments || []).forEach(function (p) { if (mv(p.from, -p.amt, p.d)) paidOut += p.amt; }); });
+  var total = since ? flowsBetween(since, today()) : 0;
+  var owed = laterOwed(), expected = lc ? r2(lc.total + total) : null;
+  // whatever the named accounts and PayLater don't explain is money that moved without an account
+  var named = r2(sum(accs, function (n) { return bal[n] || 0; }));
+  var unassigned = lc ? r2(expected - (named - owed)) : 0;
+  return { since: since, lc: lc, bal: bal, touched: touched, unassigned: unassigned, expected: expected, owed: owed, accs: accs };
+}
+function balancesSection() {
+  var A = accountBalances(), h = '<section class="blk"><h2>Balances <button data-act="check">Count now</button></h2>';
+  if (!A.lc) {
+    return h + '<div class="panel" style="padding:14px 16px"><p style="margin:0 0 8px"><b>Start by counting what you have today.</b></p>' +
+      '<p class="note" style="margin:0 0 12px">Enter the real balance of each place you keep money (bank, cash, GrabPay wallet) and what you owe on PayLater. That becomes the starting point. Nothing before it needs to be perfect.</p>' +
+      '<button class="btn sm" data-act="check">Set starting balances</button></div></section>';
+  }
+  h += '<div class="panel">';
+  A.accs.forEach(function (n) {
+    var b = A.bal[n], counted = A.lc.lines && A.lc.lines[n] != null ? +A.lc.lines[n] : null;
+    h += '<div class="row"><div class="l"><b>' + esc(n) + '</b><span>' + (counted == null ? 'Not counted yet' : 'Counted ' + money(counted) + ' on ' + dayLabel(A.since) + (A.touched[n] ? ', updated since' : '')) + '</span></div>' +
+      '<div class="r">' + (b == null ? '\u2013' : money(b)) + '</div></div>';
+  });
+  if (Math.abs(A.unassigned) > 0.005)
+    h += '<div class="row"><div class="l"><b>Not assigned to an account</b><span>Spending and income since ' + dayLabel(A.since) + ' with no "Paid from" set</span></div><div class="r ' + (A.unassigned < 0 ? 'neg' : 'pos') + '">' + signed(A.unassigned) + '</div></div>';
+  if (A.owed > 0.005) h += '<div class="row"><div class="l"><b>Owed on PayLater</b><span>From your bills</span></div><div class="r neg">\u2212' + money(A.owed) + '</div></div>';
+  h += '<div class="row"><div class="l"><b>Expected total now</b><span>What a count today should come to</span></div><div class="r">' + money(A.expected) + '</div></div></div>' +
+    '<p class="note">Each account starts from what you last counted and moves with anything since that names it. Set "Paid from" on purchases to keep each account exact; the rest waits in "Not assigned" until your next count.</p></section>';
+  return h;
+}
 function lastCheck() { var c = S.checks.slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; }); return c[c.length - 1] || null; }
 function quietDays(n) {
   var has = {}; allTx().forEach(function (t) { if (t.t === 'exp') has[t.d] = 1; });
@@ -2741,12 +2830,13 @@ function checkSheet() {
   // without it the check looks short by exactly that amount.
   var plOwedBy = {};
   providers().forEach(function (p) {
-    var o = laterOwed(p.name); if (o <= 0.005) return;
+    var o = laterOwed(p.name);
+    if (o <= 0.005) { if (vals[p.name] != null && S.meta.accounts.some(function (a) { return a.name === p.name && a.liability; })) vals[p.name] = 0; return; }
     plOwedBy[p.name] = o;
     var acc = S.meta.accounts.filter(function (a) { return a.name === p.name; })[0];
     if (!acc) { acc = { name: p.name, liability: true, auto: true }; S.meta.accounts.push(acc); mark('meta'); }
     acc.liability = true;
-    if (vals[p.name] == null) vals[p.name] = o;
+    vals[p.name] = o; // your bills are the authority on what you owe, not last time's figure
   });
   var body = '<p class="note" style="margin-top:0">Enter what you actually have right now. The app compares it with what your logs say you should have' + (prev ? ' since your last check on ' + dayLabel(prev.d) : '') + '.</p>' +
     '<div class="panel" id="accs">' + accRows() + '</div>' +
@@ -3678,7 +3768,7 @@ function onClick(e) {
   if ((b = t.closest('[data-plopen]'))) { payLaterSheet(b.dataset.plopen); return; }
   if ((b = t.closest('[data-quick]'))) {
     var q = frequentNotes()[+b.dataset.quick];
-    if (q) txSheet({ id: uid(), d: today(), t: 'exp', amt: q.t.amt, cat: q.t.cat, sub: q.t.sub || '', note: q.t.note, tags: (q.t.tags || []).slice(), pm: q.t.pm, plp: q.t.plp, src: 'app' }, true);
+    if (q) txSheet({ id: uid(), d: today(), t: 'exp', amt: q.t.amt, cat: q.t.cat, sub: q.t.sub || '', note: q.t.note, tags: (q.t.tags || []).slice(), pm: q.t.pm, plp: q.t.plp, acct: q.t.acct, src: 'app' }, true);
     return;
   }
   if ((b = t.closest('[data-range]'))) { UI.range = +b.dataset.range; render(); return; }
@@ -3707,6 +3797,7 @@ function onClick(e) {
     else if (a === 'dupes') dupeSheet();
     else if (a === 'catfilter') catFilterSheet(UI.fcat || null);
     else if (a === 'catclear') { UI.fcat = ''; UI.fsub = ''; render(); }
+    else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
     else if (a === 'next') { UI.month = addMonth(UI.month, 1); render(); }
     else if (a === 'add-tx') txSheet();
