@@ -1569,8 +1569,8 @@ function txSheet(existing, asNew) {
     '<p class="note" id="spmsg"></p></div>' +
     '<label class="f">Paid with</label><div class="wrap" id="pm"><button class="chip" data-pm="cash" aria-pressed="' + (t.pm !== 'later') + '">Cash or bank</button>' +
       providers().map(function (p) { return '<button class="chip" data-pm="later" data-plp="' + esc(p.name) + '" aria-pressed="' + (t.pm === 'later' && provOf(t) === p.name) + '">' + esc(p.name) + '</button>'; }).join('') + '</div>' +
-    '<div id="instbox"' + (t.pm === 'later' ? '' : ' hidden') + '><label class="f">Instalments</label><div class="seg" id="instn">' +
-      [1, 3, 4, 6, 12].map(function (n) { return '<button data-in="' + n + '" aria-pressed="' + (((t.inst && t.inst.n) || 1) === n) + '">' + (n === 1 ? 'None' : n + '\u00d7') + '</button>'; }).join('') + '</div>' +
+    '<div id="instbox"' + (t.pm === 'later' ? '' : ' hidden') + '><label class="f">How it gets paid</label><div class="seg" id="instn">' +
+      [1, 3, 4, 6, 12].map(function (n) { return '<button data-in="' + n + '" aria-pressed="' + (((t.inst && t.inst.n) || 1) === n) + '">' + (n === 1 ? 'Next month' : n + ' months') + '</button>'; }).join('') + '</div>' +
       '<div class="seg" id="insts"' + (t.inst && t.inst.n > 1 ? '' : ' hidden') + '><button data-is="0" aria-pressed="' + !(t.inst && t.inst.start) + '">First in this bill</button><button data-is="1" aria-pressed="' + !!(t.inst && t.inst.start) + '">First in next bill</button></div>' +
       '<p class="note" id="instmsg" style="margin-top:0"></p></div>' +
     '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="What was it?" autocomplete="off">' +
@@ -1607,7 +1607,7 @@ function txSheet(existing, asNew) {
       $('#insts', el).hidden = n < 2;
       el.querySelectorAll('#instn button').forEach(function (x) { x.setAttribute('aria-pressed', +x.dataset.in === n); });
       el.querySelectorAll('#insts button').forEach(function (x) { x.setAttribute('aria-pressed', +x.dataset.is === ((t.inst && t.inst.start) || 0)); });
-      $('#instmsg', el).textContent = n < 2 ? '' : (a > 0 ? n + ' monthly instalments of ' + money(r2(a / n)) + '. ' : '') +
+      $('#instmsg', el).textContent = n < 2 ? 'Paid in full with the next ' + provOf(t) + ' bill, like a ride.' : (a > 0 ? n + ' monthly instalments of ' + money(r2(a / n)) + '. ' : '') +
         'The full amount counts as spending today and is owed to ' + provOf(t) + ' straight away; each bill then asks for one instalment.';
     }
     $('#instn', el).addEventListener('click', function (e) {
