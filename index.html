@@ -390,6 +390,9 @@ label.f{margin:16px 2px 8px}
   main>.quick .chips{flex-wrap:nowrap;overflow-x:auto}
 }
 @media (min-width:1024px){ main>.hero{align-self:stretch;display:flex;flex-direction:column;justify-content:center} }
+
+#plsel{flex-wrap:nowrap}
+#plsel button{white-space:nowrap;flex:0 0 auto;padding:9px 14px}
 </style>
 </head>
 <body>
@@ -1144,6 +1147,10 @@ function renderHome() {
   if (plOwed > 0 || plMonth > 0) {
     h += '<section class="blk"><h2>PayLater <button data-act="paylater">Open</button></h2><div class="panel">' +
       '<div class="row"><div class="l"><b>Charged to PayLater in ' + monthLabel(m, true) + '</b><span>' + plTx.length + ' purchases, already counted as spending</span></div><div class="r">' + money(plMonth) + '</div></div>' +
+      providers().filter(function (p) { return laterOwed(p.name) > 0.005; }).map(function (p) {
+        var nx = nextPayment(p.name);
+        return '<button class="row" data-plopen="' + esc(p.name) + '"><div class="l"><b>' + esc(p.name) + '</b><span>' + (nx ? 'Next ' + money(nx.amt) + ' on ' + dayLabel(nx.d) : 'No plan set yet') + '</span></div><div class="r">' + money(laterOwed(p.name)) + '</div></button>';
+      }).join('') +
       '<div class="row"><div class="l"><b>Still owed overall</b><span>' + (plNext ? 'Next payment ' + money(plNext.amt) + ' on ' + dayLabel(plNext.d) : 'No plan set yet') + '</span></div><div class="r">' + money(plOwed) + '</div></div></div></section>';
   }
   var lcx = lastCheck(), since = lcx ? Math.round((new Date(today()) - new Date(lcx.d)) / 864e5) : null;
@@ -1171,7 +1178,7 @@ function txRow(t) {
   var title = t.note ? t.note : plain(t.cat);
   var sub = t.note ? plain(t.cat) : '';
   if (t.sub) sub = sub ? sub + ' \u00b7 ' + t.sub : t.sub;
-  if (t.pm === 'later') sub = sub ? sub + ' \u00b7 PayLater' : 'PayLater';
+  if (t.pm === 'later') { var pn = provOf(t); sub = sub ? sub + ' \u00b7 ' + pn : pn; }
   if (t.split && t.split.mine === 0) sub = 'Bought for ' + t.split.person + ', none of it yours';
   return '<button class="row" data-edit-tx="' + esc(t.id) + '"><span class="av' + ((t.tags || []).indexOf('Alaina') > -1 ? ' al' : '') + '">' + esc(avatar(t.cat)) + '</span>' +
     '<div class="l"><b>' + esc(title) + tags + '</b>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div>' +
@@ -1222,18 +1229,18 @@ function movementRows() {
     (b.payments || []).forEach(function (pm) {
       if (!pm.payId) return;
       var L = lumps[pm.payId] = lumps[pm.payId] || { d: pm.d, amt: 0, note: pm.note, bills: [] };
-      L.amt = r2(L.amt + pm.amt); L.d = pm.d; L.bills.push(periodLabel(b.from));
+      L.amt = r2(L.amt + pm.amt); L.d = pm.d; L.prov = billProv(b); L.bills.push(periodLabel(b.from));
     });
   });
   Object.keys(lumps).forEach(function (k) {
     var L = lumps[k];
-    out.push({ d: L.d, kind: 'bill', title: L.note || 'PayLater payment', sub: 'Covers ' + L.bills.join(' and ') + (L.bills.length > 1 ? ' bills' : ' bill'),
+    out.push({ d: L.d, kind: 'bill', title: L.note || L.prov + ' payment', sub: L.prov + ', covers ' + L.bills.join(' and ') + (L.bills.length > 1 ? ' bills' : ' bill'),
       right: '\u2212' + money(L.amt), av: '\uD83D\uDCB3', attr: 'data-act="paylater"', text: 'paylater ' + (L.note || '') });
   });
   S.bills.forEach(function (b) {
     (b.payments || []).forEach(function (pm) {
       if (pm.payId) return;
-      out.push({ d: pm.d, kind: 'bill', title: 'PayLater payment', sub: (pm.note || periodLabel(b.from) + ' bill'), right: money(pm.amt), av: '\u2713',
+      out.push({ d: pm.d, kind: 'bill', title: billProv(b) + ' payment', sub: (pm.note || periodLabel(b.from) + ' bill'), right: money(pm.amt), av: '\u2713',
         attr: 'data-act="paylater"', text: 'paylater ' + (pm.note || '') });
     });
   });
@@ -1409,11 +1416,14 @@ function subsSection() {
   return h;
 }
 function payLaterSection() {
-  var h = '';
-  var owed = laterOwed(), nx = nextPayment();
-  h += '<section class="blk"><h2>PayLater</h2><div class="panel">' +
-    '<button class="row" data-act="paylater"><div class="l"><b>' + (owed > 0 ? money(owed) + ' outstanding' : 'Nothing outstanding') + '</b><span>' +
-    (nx ? 'Next payment ' + money(nx.amt) + ' on ' + dayLabel(nx.d) : 'Bills, instalment plans and what is coming up') + '</span></div><div class="r">›</div></button></div></section>';
+  var provs = providers(), total = laterOwed();
+  var h = '<section class="blk"><h2>PayLater<span class="note" style="margin:0">' + money(total) + ' owed in total</span></h2><div class="panel">';
+  provs.forEach(function (p) {
+    var o = laterOwed(p.name), nx = nextPayment(p.name);
+    h += '<button class="row" data-plopen="' + esc(p.name) + '"><span class="av">\uD83D\uDCB3</span><div class="l"><b>' + esc(p.name) + '</b><span>' +
+      (o > 0 ? (nx ? 'Next ' + money(nx.amt) + ' on ' + dayLabel(nx.d) : 'No payment plan set') : 'Nothing owed') + '</span></div><div class="r' + (o > 0 ? '' : ' mut') + '">' + money(o) + '</div></button>';
+  });
+  h += '</div><p class="note">Add another provider from inside PayLater. Any account you marked as money owed in the balance check, with PayLater in its name, shows up here automatically.</p></section>';
   return h;
 }
 function balanceSection() {
@@ -1555,7 +1565,8 @@ function txSheet(existing, asNew) {
     '<div class="wrap" style="margin-top:7px"><button class="chip" id="mine0">None of it is mine</button><button class="chip" id="minehalf">Half</button></div>' +
     '<label class="f">Who owes you the rest</label><div class="wrap" id="spwho"></div>' +
     '<p class="note" id="spmsg"></p></div>' +
-    '<label class="f">Paid with</label><div class="seg" id="pm"><button data-pm="cash" aria-pressed="' + (t.pm !== 'later') + '">Cash or bank</button><button data-pm="later" aria-pressed="' + (t.pm === 'later') + '">PayLater</button></div>' +
+    '<label class="f">Paid with</label><div class="wrap" id="pm"><button class="chip" data-pm="cash" aria-pressed="' + (t.pm !== 'later') + '">Cash or bank</button>' +
+      providers().map(function (p) { return '<button class="chip" data-pm="later" data-plp="' + esc(p.name) + '" aria-pressed="' + (t.pm === 'later' && provOf(t) === p.name) + '">' + esc(p.name) + '</button>'; }).join('') + '</div>' +
     '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="What was it?" autocomplete="off">' +
     '<div class="wrap" id="nsug" style="margin-top:7px"></div>' +
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + t.d + '">' +
@@ -1634,7 +1645,7 @@ function txSheet(existing, asNew) {
             $('#cats', el).innerHTML = catChips();
             $('#sub', el).value = t.sub; $('#subchips', el).innerHTML = subChips();
             if ((o.tx.tags || []).indexOf('Alaina') > -1 && t.tags.indexOf('Alaina') < 0) { t.tags.push('Alaina'); $('#tags', el).innerHTML = tagChips(); }
-            if (o.tx.pm === 'later' && t.pm !== 'later') { t.pm = 'later'; el.querySelectorAll('#pm button').forEach(function (x) { x.setAttribute('aria-pressed', x.dataset.pm === 'later'); }); }
+            if (o.tx.pm === 'later' && t.pm !== 'later') { t.pm = 'later'; t.plp = provOf(o.tx); el.querySelectorAll('#pm button').forEach(function (x) { x.setAttribute('aria-pressed', x.dataset.pm === 'later' && x.dataset.plp === t.plp); }); }
             toast('Filled in from last time');
           }
           drawSug();
@@ -1645,6 +1656,7 @@ function txSheet(existing, asNew) {
     drawSug();
     $('#pm', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-pm]'); if (!b) return; t.pm = b.dataset.pm;
+      if (t.pm === 'later') t.plp = b.dataset.plp; else delete t.plp;
       el.querySelectorAll('#pm button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
     });
     $('#save', el).addEventListener('click', function () {
@@ -2269,7 +2281,7 @@ function exportCsv(kind) {
   } else {
     rows = [['ID', 'Date', 'Type', 'Amount', 'Category', 'Subcategory', 'Note', 'Tags', 'Paid with', 'From', 'To']];
     allTx().sort(function (a, b) { return a.d < b.d ? -1 : 1; }).forEach(function (t) {
-      rows.push([t.id, t.d, t.t === 'exp' ? 'Expense' : t.t === 'inc' ? 'Income' : t.t === 'xfer' ? 'Transfer' : 'Adjustment', t.amt, t.cat || '', t.sub || '', t.note || '', (t.tags || []).join('; '), t.pm === 'later' ? 'PayLater' : '', t.from || '', t.to || '']);
+      rows.push([t.id, t.d, t.t === 'exp' ? 'Expense' : t.t === 'inc' ? 'Income' : t.t === 'xfer' ? 'Transfer' : 'Adjustment', t.amt, t.cat || '', t.sub || '', t.note || '', (t.tags || []).join('; '), t.pm === 'later' ? provOf(t) : '', t.from || '', t.to || '']);
     });
     download('ledger-transactions-' + today() + '.csv', rows.map(function (r) { return r.map(csvCell).join(','); }).join('\n'));
   }
@@ -2318,7 +2330,8 @@ function csvDiff(rows) {
         cat: get('category') || '\u{1F4E6} Other', sub: get('subcategory'), note: get('note'),
         tags: get('tags').split(/[;,]/).map(function (x) { return x.trim(); }).filter(Boolean), src: 'csv'
       };
-      if (/later/i.test(get('paid with'))) t.pm = 'later';
+      var pw = get('paid with');
+      if (pw && !/^cash|bank/i.test(pw)) { t.pm = 'later'; t.plp = /^paylater$/i.test(pw) ? GRAB : pw; }
       if (t.t === 'xfer') { t.from = get('from'); t.to = get('to'); t.cat = ''; }
       if (id && findTx(id)) { out.upd.push(t); out.seen[id] = 1; } else out.add.push(t);
     }
@@ -2458,19 +2471,23 @@ function checkSheet() {
   function accRows() {
     if (!S.meta.accounts.length) return '<div class="note" style="padding:10px 0">Add each place you keep money you can spend: bank accounts, cash, GrabPay wallet. Add GrabPay Later as money you owe. Leave brokerage and prop firm accounts out, they are tracked separately.</div>';
     return S.meta.accounts.map(function (a) {
-      var auto = a.liability && /pay ?later/i.test(a.name) && owedPL > 0.005;
-      return '<div class="row"><div class="l"><b>' + esc(a.name) + '</b><span>' + (auto ? 'From your bills, ' + money(owedPL) : a.liability ? 'Amount you owe' : 'Balance') + '</span></div>' +
+      var auto = plOwedBy[a.name];
+      return '<div class="row"><div class="l"><b>' + esc(a.name) + '</b><span>' + (auto ? 'From your bills, ' + money(auto) : a.liability ? 'Amount you owe' : 'Balance') + '</span></div>' +
         '<input class="t" style="width:120px;text-align:right" inputmode="decimal" data-acc="' + esc(a.name) + '" value="' + (vals[a.name] != null ? vals[a.name] : '') + '" placeholder="0.00"></div>';
     }).join('');
   }
   var qd = quietDays(30), owedPL = laterOwed();
   // What you owe PayLater is already known from your bills, so it goes in by itself:
   // without it the check looks short by exactly that amount.
-  if (owedPL > 0.005) {
-    var pla = S.meta.accounts.filter(function (a) { return a.liability && /pay ?later/i.test(a.name); })[0];
-    if (!pla) { pla = { name: 'GrabPay Later', liability: true, auto: true }; S.meta.accounts.push(pla); mark('meta'); }
-    if (vals[pla.name] == null) vals[pla.name] = owedPL;
-  }
+  var plOwedBy = {};
+  providers().forEach(function (p) {
+    var o = laterOwed(p.name); if (o <= 0.005) return;
+    plOwedBy[p.name] = o;
+    var acc = S.meta.accounts.filter(function (a) { return a.name === p.name; })[0];
+    if (!acc) { acc = { name: p.name, liability: true, auto: true }; S.meta.accounts.push(acc); mark('meta'); }
+    acc.liability = true;
+    if (vals[p.name] == null) vals[p.name] = o;
+  });
   var body = '<p class="note" style="margin-top:0">Enter what you actually have right now. The app compares it with what your logs say you should have' + (prev ? ' since your last check on ' + dayLabel(prev.d) : '') + '.</p>' +
     '<div class="panel" id="accs">' + accRows() + '</div>' +
     '<div style="display:flex;gap:8px;margin-top:10px"><input class="t" id="an" placeholder="e.g. DBS, Cash, GrabPay Later"><button class="btn sm ghost" id="aa">Add</button></div>' +
@@ -2525,22 +2542,43 @@ function checkSheet() {
 // Grab bills a statement period of PayLater spending as one bill, payable in full the
 // next month or split over 4, 8 or 12 monthly payments (8 and 12 carry a processing fee).
 var PL_SPLITS = [1, 4, 8, 12];
-function cycleDay() { return Math.min(28, Math.max(1, S.meta.plCycle || 1)); }
+var GRAB = 'GrabPay Later';
+function provOf(t) { return t.plp || GRAB; }
+function billProv(b) { return b.prov || GRAB; }
+// Providers come from three places: ones you added, ones already used on a purchase or
+// bill, and any account in the balance check that is clearly a buy-now-pay-later line.
+function providers() {
+  var out = [], seen = {};
+  function add(n, cyc) { if (!n || seen[n]) return; seen[n] = 1; out.push({ name: n, cycle: cyc }); }
+  (S.meta.plProviders || []).forEach(function (p) { add(p.name, p.cycle); });
+  add(GRAB, S.meta.plCycle || 1);
+  allTx().forEach(function (t) { if (t.pm === 'later') add(provOf(t)); });
+  S.bills.forEach(function (b) { add(billProv(b)); });
+  S.meta.accounts.forEach(function (a) { if (a.liability && /pay ?later|spaylater|atome|bnpl|instal/i.test(a.name)) add(a.name); });
+  return out;
+}
+function provObj(name) { return providers().filter(function (p) { return p.name === name; })[0] || { name: name }; }
+function cycleDay(prov) {
+  var p = (S.meta.plProviders || []).filter(function (x) { return x.name === (prov || GRAB); })[0];
+  var c = p && p.cycle ? p.cycle : (!prov || prov === GRAB ? S.meta.plCycle : 1);
+  return Math.min(28, Math.max(1, c || 1));
+}
 function pad2(n) { return String(n).padStart(2, '0'); }
 function dayBefore(d) { var x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() - 1); return x.getFullYear() + '-' + pad2(x.getMonth() + 1) + '-' + pad2(x.getDate()); }
-function periodStart(d) { var m = monthOf(d), cs = cycleDay(); if (+d.slice(8, 10) < cs) m = addMonth(m, -1); return m + '-' + pad2(cs); }
+function periodStart(d, prov) { var m = monthOf(d), cs = cycleDay(prov); if (+d.slice(8, 10) < cs) m = addMonth(m, -1); return m + '-' + pad2(cs); }
 function periodEnd(from) { return dayBefore(addMonth(monthOf(from), 1) + '-' + from.slice(8, 10)); }
-function periodLabel(from) {
+function periodLabel(from, prov) {
   var to = periodEnd(from);
-  return cycleDay() === 1 ? monthLabel(monthOf(from)) : dayLabel(from) + ' to ' + dayLabel(to);
+  return +from.slice(8, 10) === 1 ? monthLabel(monthOf(from)) : dayLabel(from) + ' to ' + dayLabel(to);
 }
-function laterItems(from) {
+function laterItems(from, prov) {
+  prov = prov || GRAB;
   var to = periodEnd(from), out = [];
-  allTx().forEach(function (t) { if (t.t === 'exp' && t.pm === 'later' && t.d >= from && t.d <= to) out.push(t); });
+  allTx().forEach(function (t) { if (t.t === 'exp' && t.pm === 'later' && provOf(t) === prov && t.d >= from && t.d <= to) out.push(t); });
   return out.sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; });
 }
-function billFor(from) { return S.bills.filter(function (b) { return b.from === from; })[0] || null; }
-function billTotal(b) { return r2(sum(laterItems(b.from), function (t) { return t.amt; })); }
+function billFor(from, prov) { prov = prov || GRAB; return S.bills.filter(function (b) { return b.from === from && billProv(b) === prov; })[0] || null; }
+function billTotal(b) { return r2(sum(laterItems(b.from, billProv(b)), function (t) { return t.amt; })); }
 function billDue(b) { return r2(billTotal(b) + (b.fee || 0)); }
 function billPaid(b) { return r2(sum(b.payments || [], function (p) { return p.amt; })); }
 function billLeft(b) { return r2(billDue(b) - billPaid(b)); }
@@ -2554,38 +2592,46 @@ function billSchedule(b) {
   }
   return out;
 }
-function periods() {
+function periods(prov) {
+  prov = prov || GRAB;
   var ps = {};
-  allTx().forEach(function (t) { if (t.t === 'exp' && t.pm === 'later') ps[periodStart(t.d)] = 1; });
-  S.bills.forEach(function (b) { ps[b.from] = 1; });
+  allTx().forEach(function (t) { if (t.t === 'exp' && t.pm === 'later' && provOf(t) === prov) ps[periodStart(t.d, prov)] = 1; });
+  S.bills.forEach(function (b) { if (billProv(b) === prov) ps[b.from] = 1; });
   return Object.keys(ps).sort().reverse();
 }
-function laterOwed() {
-  return r2(sum(periods(), function (f) { var b = billFor(f); return b ? billLeft(b) : r2(sum(laterItems(f), function (t) { return t.amt; })); }));
+// With no provider named, these add up every provider.
+function laterOwed(prov) {
+  if (!prov) return r2(sum(providers(), function (p) { return laterOwed(p.name); }));
+  return r2(sum(periods(prov), function (f) { var b = billFor(f, prov); return b ? billLeft(b) : r2(sum(laterItems(f, prov), function (t) { return t.amt; })); }));
 }
-function nextPayment() {
+function nextPayment(prov) {
   var out = null;
-  S.bills.forEach(function (b) { billSchedule(b).forEach(function (s) { if (!s.paid && (!out || s.d < out.d)) out = { d: s.d, amt: r2(s.amt - s.part), from: b.from }; }); });
+  S.bills.forEach(function (b) {
+    if (prov && billProv(b) !== prov) return;
+    billSchedule(b).forEach(function (s) { if (!s.paid && (!out || s.d < out.d)) out = { d: s.d, amt: r2(s.amt - s.part), from: b.from, prov: billProv(b) }; });
+  });
   return out;
 }
-function upcoming(n) {
+function upcoming(n, prov) {
   var out = [];
   for (var i = 0; i < n; i++) {
     var m = addMonth(monthOf(today()), i), amt = 0;
-    S.bills.forEach(function (b) { billSchedule(b).forEach(function (s) { if (!s.paid && monthOf(s.d) === m) amt += s.amt - s.part; }); });
+    S.bills.forEach(function (b) { if (prov && billProv(b) !== prov) return; billSchedule(b).forEach(function (s) { if (!s.paid && monthOf(s.d) === m) amt += s.amt - s.part; }); });
     out.push({ m: m, amt: r2(amt) });
   }
   return out;
 }
-function openBills() {
-  return periods().slice().sort().map(function (f) {
-    var b = billFor(f);
-    if (!b) b = { id: uid(), from: f, n: 1, fee: 0, first: '', payments: [], _new: true };
+function openBills(prov) {
+  prov = prov || GRAB;
+  return periods(prov).slice().sort().map(function (f) {
+    var b = billFor(f, prov);
+    if (!b) b = { id: uid(), from: f, prov: prov, n: 1, fee: 0, first: '', payments: [], _new: true };
     return b;
   }).filter(function (b) { return billLeft(b) > 0.005; });
 }
-function bulkPaySheet() {
-  var bills = openBills(), owed = r2(sum(bills, billLeft));
+function bulkPaySheet(prov) {
+  prov = prov || UI.plp || GRAB;
+  var bills = openBills(prov), owed = r2(sum(bills, billLeft));
   var body = '<div class="kv" style="margin-top:0"><span>Outstanding across ' + bills.length + ' bill' + (bills.length === 1 ? '' : 's') + '</span><span>' + money(owed) + '</span></div>' +
     '<div class="amt-in"><span>$</span><input id="bp" inputmode="decimal" value="' + (owed || '') + '" aria-label="Amount paid"></div>' +
     '<label class="f" for="bpd">Date paid</label><input class="t" type="date" id="bpd" value="' + today() + '">' +
@@ -2593,7 +2639,7 @@ function bulkPaySheet() {
     '<label class="f">How it will be applied</label><div class="panel" id="alloc"></div>' +
     '<p class="note">Oldest bill first. This records the money leaving your account; the purchases were already counted on the days you made them.</p>' +
     '<div class="actions"><button class="btn" id="bpgo">Record payment</button></div>';
-  openSheet('Pay PayLater', body, function (el) {
+  openSheet('Pay ' + prov, body, function (el) {
     function plan() {
       var left = parseFloat($('#bp', el).value); if (isNaN(left) || left < 0) left = 0;
       var out = [];
@@ -2606,7 +2652,7 @@ function bulkPaySheet() {
     function draw() {
       var p = plan();
       $('#alloc', el).innerHTML = (p.rows.length ? p.rows.map(function (r) {
-        return '<div class="row"><div class="l"><b>' + periodLabel(r.b.from) + '</b><span>' + (billLeft(r.b) - r.amt < 0.005 ? 'Cleared' : money(r2(billLeft(r.b) - r.amt)) + ' left after this') + '</span></div><div class="r">' + money(r.amt) + '</div></div>';
+        return '<div class="row"><div class="l"><b>' + periodLabel(r.b.from, prov) + '</b><span>' + (billLeft(r.b) - r.amt < 0.005 ? 'Cleared' : money(r2(billLeft(r.b) - r.amt)) + ' left after this') + '</span></div><div class="r">' + money(r.amt) + '</div></div>';
       }).join('') : '<div class="empty" style="padding:14px">Nothing to apply it to.</div>') +
         (p.over > 0.005 ? '<div class="row"><div class="l"><b>Not needed</b><span>More than you owe, so it stays unrecorded</span></div><div class="r">' + money(p.over) + '</div></div>' : '');
     }
@@ -2617,46 +2663,70 @@ function bulkPaySheet() {
       p.rows.forEach(function (r) {
         if (r.b._new) { delete r.b._new; S.bills.push(r.b); }
         r.b.payments = r.b.payments || [];
-        r.b.payments.push({ id: uid(), payId: payId, d: d, amt: r.amt, note: note || 'PayLater payment' });
+        r.b.payments.push({ id: uid(), payId: payId, d: d, amt: r.amt, note: note || prov + ' payment' });
       });
       mark('bills'); closeSheet(); render(); toast('Recorded ' + money(sum(p.rows, function (r) { return r.amt; })));
     });
   });
 }
-function payLaterSheet() {
-  var owed = laterOwed(), nx = nextPayment(), up = upcoming(6), ps = periods();
-  var body = '<div class="kv"><span>Outstanding on PayLater</span><span>' + money(owed) + '</span>' +
-    '<span>Next payment</span><span>' + (nx ? money(nx.amt) + ' on ' + dayLabel(nx.d) : 'Nothing scheduled') + '</span></div>' +
+function payLaterSheet(prov) {
+  var provs = providers();
+  prov = prov || UI.plp || (provs.filter(function (p) { return laterOwed(p.name) > 0; })[0] || provs[0]).name;
+  UI.plp = prov;
+  var owed = laterOwed(prov), nx = nextPayment(prov), up = upcoming(6, prov), ps = periods(prov);
+  var body = '<div class="seg" id="plsel" style="overflow-x:auto">' + provs.map(function (p) {
+      var o = laterOwed(p.name);
+      return '<button data-prov="' + esc(p.name) + '" aria-pressed="' + (p.name === prov) + '">' + esc(p.name.replace(/ ?pay ?later/i, '') || p.name) + (o > 0 ? ' \u00b7 ' + money(o, 0) : '') + '</button>';
+    }).join('') + '<button data-prov="__new" aria-pressed="false">+ Add</button></div>' +
+    '<div class="kv"><span>Outstanding on ' + esc(prov) + '</span><span>' + money(owed) + '</span>' +
+    '<span>Next payment</span><span>' + (nx ? money(nx.amt) + ' on ' + dayLabel(nx.d) : 'Nothing scheduled') + '</span>' +
+    (provs.length > 1 ? '<span>All providers together</span><span>' + money(laterOwed()) + '</span>' : '') + '</div>' +
     (owed > 0 ? '<div class="actions" style="margin:10px 0 4px"><button class="btn" id="paynow">Record a payment</button></div>' : '');
   if (up.some(function (u) { return u.amt > 0; })) {
     body += '<label class="f">Committed over the next 6 months</label><div class="panel">' + up.map(function (u) {
-      return '<div class="row"><div class="l"><b>' + monthLabel(u.m) + '</b></div><div class="r">' + (u.amt ? money(u.amt) : '–') + '</div></div>';
+      return '<div class="row"><div class="l"><b>' + monthLabel(u.m) + '</b></div><div class="r">' + (u.amt ? money(u.amt) : '\u2013') + '</div></div>';
     }).join('') + '</div>';
   }
   body += '<label class="f">Bills by statement period</label><div class="panel">';
-  if (!ps.length) body += '<div class="empty" style="padding:14px">Nothing charged to PayLater yet. Set "Paid with" to PayLater when you add a transaction, or tick "Charge to PayLater" when importing a Grab statement.</div>';
+  if (!ps.length) body += '<div class="empty" style="padding:14px">Nothing charged to ' + esc(prov) + ' yet. When you add a purchase, choose it under "Paid with".</div>';
   ps.forEach(function (f) {
-    var b = billFor(f), items = laterItems(f), tot = r2(sum(items, function (t) { return t.amt; }));
-    var sub = b ? (b.n > 1 ? b.n + ' monthly payments, ' + money(billLeft(b)) + ' left' : (billLeft(b) <= 0.01 ? 'Settled' : 'Due ' + dayLabel(billSchedule(b)[0].d))) : items.length + ' purchases, no plan set';
-    body += '<button class="row" data-bill="' + f + '"><div class="l"><b>' + periodLabel(f) + '</b><span>' + sub + '</span></div><div class="r">' + money(b ? billDue(b) : tot) + '</div></button>';
+    var b = billFor(f, prov), items = laterItems(f, prov), tot = r2(sum(items, function (t) { return t.amt; }));
+    var sub = b ? (b.n > 1 ? b.n + ' monthly payments, ' + money(billLeft(b)) + ' left' : (billLeft(b) <= 0.01 ? 'Settled' : 'Due ' + dayLabel(billSchedule(b)[0].d))) : items.length + ' purchase' + (items.length === 1 ? '' : 's') + ', no plan set';
+    body += '<button class="row" data-bill="' + f + '"><div class="l"><b>' + periodLabel(f, prov) + '</b><span>' + sub + '</span></div><div class="r">' + money(b ? billDue(b) : tot) + '</div></button>';
   });
-  body += '</div><label class="f" for="cyc">Statement period starts on day</label><input class="t" id="cyc" inputmode="numeric" value="' + cycleDay() + '">' +
-    '<p class="note">Grab bills a whole period at once. Set the day your bill period starts so purchases fall into the right bill. Your purchases and payments stay separate records either way.</p>';
+  body += '</div><label class="f" for="cyc">' + esc(prov) + ' statement period starts on day</label><input class="t" id="cyc" inputmode="numeric" value="' + cycleDay(prov) + '">' +
+    '<p class="note">Each provider bills its own period, so purchases fall into the right bill. Purchases count as spending on the day you make them; paying a bill is never counted again.</p>';
   openSheet('PayLater', body, function (el) {
-    el.querySelectorAll('[data-bill]').forEach(function (btn) { btn.addEventListener('click', function () { billSheet(btn.dataset.bill); }); });
-    var pn = $('#paynow', el); if (pn) pn.addEventListener('click', function () { bulkPaySheet(); });
+    $('#plsel', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-prov]'); if (!b) return;
+      if (b.dataset.prov === '__new') {
+        var n = (prompt('Provider name, e.g. Shopee PayLater, Atome') || '').trim(); if (!n) return;
+        S.meta.plProviders = S.meta.plProviders || [];
+        if (!S.meta.plProviders.some(function (x) { return x.name === n; })) S.meta.plProviders.push({ name: n, cycle: 1 });
+        if (!S.meta.accounts.some(function (a) { return a.name === n; })) S.meta.accounts.push({ name: n, liability: true });
+        mark('meta'); payLaterSheet(n); return;
+      }
+      payLaterSheet(b.dataset.prov);
+    });
+    el.querySelectorAll('[data-bill]').forEach(function (btn) { btn.addEventListener('click', function () { billSheet(btn.dataset.bill, prov); }); });
+    var pn = $('#paynow', el); if (pn) pn.addEventListener('click', function () { bulkPaySheet(prov); });
     $('#cyc', el).addEventListener('change', function () {
-      var v = parseInt(this.value, 10); if (!(v >= 1 && v <= 28)) { this.value = cycleDay(); return; }
-      S.meta.plCycle = v; mark('meta'); closeSheet(); render(); payLaterSheet();
+      var v = parseInt(this.value, 10); if (!(v >= 1 && v <= 28)) { this.value = cycleDay(prov); return; }
+      S.meta.plProviders = S.meta.plProviders || [];
+      var po = S.meta.plProviders.filter(function (x) { return x.name === prov; })[0];
+      if (po) po.cycle = v; else S.meta.plProviders.push({ name: prov, cycle: v });
+      if (prov === GRAB) S.meta.plCycle = v;
+      mark('meta'); render(); payLaterSheet(prov);
     });
   });
 }
-function billSheet(from) {
-  var b = billFor(from);
-  if (!b) { b = { id: uid(), from: from, n: 1, fee: 0, first: '', payments: [] }; S.bills.push(b); mark('bills'); }
+function billSheet(from, prov) {
+  prov = prov || GRAB;
+  var b = billFor(from, prov);
+  if (!b) { b = { id: uid(), from: from, prov: prov, n: 1, fee: 0, first: '', payments: [] }; S.bills.push(b); mark('bills'); }
   function save() { mark('bills'); render(); }
   function body() {
-    var items = laterItems(from), tot = billTotal(b), sch = billSchedule(b), paid = billPaid(b);
+    var items = laterItems(from, prov), tot = billTotal(b), sch = billSchedule(b), paid = billPaid(b);
     var h = '<div class="kv"><span>Purchases in this period</span><span>' + money(tot) + ' over ' + items.length + ' items</span>' +
       (b.fee ? '<span>Processing fee</span><span>' + money(b.fee) + '</span>' : '') +
       '<span>Total to pay</span><span>' + money(billDue(b)) + '</span><span>Paid so far</span><span>' + money(paid) + '</span><span><b>Still to pay</b></span><span><b>' + money(billLeft(b)) + '</b></span></div>';
@@ -2679,13 +2749,13 @@ function billSheet(from) {
     }).join('') + '</div>';
     h += '<label class="f" for="fee">Processing fee</label><input class="t" id="fee" inputmode="decimal" value="' + (b.fee || '') + '" placeholder="0.00">' +
       '<label class="f" for="fd">First payment due</label><input class="t" type="date" id="fd" value="' + (b.first || sch[0].d) + '">' +
-      '<label class="f" for="stt">Grab statement total, to check against</label><input class="t" id="stt" inputmode="decimal" value="' + (b.stmt || '') + '" placeholder="optional">' +
+      '<label class="f" for="stt">Statement total, to check against</label><input class="t" id="stt" inputmode="decimal" value="' + (b.stmt || '') + '" placeholder="optional">' +
       '<div class="actions"><button class="btn danger" id="delb">Delete bill</button><button class="btn" id="saveb">Save</button></div>';
     h += '<label class="f">Purchases in this bill</label><div class="panel">' + (items.length ? items.map(txRow).join('') : '<div class="empty" style="padding:14px">Nothing charged to PayLater in this period.</div>') + '</div>';
     return h;
   }
   function draw() {
-    openSheet(periodLabel(from) + ' bill', body(), function (el) {
+    openSheet(prov + ', ' + periodLabel(from, prov), body(), function (el) {
       $('#pn', el).addEventListener('click', function (e) {
         var btn = e.target.closest('[data-n]'); if (!btn) return; b.n = +btn.dataset.n; save(); draw();
       });
@@ -2698,12 +2768,12 @@ function billSheet(from) {
       });
       $('#delb', el).addEventListener('click', function () {
         if (!confirm('Delete this bill and its payment records? The purchases themselves stay.')) return;
-        S.bills = S.bills.filter(function (x) { return x.id !== b.id; }); save(); closeSheet(); payLaterSheet();
+        S.bills = S.bills.filter(function (x) { return x.id !== b.id; }); save(); closeSheet(); payLaterSheet(prov);
       });
       $('#addp', el).addEventListener('click', function () { paymentSheet(b, null, draw); });
       $('#addi', el).addEventListener('click', function () {
         closeSheet();
-        txSheet({ id: uid(), d: periodEnd(from) > today() ? today() : periodEnd(from), t: 'exp', amt: 0, cat: '', sub: '', note: '', tags: [], pm: 'later', src: 'app' }, true);
+        txSheet({ id: uid(), d: periodEnd(from) > today() ? today() : periodEnd(from), t: 'exp', amt: 0, cat: '', sub: '', note: '', tags: [], pm: 'later', plp: prov, src: 'app' }, true);
       });
       el.querySelectorAll('[data-pmt]').forEach(function (btn) {
         btn.addEventListener('click', function () { paymentSheet(b, (b.payments || []).filter(function (p) { return p.id === btn.dataset.pmt; })[0], draw); });
@@ -2935,13 +3005,16 @@ function inboxSheet() {
     '<select class="t" id="ibs" style="width:auto;margin-bottom:10px"><option value="new">Newest</option><option value="old">Oldest</option><option value="big">Largest</option></select></div>' +
     '<div style="display:flex;gap:8px;margin-bottom:10px"><select class="t" id="ibm" style="flex:1">' + monthOpts() + '</select>' +
     '<select class="t" id="ibw" style="width:auto" aria-label="Match window"><option value="1">Match ±1 day</option><option value="3">Match ±3 days</option><option value="7">Match ±7 days</option><option value="14">Match ±14 days</option></select></div>' +
-    '<div class="wrap" style="margin-bottom:8px"><button class="chip" id="plt" aria-pressed="' + (IB.later !== false) + '">Charge to PayLater</button><button class="chip" data-bulk="sel">Select shown</button><button class="chip" data-bulk="unsel">Deselect shown</button><button class="chip rose" data-bulk="tag">Tag shown Alaina</button><button class="chip" data-bulk="untag">Untag shown</button><button class="chip" data-bulk="drop">Discard unselected shown</button></div>' +
+    '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center"><button class="chip" id="plt" aria-pressed="' + (IB.later !== false) + '">Charged to</button>' +
+    '<select class="t" id="plpsel" style="flex:1">' + providers().map(function (p) { return '<option' + ((IB.plp || GRAB) === p.name ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '</select></div>' +
+    '<div class="wrap" style="margin-bottom:8px"><button class="chip" data-bulk="sel">Select shown</button><button class="chip" data-bulk="unsel">Deselect shown</button><button class="chip rose" data-bulk="tag">Tag shown Alaina</button><button class="chip" data-bulk="untag">Untag shown</button><button class="chip" data-bulk="drop">Discard unselected shown</button></div>' +
     '<div style="display:flex;gap:8px;margin-bottom:10px"><select class="t" id="ibcat" style="flex:1"><option value="">Set category for shown…</option>' + expCats + '<option value="__new">New category…</option></select></div>' +
     '<div id="ibrule"></div><div id="ibl">' + list() + '</div>' +
     '<div class="actions"><button class="btn ghost" id="ibc">Clear list</button><button class="btn" id="iba">Add selected</button></div>';
   openSheet('Review imported rows', body, function (el) {
     $('#ibs', el).value = IB.sort; $('#ibw', el).value = String(IB.win);
     $('#plt', el).addEventListener('click', function () { IB.later = IB.later === false; this.setAttribute('aria-pressed', IB.later !== false); });
+    $('#plpsel', el).addEventListener('change', function () { IB.plp = this.value; });
     function re() { $('#ibl', el).innerHTML = list(); $('#ibm', el).innerHTML = monthOpts(); ruleHint(); }
     $('#ibm', el).addEventListener('change', function () { IB.m = this.value; re(); });
     $('#ibw', el).addEventListener('change', function () { IB.win = +this.value; rematch(); mark('inbox'); re(); });
@@ -2983,7 +3056,7 @@ function inboxSheet() {
       sel.forEach(function (r) {
         var t = { id: uid(), d: r.d, t: r.kind === 'refund' ? 'inc' : 'exp', amt: r.amt, cat: r.cat, sub: cleanSub(r.sub), note: r.desc.slice(0, 90), tags: r.tags.slice(), src: 'stmt' };
         rememberSub(t.cat, t.sub);
-        if (IB.later !== false && t.t === 'exp') t.pm = 'later';
+        if (IB.later !== false && t.t === 'exp') { t.pm = 'later'; t.plp = IB.plp || GRAB; }
         if (!catObj(t.cat)) S.meta.cats.push({ name: t.cat, type: t.t, kind: t.t === 'inc' ? 'reimb' : undefined });
         var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
       });
@@ -3177,9 +3250,10 @@ function onClick(e) {
   var b;
   if ((b = t.closest('[data-tab]'))) { UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
+  if ((b = t.closest('[data-plopen]'))) { payLaterSheet(b.dataset.plopen); return; }
   if ((b = t.closest('[data-quick]'))) {
     var q = frequentNotes()[+b.dataset.quick];
-    if (q) txSheet({ id: uid(), d: today(), t: 'exp', amt: q.t.amt, cat: q.t.cat, sub: q.t.sub || '', note: q.t.note, tags: (q.t.tags || []).slice(), pm: q.t.pm, src: 'app' }, true);
+    if (q) txSheet({ id: uid(), d: today(), t: 'exp', amt: q.t.amt, cat: q.t.cat, sub: q.t.sub || '', note: q.t.note, tags: (q.t.tags || []).slice(), pm: q.t.pm, plp: q.t.plp, src: 'app' }, true);
     return;
   }
   if ((b = t.closest('[data-range]'))) { UI.range = +b.dataset.range; render(); return; }
