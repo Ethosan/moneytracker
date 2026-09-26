@@ -396,6 +396,21 @@ label.f{margin:16px 2px 8px}
 
 /* anything marked hidden stays hidden, whatever its own display rule says */
 [hidden]{display:none!important}
+
+/* ---------- amount calculator ---------- */
+.calc-in{padding-right:10px}
+.calc-in input{min-width:0}
+.calcbtn{flex:0 0 auto;align-self:center;width:48px;height:48px;border-radius:14px;border:0;background:var(--sunk);color:var(--muted);font:700 12px/1.1 "Geist",sans-serif;letter-spacing:.04em}
+.calcbtn[aria-expanded="true"]{background:var(--accent);color:var(--accent-ink)}
+.calcsum{display:flex;gap:10px;align-items:baseline;min-height:0;margin:-6px 4px 10px;font-size:13.5px;color:var(--muted)}
+.calcsum:empty{display:none}
+.calcsum b{color:var(--ink);font-size:15px}
+.calcpad{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;background:var(--surface);border-radius:22px;padding:12px;margin:0 0 14px;box-shadow:var(--shadow)}
+.calcpad button{min-height:52px;border:0;border-radius:14px;background:var(--sunk);font:600 20px "Geist",sans-serif;color:var(--ink)}
+.calcpad button.op{background:var(--accent-soft);color:var(--accent)}
+.calcpad button.fn{color:var(--muted);font-size:17px}
+.calcpad button.eq{background:var(--accent);color:var(--accent-ink)}
+.calcpad button:active{transform:scale(.96)}
 </style>
 </head>
 <body>
@@ -1183,6 +1198,7 @@ function txRow(t) {
   if (t.sub) sub = sub ? sub + ' \u00b7 ' + t.sub : t.sub;
   if (t.pm === 'later') { var pn = provOf(t); sub = sub ? sub + ' \u00b7 ' + pn : pn; }
   if (t.split && t.split.mine === 0) sub = 'Bought for ' + t.split.person + ', none of it yours';
+  if (t.calc && isSum(t.calc)) { var np = sumParts(t.calc).length; sub = (sub ? sub + ' \u00b7 ' : '') + (np > 1 && !/[*/()]/.test(t.calc) ? np + ' items: ' + sumParts(t.calc).join(' + ') : t.calc); }
   if (t._inst) sub = 'Instalment ' + t._inst + ' of ' + money(t._full) + (sub ? ' \u00b7 ' + sub : '');
   else if (t.inst && t.inst.n > 1) sub = (sub ? sub + ' \u00b7 ' : '') + t.inst.n + ' instalments of ' + money(r2(t.amt / t.inst.n));
   return '<button class="row" data-edit-tx="' + esc(t.id) + '"><span class="av' + ((t.tags || []).indexOf('Alaina') > -1 ? ' al' : '') + '">' + esc(avatar(t.cat)) + '</span>' +
@@ -1560,7 +1576,7 @@ function txSheet(existing, asNew) {
   var body = '<div class="seg" id="tt"><button data-t="exp" aria-pressed="' + (t.t === 'exp') + '">Expense</button><button data-t="inc" aria-pressed="' + (t.t === 'inc') + '">Income</button>' +
     (existing ? '' : '<button data-t="move" aria-pressed="false">Move money</button>') +
     (t.t === 'adj' ? '<button data-t="adj" aria-pressed="true">Adjustment</button>' : '') + '</div>' +
-    '<div class="amt-in"><span>$</span><input id="amt" inputmode="decimal" placeholder="0.00" value="' + (t.amt ? t.amt : '') + '" aria-label="Amount"></div>' +
+    calcField('amt', t.calc || (t.amt ? t.amt : '')) +
     '<label class="f">Category</label><div class="wrap" id="cats">' + catChips() + '</div>' +
     '<label class="f" for="sub">Subcategory</label><input class="t" id="sub" value="' + esc(t.sub || '') + '" placeholder="e.g. Grab, drinks, with friends" autocomplete="off">' +
     '<div class="wrap" id="subchips" style="margin-top:7px">' + subChips() + '</div>' +
@@ -1582,6 +1598,7 @@ function txSheet(existing, asNew) {
     '<div class="actions">' + (existing ? '<button class="btn danger" id="del">Delete</button>' : '') + '<button class="btn" id="save">' + (existing ? 'Save changes' : 'Add') + '</button></div>';
   openSheet(existing ? 'Edit transaction' : 'New transaction', body, function (el) {
     if (!existing) setTimeout(function () { $('#amt', el).focus(); }, 50);
+    wireCalc(el, 'amt', function () { if (typeof drawInst === 'function') { try { drawInst(); drawWho(); } catch (x) { } } });
     $('#tt', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-t]'); if (!b) return;
       if (b.dataset.t === 'move') { closeSheet(); moveSheet(); return; }
@@ -1606,7 +1623,7 @@ function txSheet(existing, asNew) {
     });
     $('#sub', el).addEventListener('input', function () { t.sub = cleanSub(this.value); });
     function drawInst() {
-      var n = (t.inst && t.inst.n) || 1, a = parseFloat($('#amt', el).value);
+      var n = (t.inst && t.inst.n) || 1, a = calcVal($('#amt', el).value);
       $('#insts', el).hidden = n < 2;
       el.querySelectorAll('#instn button').forEach(function (x) { x.setAttribute('aria-pressed', +x.dataset.in === n); });
       el.querySelectorAll('#insts button').forEach(function (x) { x.setAttribute('aria-pressed', +x.dataset.is === ((t.inst && t.inst.start) || 0)); });
@@ -1633,7 +1650,7 @@ function txSheet(existing, asNew) {
       var box = $('#spwho', el); if (!box) return;
       box.innerHTML = whoList().map(function (n) { return '<button class="chip" data-spw="' + esc(n) + '" aria-pressed="' + (spWho === n) + '">' + esc(n) + '</button>'; }).join('') +
         '<button class="chip" data-spw="__new">Someone else\u2026</button>';
-      var mine = parseFloat(($('#mine', el) || {}).value), full = parseFloat($('#amt', el).value);
+      var mine = parseFloat(($('#mine', el) || {}).value), full = calcVal($('#amt', el).value);
       $('#spmsg', el).textContent = !(full > 0) ? 'Enter the total you paid above, and your share here.'
         : mine === 0 ? 'None of this is your spending. The full ' + money(full) + ' is owed to you by ' + (spWho || 'them') + '.'
         : (mine > 0 && full > mine) ? money(full - mine) + ' goes to ' + (spWho || 'them') + ' as money owed to you, and only ' + money(mine) + ' counts as your spending.'
@@ -1648,7 +1665,7 @@ function txSheet(existing, asNew) {
     el.addEventListener('input', function (e) { if (e.target.id === 'mine' || e.target.id === 'amt') drawWho(); });
     $('#mine0', el).addEventListener('click', function () { $('#mine', el).value = '0'; drawWho(); });
     $('#minehalf', el).addEventListener('click', function () {
-      var full = parseFloat($('#amt', el).value); if (full > 0) $('#mine', el).value = r2(full / 2); drawWho();
+      var full = calcVal($('#amt', el).value); if (full > 0) $('#mine', el).value = r2(full / 2); drawWho();
     });
     $('#spwho', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-spw]'); if (!b) return;
@@ -1688,11 +1705,12 @@ function txSheet(existing, asNew) {
       $('#instbox', el).hidden = t.pm !== 'later'; drawInst();
     });
     $('#save', el).addEventListener('click', function () {
-      var a = parseFloat($('#amt', el).value);
+      var a = calcVal($('#amt', el).value);
       if (!(a > 0)) { toast('Enter an amount'); $('#amt', el).focus(); return; }
       if (!t.cat) { toast('Pick a category'); return; }
       t.amt = r2(a); t.note = $('#note', el).value.trim(); t.d = $('#dt', el).value || today();
       t.sub = cleanSub($('#sub', el).value);
+      var ex = exprOf($('#amt', el)); if (ex) t.calc = ex.replace(/\s+/g, ''); else delete t.calc;
       var mineV = parseFloat(($('#mine', el) || {}).value);
       if (!$('#spbox', el).hidden && mineV >= 0 && mineV < t.amt) {
         if (!spWho) { toast('Say who owes you the rest'); return; }
@@ -1738,7 +1756,7 @@ function wireAcct(el, id, onPick) {
 // useless without knowing where the money went, so it is recorded with both ends.
 function xferSheet(existing) {
   var t = existing ? Object.assign({}, existing) : { id: uid(), d: today(), t: 'xfer', amt: 0, from: '', to: '', note: '', src: 'app' };
-  var body = '<div class="amt-in"><span>$</span><input id="amt" inputmode="decimal" placeholder="0.00" value="' + (t.amt || '') + '" aria-label="Amount"></div>' +
+  var body = calcField('amt', t.amt || '') +
     '<label class="f" for="xf">Out of</label>' + acctSelect('xf', t.from, 'Choose an account') +
     '<label class="f" for="xt">In to</label>' + acctSelect('xt', t.to, 'Choose an account') +
     '<label class="f" for="xn">Note</label><input class="t" id="xn" value="' + esc(t.note) + '" placeholder="e.g. ATM withdrawal, wallet top up">' +
@@ -1746,9 +1764,9 @@ function xferSheet(existing) {
     '<p class="note">Not spending and not income. It only shows in your history and in the balance check.</p>' +
     '<div class="actions">' + (existing ? '<button class="btn danger" id="xdel">Delete</button>' : '') + '<button class="btn" id="xs">Save</button></div>';
   openSheet(existing ? 'Edit transfer' : 'Move between my accounts', body, function (el) {
-    wireAcct(el, 'xf'); wireAcct(el, 'xt');
+    wireAcct(el, 'xf'); wireAcct(el, 'xt'); wireCalc(el, 'amt');
     $('#xs', el).addEventListener('click', function () {
-      var a = parseFloat($('#amt', el).value);
+      var a = calcVal($('#amt', el).value);
       if (!(a > 0)) { toast('Enter an amount'); return; }
       var f = $('#xf', el).value, to = $('#xt', el).value;
       if (!f || !to) { toast('Pick both accounts'); return; }
@@ -1761,6 +1779,74 @@ function xferSheet(existing) {
     var dl = $('#xdel', el); if (dl) dl.addEventListener('click', function () { if (!confirm('Delete this transfer?')) return; removeTx(existing); closeSheet(); render(); });
   });
 }
+
+// ---------- amount calculator ----------
+// Amount fields accept sums like 12.50+8.90+3, so one entry can bundle several
+// purchases. Evaluated with a tiny parser (numbers and + - x / only), never eval().
+function calcVal(str) {
+  var s = String(str == null ? '' : str).replace(/[,\s$]/g, '').replace(/[x\u00d7]/gi, '*').replace(/\u00f7/g, '/').replace(/[\u2212\u2013]/g, '-');
+  if (!s) return NaN;
+  if (!/^[0-9.+\-*/()]+$/.test(s)) return NaN;
+  var i = 0;
+  function num() {
+    var m = /^\d*\.?\d+|^\d+\.?/.exec(s.slice(i)); if (!m) throw 0;
+    i += m[0].length; return parseFloat(m[0]);
+  }
+  function factor() {
+    if (s[i] === '-') { i++; return -factor(); }
+    if (s[i] === '+') { i++; return factor(); }
+    if (s[i] === '(') { i++; var v = expr(); if (s[i] !== ')') throw 0; i++; return v; }
+    return num();
+  }
+  function term() { var v = factor(); while (s[i] === '*' || s[i] === '/') { var o = s[i++], r = factor(); v = o === '*' ? v * r : v / r; } return v; }
+  function expr() { var v = term(); while (s[i] === '+' || s[i] === '-') { var o = s[i++], r = term(); v = o === '+' ? v + r : v - r; } return v; }
+  try { var v = expr(); if (i !== s.length || !isFinite(v)) return NaN; return r2(v); } catch (e) { return NaN; }
+}
+function isSum(str) { return /\d\s*[+\-*/x\u00d7\u00f7]\s*[\d(]/.test(String(str || '')); }
+function sumParts(str) { return String(str || '').split(/\+/).map(function (x) { return x.trim(); }).filter(Boolean); }
+function calcField(id, value, label) {
+  return '<div class="amt-in calc-in"><span>$</span><input id="' + id + '" inputmode="decimal" autocomplete="off" placeholder="0.00" value="' + esc(value == null ? '' : value) + '" aria-label="' + (label || 'Amount') + '">' +
+    '<button type="button" class="calcbtn" data-calc="' + id + '" aria-label="Open calculator" aria-expanded="false">+\u2212<br>\u00d7\u00f7</button></div>' +
+    '<div class="calcsum" id="' + id + '-sum"></div>' +
+    '<div class="calcpad" id="' + id + '-pad" hidden>' +
+      ['7', '8', '9', '\u00f7', '4', '5', '6', '\u00d7', '1', '2', '3', '\u2212', '.', '0', '\u232b', '+', 'C', '(', ')', '='].map(function (k) {
+        return '<button type="button" data-key="' + k + '" class="' + (/[\u00f7\u00d7\u2212+=]/.test(k) ? 'op' : k === 'C' || k === '\u232b' ? 'fn' : '') + (k === '=' ? ' eq' : '') + '">' + k + '</button>';
+      }).join('') + '</div>';
+}
+function wireCalc(el, id, onChange) {
+  var inp = $('#' + id, el), pad = $('#' + id + '-pad', el), sumEl = $('#' + id + '-sum', el), btn = el.querySelector('[data-calc="' + id + '"]');
+  if (!inp) return;
+  function show() {
+    var v = inp.value, n = calcVal(v);
+    // long sums shrink to fit, and the end stays visible as you add to it
+    inp.style.fontSize = v.length > 16 ? '22px' : v.length > 10 ? '30px' : '';
+    inp.scrollLeft = inp.scrollWidth;
+    if (isSum(v)) {
+      var parts = sumParts(v);
+      sumEl.innerHTML = isNaN(n) ? '<span class="neg">Not a valid sum yet</span>'
+        : '<b>= ' + money(n) + '</b>' + (parts.length > 1 && !/[*/x\u00d7\u00f7()\-]/.test(v.replace(/^-/, '')) ? '<span>' + parts.length + ' items bundled</span>' : '');
+    } else sumEl.innerHTML = '';
+    if (onChange) onChange();
+  }
+  btn.addEventListener('click', function () {
+    var open = pad.hidden; pad.hidden = !open; btn.setAttribute('aria-expanded', open);
+    inp.readOnly = open; // keeps the phone keyboard away while the keypad is open
+    if (!open) inp.focus();
+  });
+  pad.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-key]'); if (!b) return; var k = b.dataset.key, v = inp.value;
+    if (k === 'C') v = '';
+    else if (k === '\u232b') v = v.slice(0, -1);
+    else if (k === '=') { var n = calcVal(v); if (!isNaN(n)) { inp.dataset.expr = isSum(v) ? v : ''; v = String(n); } }
+    else v += { '\u00f7': '/', '\u00d7': '*', '\u2212': '-' }[k] || k;
+    inp.value = v; show();
+  });
+  inp.addEventListener('input', function () { inp.dataset.expr = ''; show(); });
+  show();
+}
+// The sum you typed, if any, so it can be kept with the transaction for context.
+function exprOf(inp) { return isSum(inp.value) ? inp.value : (inp.dataset.expr || ''); }
+
 // Moving money is not spending. It either goes into an investment account, or it just
 // shifts between your own bank, wallet and cash, which needs no record at all.
 function moveSheet() {
@@ -1832,7 +1918,7 @@ function ledgerSheet(opts) {
     '<div id="newv" hidden><label class="f" for="nvn">Name</label><input class="t" id="nvn" placeholder="e.g. Topstep">' +
     '<label class="f">Type</label><div class="seg" id="nvt"><button data-ty="broker" aria-pressed="true">Broker</button><button data-ty="prop" aria-pressed="false">Prop firm</button><button data-ty="poker" aria-pressed="false">Poker</button><button data-ty="crypto" aria-pressed="false">Crypto</button></div></div>' +
     '<label class="f">What happened</label><div class="seg" id="fl">' + flows() + '</div>' +
-    '<div class="amt-in"><span>$</span><input id="amt" inputmode="decimal" placeholder="0.00" value="' + (e.amt || '') + '" aria-label="Amount"></div>' +
+    calcField('amt', e.amt || '') +
     '<label class="f" id="acctlbl" for="acct">Money came from</label>' + acctSelect('acct', e.acct) +
     '<label class="f">Whose money</label><div class="wrap" id="who">' + whoChips() + '</div>' +
     '<div id="offbox" hidden><label style="display:flex;gap:9px;align-items:center;font-size:13.5px;margin-top:10px"><input type="checkbox" id="offset" checked> <span id="offlbl"></span></label></div>' +
@@ -1841,6 +1927,7 @@ function ledgerSheet(opts) {
     '<div class="actions">' + (opts.entry ? '<button class="btn danger" id="del">Delete</button>' : '') + '<button class="btn" id="save">' + (opts.entry ? 'Save changes' : 'Log it') + '</button></div>';
   openSheet(opts.entry ? 'Edit entry' : 'Log an entry', body, function (el) {
     if (!e.venue && names.length) e.venue = names[0];
+    wireCalc(el, 'amt');
     var sel = $('#ven', el);
     if (!names.length) { sel.value = '__new'; $('#newv', el).hidden = false; e.venue = ''; $('#fl', el).innerHTML = flows(); }
     sel.addEventListener('change', function () {
@@ -1878,7 +1965,7 @@ function ledgerSheet(opts) {
       var b = ev.target.closest('[data-f]'); if (!b) return; e.f = b.dataset.f; el.querySelectorAll('#fl button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); drawOffset(); acctLabel();
     });
     $('#save', el).addEventListener('click', function () {
-      var a = parseFloat($('#amt', el).value);
+      var a = calcVal($('#amt', el).value);
       if (!(a >= 0) || (e.f !== 'bal' && !(a > 0))) { toast('Enter an amount'); return; }
       if (sel.value === '__new') {
         var nm = $('#nvn', el).value.trim(); if (!nm) { toast('Name the account'); return; }
@@ -1956,7 +2043,7 @@ function debtSheet(person) {
     var stl = $('#settle', el);
     if (stl) stl.addEventListener('click', function () { settleSheet(person); });
     $('#save', el).addEventListener('click', function () {
-      var p = $('#per', el).value.trim(), a = parseFloat($('#amt', el).value);
+      var p = $('#per', el).value.trim(), a = calcVal($('#amt', el).value);
       if (!p) { toast('Add a name'); return; } if (!(a > 0)) { toast('Enter an amount'); return; }
       var sgn = DEBT_ACTS.filter(function (x) { return x[0] === act; })[0][2];
       S.debts.push({ id: uid(), d: $('#dt', el).value || today(), person: p, amt: r2(a * sgn), note: $('#note', el).value.trim(), k: act, src: 'app' }); mark('debts');
@@ -2037,7 +2124,7 @@ function subSheet(existing, prefill) {
   openSheet(existing ? 'Edit subscription' : 'Track a subscription', body, function (el) {
     $('#cy', el).addEventListener('click', function (e) { var b = e.target.closest('[data-c]'); if (!b) return; s.cycle = +b.dataset.c; el.querySelectorAll('#cy button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
     $('#save', el).addEventListener('click', function () {
-      s.name = $('#sn', el).value.trim(); s.amt = r2(parseFloat($('#amt', el).value)); s.next = $('#nx', el).value;
+      s.name = $('#sn', el).value.trim(); s.amt = r2(calcVal($('#amt', el).value)); s.next = $('#nx', el).value;
       if (!s.name || !(s.amt > 0)) { toast('Add a name and amount'); return; }
       S.meta.subs = S.meta.subs.filter(function (x) { return x.id !== s.id; }); S.meta.subs.push(s); mark('meta'); closeSheet(); render();
     });
