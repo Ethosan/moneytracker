@@ -443,6 +443,17 @@ dialog.tall{max-height:94vh}
 .wal-stats>div{background:var(--surface);border-radius:16px;padding:10px 12px;box-shadow:var(--shadow);display:grid;gap:2px}
 .wal-stats b{font-size:18px;letter-spacing:-.01em}
 .wal-stats span{font-size:12.5px;color:var(--muted)}
+
+/* history icon */
+.icon .ico{width:21px;height:21px;display:block}
+.icon.sm .ico{width:20px;height:20px}
+/* spent / earned switch inside the summary card */
+.hero-tog{display:inline-flex;gap:2px;padding:3px;border-radius:999px;background:rgba(255,255,255,.1);margin:0 0 12px}
+.hero-tog button{border:0;background:transparent;color:var(--hero-muted);font:600 13px "Geist",sans-serif;padding:7px 14px;border-radius:999px;min-height:34px}
+.hero-tog button[aria-selected="true"]{background:var(--hero-ink);color:#0e1116}
+.hero.earn{background:radial-gradient(120% 90% at 100% 0%,#0f5c43 0%,transparent 55%),#0c1210}
+.strip [data-hm]{cursor:pointer}
+.actions.wrap-btns{flex-wrap:wrap;justify-content:flex-start}.actions.wrap-btns .btn{flex:0 1 auto}
 </style>
 </head>
 <body>
@@ -1247,7 +1258,7 @@ var ICON = {
   home: '<span class="ms" aria-hidden="true">donut_large</span>', list: '<span class="ms" aria-hidden="true">receipt_long</span>',
   pnl: '<span class="ms" aria-hidden="true">trending_up</span>', ins: '<span class="ms" aria-hidden="true">insights</span>',
   more: '<span class="ms" aria-hidden="true">more_horiz</span>',
-  history: '<span class="ms" aria-hidden="true">history</span>'
+  history: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 4.5v3.8h3.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8.2V12l2.6 1.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 };
 function avatar(cat) { var m = String(cat || '').match(/^(\p{Extended_Pictographic}\uFE0F?)/u); return m ? m[1] : String(cat || '?').charAt(0).toUpperCase(); }
 function nav() {
@@ -1284,6 +1295,44 @@ function frequentNotes() {
   return Object.keys(g).map(function (k) { return g[k]; }).filter(function (o) { return o.n > 1; })
     .sort(function (a, b) { return b.n - a.n; }).slice(0, 6);
 }
+function heroToggle() {
+  var mode = UI.homeMode || 'spend';
+  return '<div class="hero-tog" role="tablist">' + [['spend', 'Spent'], ['earn', 'Earned']].map(function (x) {
+    return '<button role="tab" data-hm="' + x[0] + '" aria-selected="' + (mode === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>';
+}
+function incomeBy(m) {
+  var by = {}, work = 0, other = 0;
+  (S.tx[m] || []).forEach(function (t) {
+    if (t.t !== 'inc') return; var k = incKind(t.cat); if (k === 'reimb') return;
+    by[t.cat] = r2((by[t.cat] || 0) + t.amt); if (k === 'earned') work += t.amt; else other += t.amt;
+  });
+  return { by: by, work: r2(work), other: r2(other), total: r2(work + other) };
+}
+function earnHero(m, quick) {
+  var cur = incomeBy(m), prev = [1, 2, 3].map(function (k) { return incomeBy(addMonth(m, -k)); }).filter(function (x) { return x.total > 0; });
+  // compare work income only: gifts and bonuses are one-offs and would distort "usual"
+  var usual = prev.length ? r2(sum(prev, function (x) { return x.work; }) / prev.length) : null;
+  var avgBy = {}; prev.forEach(function (x) { Object.keys(x.by).forEach(function (c) { avgBy[c] = (avgBy[c] || 0) + x.by[c] / prev.length; }); });
+  var cats = Object.keys(cur.by).sort(function (a, b) { return cur.by[b] - cur.by[a]; });
+  var h = '<div class="hero earn">' + heroToggle() + '<div class="lbl">Earned in ' + monthLabel(m, true) + '</div>' +
+    '<div class="big"><small>$</small><span data-count="' + Math.round(cur.total) + '">' + Math.round(cur.total).toLocaleString('en-SG') + '</span></div>' +
+    '<div class="sub">' + money(cur.work, 0) + ' from work, ' + money(cur.other, 0) + ' gifts and bonuses</div>';
+  if (usual != null) {
+    var pct = usual > 0 ? Math.min(100, cur.work / usual * 100) : 0;
+    h += '<div class="pace"><div class="pbar"><i style="width:' + pct + '%"></i></div><span>Work income ' + (cur.work >= usual ? '<b>' + money(cur.work - usual, 0) + ' above</b> your usual ' + money(usual, 0) : money(usual - cur.work, 0) + ' below your usual <b>' + money(usual, 0) + '</b>') + '</span></div>';
+  }
+  if (cats.length) h += '<div class="tape" role="img" aria-label="Income by source">' + cats.map(function (c, k) { return '<i style="width:' + (cur.by[c] / cur.total * 100) + '%;background:' + SEGS[Math.min(k, 4)] + '"></i>'; }).join('') + '</div>';
+  h += '</div>' + quick;
+  if (cats.length) {
+    h += '<div class="panel legend-wrap"><ul class="legend">' + cats.map(function (c, k) {
+      var d = prev.length ? cur.by[c] - (avgBy[c] || 0) : null; if (d != null && Math.abs(d) < 0.5) d = null;
+      var cls = d == null ? 'flat' : d > 5 ? 'down' : d < -5 ? 'up' : 'flat';
+      return '<li><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(plain(c)) + '</span><span class="delta ' + cls + '">' + (d == null ? '' : (d > 0 ? '+' : '\u2212') + '$' + Math.abs(Math.round(d))) + '</span><span class="amt">' + money(cur.by[c], 0) + '</span></li>';
+    }).join('') + '</ul></div>';
+    if (prev.length) h += '<p class="note" style="margin:-4px 4px 14px">Tags compare with your average for the previous ' + (prev.length === 1 ? 'month' : prev.length + ' months') + '. Paybacks from friends are left out: they reduce spending instead.</p>';
+  } else h += '<div class="panel"><div class="empty" style="padding:14px">No income logged in ' + monthLabel(m) + ' yet.</div></div>';
+  return h;
+}
 function renderHome() {
   var m = UI.month, st = monthStats(m), avg = priorAvg(m);
   var freq = m === monthOf(today()) ? frequentNotes() : [];
@@ -1300,7 +1349,9 @@ function renderHome() {
   var dup = doubleCounts();
   if (dup.length) h += '<button class="banner" data-act="dupes"><b>' + dup.length + ' repayment' + (dup.length > 1 ? 's look' : ' looks') + ' recorded twice</b><span>Once as income and once against a balance. Tap to keep one.</span></button>';
   if (S.inbox.length) h += '<button class="banner" data-act="inbox"><b>' + S.inbox.length + ' statement rows to review</b><span>Tag Alaina rides and add them</span></button>';
-  h += '<div class="hero"><div class="lbl">Spent in ' + monthLabel(m, true) + ', after paybacks</div>' +
+  if (UI.homeMode === 'earn') h += earnHero(m, quick);
+  else {
+  h += '<div class="hero">' + heroToggle() + '<div class="lbl">Spent in ' + monthLabel(m, true) + ', after paybacks</div>' +
     '<div class="big"><small>$</small><span data-count="' + Math.round(st.net) + '">' + Math.round(st.net).toLocaleString('en-SG') + '</span></div>' +
     '<div class="sub">' + money(st.spend, 0) + ' out, ' + money(st.reimb, 0) + ' paid back by friends</div>' + paceLine(m, st, avg);
   if (cats.length) {
@@ -1323,7 +1374,8 @@ function renderHome() {
     h += '</ul></div>';
     if (avg) h += '<p class="note" style="margin:-4px 4px 14px">Coloured tags compare with your average for the previous ' + (avg.__n === 1 ? 'month' : avg.__n + ' months') + '.</p>';
   } else h += '</div>';
-  h += '<div class="strip"><div><b>' + money(st.earned, 0) + '</b><span>Earned</span></div><div><b>' + money(st.other, 0) +
+  }
+  h += '<div class="strip"><div data-hm="earn" role="button" tabindex="0"><b>' + money(st.earned, 0) + '</b><span>Earned \u203a</span></div><div><b>' + money(st.other, 0) +
     '</b><span>Gifts &amp; bonuses</span></div><div><b class="' + (st.saved >= 0 ? 'pos' : 'neg') + '">' + signed(st.saved, 0) + '</b><span>Kept</span></div></div>';
 
   // budgets
@@ -1369,8 +1421,12 @@ function renderHome() {
       }).join('') +
       '<div class="row"><div class="l"><b>Still owed overall</b><span>' + (plNext ? 'Next payment ' + money(plNext.amt) + ' on ' + dayLabel(plNext.d) : 'No plan set yet') + '</span></div><div class="r">' + money(plOwed) + '</div></div></div></section>';
   }
-  var lcx = lastCheck(), since = lcx ? Math.round((new Date(today()) - new Date(lcx.d)) / 864e5) : null;
-  h += '<button class="banner quiet" data-act="check"><b>' + (lcx ? 'Balance checked ' + (since === 0 ? 'today' : since + ' day' + (since === 1 ? '' : 's') + ' ago') : 'No balance check yet') + '</b><span>' + (lcx && since < 14 ? 'Next one due in ' + (14 - since) + ' days' : 'Takes a minute and catches anything you missed') + '</span></button>';
+  var lcx = lastCheck(), due = checkDue();
+  if (due) {
+    var late = due <= today(), dname = WEEKDAYS[new Date(due + 'T00:00:00').getDay()];
+    h += '<button class="banner' + (late ? '' : ' quiet') + '" data-act="check"><b>' + (!lcx ? 'Count your balances to get started' : late ? (due === today() ? 'Balance check due today' : 'Balance check due since ' + dayLabel(due)) : 'Next balance check ' + (addDays(today(), 1) === due ? 'tomorrow' : dname + ', ' + dayLabel(due).replace(/^\w+, /, ''))) + '</b>' +
+      '<span>' + (lcx ? 'Last counted ' + dayLabel(lcx.d) + '. ' : '') + (late ? 'Takes a minute: count each wallet and what you owe.' : checkPlanLabel() + '.') + '</span></button>';
+  }
   // trend
   var months = []; for (var k = 8; k >= 0; k--) months.push(addMonth(m, -k));
   var vals = months.map(function (mm) { return monthStats(mm).net; }), al = months.map(function (mm) { return monthStats(mm).alaina; });
@@ -1755,24 +1811,51 @@ function payLaterSection() {
   h += '</div><p class="note">Add another provider from inside PayLater. Any account you marked as money owed in the balance check, with PayLater in its name, shows up here automatically.</p></section>';
   return h;
 }
+// When the next count is due: the chosen weekday after your last count (Sunday unless changed).
+function checkDue() {
+  var every = S.meta.checkEvery || 'week', day = S.meta.checkDay == null ? 0 : +S.meta.checkDay, lc = lastCheck();
+  if (every === 'off') return null;
+  if (!lc) return today();
+  var d = addDays(lc.d, 1); while (new Date(d + 'T00:00:00').getDay() !== day) d = addDays(d, 1);
+  return every === 'fortnight' ? addDays(d, 7) : d;
+}
+var WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+function checkPlanLabel() {
+  var every = S.meta.checkEvery || 'week', day = WEEKDAYS[S.meta.checkDay == null ? 0 : +S.meta.checkDay];
+  return every === 'off' ? 'Off' : (every === 'fortnight' ? 'Every other ' : 'Every ') + day;
+}
+function checkPlanSheet() {
+  var every = S.meta.checkEvery || 'week', day = S.meta.checkDay == null ? 0 : +S.meta.checkDay;
+  var body = '<label class="f" style="margin-top:0">How often</label><div class="seg" id="cpe">' + [['week', 'Weekly'], ['fortnight', 'Every 2 weeks'], ['off', 'Off']].map(function (x) {
+      return '<button data-e="' + x[0] + '" aria-pressed="' + (every === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+    '<label class="f">On</label><div class="wrap" id="cpd">' + WEEKDAYS.map(function (w, i) { return '<button class="chip" data-d="' + i + '" aria-pressed="' + (day === i) + '">' + w.slice(0, 3) + '</button>'; }).join('') + '</div>' +
+    '<p class="note">The Month screen shows a reminder from that day until you count. Counting is what keeps every wallet and PayLater figure honest.</p>' +
+    '<div class="actions"><button class="btn" id="cps">Save</button></div>';
+  openSheet('Balance check reminder', body, function (el) {
+    $('#cpe', el).addEventListener('click', function (e) { var b = e.target.closest('[data-e]'); if (!b) return; every = b.dataset.e; el.querySelectorAll('#cpe button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
+    $('#cpd', el).addEventListener('click', function (e) { var b = e.target.closest('[data-d]'); if (!b) return; day = +b.dataset.d; el.querySelectorAll('#cpd .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
+    $('#cps', el).addEventListener('click', function () { S.meta.checkEvery = every; S.meta.checkDay = day; mark('meta'); closeSheet(); render(); toast('Reminder: ' + checkPlanLabel()); });
+  });
+}
 function balanceSection() {
   var h = '';
   var lc = lastCheck();
   h += '<section class="blk"><h2>Balance check</h2><div class="panel">' +
-    '<button class="row" data-act="check"><div class="l"><b>Check your balances</b><span>' + (lc ? 'Last done ' + dayLabel(lc.d) + ', total ' + money(lc.total, 0) : 'Count what you have and find missed spending') + '</span></div><div class="r">›</div></button></div>' +
-    '<p class="note">Do this every week or two. Any gap between what you have and what your logs say is either spending you forgot or money you did not record.</p></section>';
+    '<button class="row" data-act="check"><div class="l"><b>Count your balances now</b><span>' + (lc ? 'Last done ' + dayLabel(lc.d) + ', total ' + money(lc.total, 0) : 'Count what you have and find missed spending') + '</span></div><div class="r">›</div></button></div>' +
+    '<button class="row" data-act="checkplan"><div class="l"><b>Reminder</b><span>' + checkPlanLabel() + '</span></div><div class="r">\u203a</div></button></div>' +
+    '<p class="note">Any gap between what you have and what your logs say is either spending you forgot or money you did not record.</p></section>';
   return h;
 }
 function renderAccounts() {
   if (UI.acct === 'later' || UI.acct === 'subs') UI.acct = 'bills';
-  var tabs = [['bal', 'Balances'], ['bills', 'Bills'], ['inv', 'Invest'], ['ppl', 'People']];
+  if (UI.acct === 'ppl') UI.acct = 'bal';
+  var tabs = [['bal', 'Balances'], ['bills', 'Bills'], ['inv', 'Invest']];
   var h = '<header class="top"><h1>Accounts</h1>' + hdRight() + '</header>' +
     '<div class="seg" id="acctseg">' + tabs.map(function (t) {
       return '<button data-acct="' + t[0] + '" aria-pressed="' + (UI.acct === t[0]) + '">' + t[1] + '</button>';
     }).join('') + '</div>';
-  if (UI.acct === 'bal') return h + balancesSection();
+  if (UI.acct === 'bal') return h + balancesSection() + peopleSection();
   if (UI.acct === 'bills') return h + payLaterSection() + subsSection();
-  if (UI.acct === 'ppl') return h + peopleSection();
   return h + pnlBody();
 }
 function renderMore() {
@@ -3004,29 +3087,47 @@ function flowsBetween(a, b) {
 // agrees with the balance check.
 function accountBalances() {
   var lc = lastCheck(), since = lc ? lc.d : null, lines = (lc && lc.lines) || {};
-  var accs = wallets();
-  var bal = {}, touched = {};
+  var accs = wallets(), bal = {}, touched = {};
   accs.forEach(function (n) { bal[n] = lines[n] != null ? +lines[n] : null; });
   function mv(acct, amt, d) {
     if (!since || d <= since || !acct || !(acct in bal)) return false;
     bal[acct] = r2((bal[acct] || 0) + amt); touched[acct] = 1; return true;
   }
-  var assigned = 0;
+  var noWallet = 0, noWalletN = 0;
   allTx().forEach(function (t) {
     if (t.t === 'xfer') { mv(t.from, -t.amt, t.d); mv(t.to, t.amt, t.d); return; }
     if (t.pm === 'later') return;
     var amt = t.t === 'exp' ? -t.amt : t.amt;
-    if (mv(t.acct, amt, t.d)) assigned += amt;
+    if (!mv(t.acct, amt, t.d) && since && t.d > since && !t.feeOf && !/Finance fees/.test(t.cat || '')) { noWallet += amt; noWalletN++; }
   });
-  S.ledger.forEach(function (e) { if (e.f === 'bal') return; var amt = e.f === 'out' ? e.amt : -e.amt; if (mv(e.acct, amt, e.d)) assigned += amt; });
-  var paidOut = 0;
-  S.bills.forEach(function (b) { (b.payments || []).forEach(function (p) { if (mv(p.from, -p.amt, p.d)) paidOut += p.amt; }); });
-  var total = since ? flowsBetween(since, today()) : 0;
-  var owed = laterOwed(), expected = lc ? r2(lc.total + total) : null;
-  // whatever the named accounts and PayLater don't explain is money that moved without an account
-  var named = r2(sum(accs, function (n) { return bal[n] || 0; }));
-  var unassigned = lc ? r2(expected - (named - owed)) : 0;
-  return { since: since, lc: lc, bal: bal, touched: touched, unassigned: unassigned, expected: expected, owed: owed, accs: accs };
+  S.ledger.forEach(function (e) { if (e.f === 'bal') return; var amt = e.f === 'out' ? e.amt : -e.amt; if (!mv(e.acct, amt, e.d) && since && e.d > since) { noWallet += amt; noWalletN++; } });
+  S.bills.forEach(function (b) { (b.payments || []).forEach(function (p) { mv(p.from, -p.amt, p.d); }); });
+  var people = 0;
+  S.debts.forEach(function (x) { if (!x.txId && !x.ledgerId && since && x.d > since) people -= x.amt; });
+  // what you owe on each PayLater line: your count, moved by purchases, fees and payments since
+  var liabNames = {};
+  S.meta.accounts.forEach(function (a) { if (a.liability) liabNames[a.name] = 1; });
+  providers().forEach(function (p) { if (laterOwed(p.name) > 0.005 || lines[p.name] != null) liabNames[p.name] = 1; });
+  var liabs = Object.keys(liabNames).map(function (n) {
+    var counted = lines[n] != null ? +lines[n] : null, delta = 0;
+    if (since) {
+      allTx().forEach(function (t) { if (t.t === 'exp' && t.pm === 'later' && provOf(t) === n && t.d > since) delta += t.amt + ((t.inst && t.inst.fee) || 0); });
+      S.bills.filter(function (b) { return billProv(b) === n; }).forEach(function (b) {
+        (b.feeTxs || []).concat(b.feeTx ? [b.feeTx] : []).forEach(function (id) { var f = findTx(id); if (f && f.d > since) delta += f.amt; });
+        (b.payments || []).forEach(function (p) { if (p.d > since) delta -= p.amt; });
+      });
+    }
+    var bills = laterOwed(n), now = counted != null ? r2(Math.max(0, counted + delta)) : bills;
+    // not in the last count: it wasn't in that total, so only its change since then counts
+    return { name: n, now: now, bills: bills, counted: counted, math: counted != null ? now : r2(delta) };
+  }).filter(function (l) { return l.now > 0.005 || l.counted != null; });
+  // balances you counted in wallets that have since been removed
+  var gone = r2(sum(Object.keys(lines).filter(function (n) { return accs.indexOf(n) < 0 && !liabNames[n] && !S.meta.accounts.some(function (a) { return a.name === n; }); }), function (n) { return +lines[n] || 0; }));
+  var total = since ? flowsBetween(since, today()) : 0, expected = lc ? r2(lc.total + total) : null;
+  var named = r2(sum(accs, function (n) { return bal[n] || 0; })), owed = r2(sum(liabs, function (l) { return l.math; }));
+  var unassigned = lc ? r2(expected - (named + gone - owed)) : 0;
+  return { since: since, lc: lc, bal: bal, touched: touched, unassigned: unassigned, expected: expected, owed: owed, accs: accs, liabs: liabs, gone: gone,
+    noWallet: r2(noWallet), noWalletN: noWalletN, people: r2(people) };
 }
 // ---------- wallet management ----------
 // Every place a wallet's name is stored: purchases and income (acct), transfers (from/to),
@@ -3217,7 +3318,7 @@ function balancesSection() {
   if (!A.lc) {
     return h + '<div class="panel" style="padding:14px 16px"><p style="margin:0 0 8px"><b>Start by counting what you have today.</b></p>' +
       '<p class="note" style="margin:0 0 12px">Enter the real balance of each place you keep money (bank, cash, GrabPay wallet) and what you owe on PayLater. That becomes the starting point. Nothing before it needs to be perfect.</p>' +
-      '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="check">Set starting balances</button><button class="btn sm ghost" data-act="addwallet">+ Add a wallet</button></div></div>' +
+      '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="check">Set starting balances</button><button class="btn sm ghost" data-act="addwallet">+ Add a wallet</button><button class="btn sm ghost" data-act="checkplan">Reminder: ' + checkPlanLabel() + '</button></div></div>' +
       (wallets().length ? '<div class="panel" style="margin-top:12px">' + wallets().map(function (n) { return '<button class="row" data-wallet="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>Not counted yet</span></div><div class="r">\u203a</div></button>'; }).join('') + '</div>' : '') + '</section>';
   }
   h += '<div class="panel">';
@@ -3226,12 +3327,22 @@ function balancesSection() {
     h += '<button class="row" data-wallet="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>' + (counted == null ? 'Not counted yet' : 'Counted ' + money(counted) + ' on ' + dayLabel(A.since) + (A.touched[n] ? ', updated since' : '')) + '</span></div>' +
       '<div class="r">' + (b == null ? '\u2013' : money(b)) + '</div></button>';
   });
-  if (Math.abs(A.unassigned) > 0.005)
-    h += '<div class="row"><div class="l"><b>Not assigned to an account</b><span>Spending and income since ' + dayLabel(A.since) + ' with no "Paid from" set</span></div><div class="r ' + (A.unassigned < 0 ? 'neg' : 'pos') + '">' + signed(A.unassigned) + '</div></div>';
-  if (A.owed > 0.005) h += '<button class="row" data-acct="bills"><div class="l"><b>Owed on PayLater</b><span>From your bills, see Bills</span></div><div class="r neg">\u2212' + money(A.owed) + '</div></button>';
+  if (Math.abs(A.gone) > 0.005)
+    h += '<div class="row"><div class="l"><b>Wallets removed since your count</b><span>What you counted in them on ' + dayLabel(A.since) + '. Gone at your next count</span></div><div class="r">' + money(A.gone) + '</div></div>';
+  if (Math.abs(A.unassigned) > 0.005) {
+    var why = [];
+    if (A.noWalletN) why.push(A.noWalletN + ' entr' + (A.noWalletN === 1 ? 'y' : 'ies') + ' with no wallet');
+    if (Math.abs(A.people) > 0.005) why.push('loans and repayments ' + signed(A.people));
+    h += '<div class="row"><div class="l"><b>Not linked to a wallet</b><span>Since ' + dayLabel(A.since) + (why.length ? ': ' + why.join(', ') : '') + '</span></div><div class="r ' + (A.unassigned < 0 ? 'neg' : 'pos') + '">' + signed(A.unassigned) + '</div></div>';
+  }
+  var lc0 = !!A.lc;
+  A.liabs.forEach(function (l) {
+    var diff = l.counted != null && Math.abs(l.now - l.bills) > 0.5;
+    h += '<button class="row" data-plopen="' + esc(l.name) + '"><div class="l"><b>' + esc(l.name) + '</b><span>' + (l.counted != null ? 'You counted ' + money(l.counted) + (diff ? '; your bills here show ' + money(l.bills) + ', so a purchase or fee may be missing' : '') : (lc0 ? 'From your bills. Not in your last count, so only changes since then affect the total' : 'From your bills')) + '</span></div><div class="r neg">\u2212' + money(l.now) + '</div></button>';
+  });
   h += '<div class="row"><div class="l"><b>Expected total now</b><span>What a count today should come to</span></div><div class="r">' + money(A.expected) + '</div></div></div>' +
-    '<div class="actions" style="margin:10px 0 0"><button class="btn sm ghost" data-act="addwallet">+ Add a wallet</button></div>' +
-    '<p class="note">Tap a wallet to see its balance over time and every entry. Each account starts from what you last counted and moves with anything since that names it. Set "Paid from" on purchases to keep each account exact; the rest waits in "Not assigned" until your next count.</p></section>';
+    '<div class="actions wrap-btns" style="margin:10px 0 0"><button class="btn sm ghost" data-act="addwallet">+ Add a wallet</button><button class="btn sm ghost" data-act="checkplan">Reminder: ' + checkPlanLabel() + '</button></div>' +
+    '<p class="note">Tap a wallet to see its balance over time and every entry. Each one starts from your last count and moves with anything since that uses it. Choosing a wallet under "Paid with" keeps it exact.</p></section>';
   return h;
 }
 function lastCheck() { var c = S.checks.slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; }); return c[c.length - 1] || null; }
@@ -4245,6 +4356,7 @@ function onClick(e) {
   if ((b = t.closest('[data-tab]'))) { UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-wallet]'))) { walletPage(b.dataset.wallet); return; }
+  if ((b = t.closest('[data-hm]'))) { UI.homeMode = b.dataset.hm; render(); return; }
   if ((b = t.closest('[data-lump]'))) { lumpSheet(b.dataset.lump); return; }
   if ((b = t.closest('[data-plopen]'))) { payLaterSheet(b.dataset.plopen); return; }
   if ((b = t.closest('[data-quick]'))) {
@@ -4283,6 +4395,7 @@ function onClick(e) {
     else if (a === 'catclear') { UI.fcat = ''; UI.fsub = ''; render(); }
     else if (a === 'addwallet') { var nw = (prompt('Name the wallet, e.g. YouTrip, PayLah, UOB') || '').trim(); if (nw) { ensureWallet(nw); render(); toast(nw + ' added'); } }
     else if (a === 'history') historySheet();
+    else if (a === 'checkplan') checkPlanSheet();
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
     else if (a === 'next') { UI.month = addMonth(UI.month, 1); render(); }
