@@ -428,6 +428,21 @@ label.f{margin:16px 2px 8px}
 #instn{flex-wrap:wrap}
 .btn[disabled]{opacity:.38;pointer-events:none;box-shadow:none}
 .row.hist .l span{white-space:normal}
+
+/* ---------- wallet page ---------- */
+.wal-hero{display:grid;gap:4px;padding:6px 2px 14px}
+.wal-hero span{font-size:13px;color:var(--muted)}
+.wal-hero b{font-size:40px;line-height:1.05;letter-spacing:-.02em;font-weight:700}
+.wal-hero em{font-style:normal;font-size:13px;color:var(--muted)}
+.wal-range{margin-bottom:10px}
+.wal-chart{position:relative;height:180px;margin:0 0 12px;background:var(--surface);border-radius:20px;padding:12px 10px 6px;box-shadow:var(--shadow)}
+.wal-strip{margin-bottom:6px}
+.wal-list .r span{font-weight:500}
+dialog.tall{max-height:94vh}
+.wal-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 12px}
+.wal-stats>div{background:var(--surface);border-radius:16px;padding:10px 12px;box-shadow:var(--shadow);display:grid;gap:2px}
+.wal-stats b{font-size:18px;letter-spacing:-.01em}
+.wal-stats span{font-size:12.5px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -3075,6 +3090,93 @@ function deleteWallet(n, into) {
   S.meta.accounts = S.meta.accounts.filter(function (a) { return a.name !== n; });
   mark('meta');
 }
+// ---------- wallet page ----------
+// Everything that moved money in or out of one wallet, as signed amounts.
+function walletFlows(n) {
+  var out = [];
+  allTx().forEach(function (t) {
+    if (t.t === 'xfer') {
+      if (t.from === n) out.push({ d: t.d, amt: -t.amt, title: t.note || 'Transfer', sub: 'To ' + t.to, attr: 'data-edit-xfer="' + esc(t.id) + '"', av: '\u21c4', kind: 'xfer' });
+      if (t.to === n) out.push({ d: t.d, amt: t.amt, title: t.note || 'Transfer', sub: 'From ' + t.from, attr: 'data-edit-xfer="' + esc(t.id) + '"', av: '\u21c4', kind: 'xfer' });
+      return;
+    }
+    if (t.pm === 'later' || t.acct !== n) return;
+    out.push({ d: t.d, amt: t.t === 'exp' ? -t.amt : t.amt, title: t.note || plain(t.cat), sub: plain(t.cat) + (t.sub ? ' \u00b7 ' + t.sub : ''), attr: 'data-edit-tx="' + esc(t.id) + '"', av: avatar(t.cat), kind: t.t });
+  });
+  S.ledger.forEach(function (e) {
+    if (e.acct !== n || e.f === 'bal') return;
+    out.push({ d: e.d, amt: e.f === 'out' ? e.amt : -e.amt, title: e.venue + (e.f === 'out' ? ' withdrawal' : ' deposit'), sub: e.note || 'Investment', attr: 'data-venue="' + esc(e.venue) + '"', av: '\u2197', kind: 'inv' });
+  });
+  var lumps = {};
+  S.bills.forEach(function (b) {
+    (b.payments || []).forEach(function (p) {
+      if (p.from !== n) return; var k = p.payId || p.id;
+      var L = lumps[k] = lumps[k] || { d: p.d, amt: 0, prov: billProv(b), k: k }; L.amt = r2(L.amt + p.amt);
+    });
+  });
+  Object.keys(lumps).forEach(function (k) { var L = lumps[k]; out.push({ d: L.d, amt: -L.amt, title: 'Paid ' + L.prov, sub: 'PayLater bill', attr: 'data-lump="' + esc(k) + '"', av: '\uD83D\uDCB3', kind: 'bill' }); });
+  return out.sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
+}
+// Balance on any day, anchored to your last count of this wallet. Without a count we can
+// only show how much it went up or down, so the numbers are relative.
+function walletModel(n) {
+  var flows = walletFlows(n), lc = lastCheck(), anchorD = null, anchor = null;
+  S.checks.slice().sort(function (a, b) { return a.d < b.d ? 1 : -1; }).some(function (c) { if (c.lines && c.lines[n] != null) { anchorD = c.d; anchor = +c.lines[n]; return true; } return false; });
+  function balOn(day) {
+    if (anchorD == null) return r2(sum(flows.filter(function (f) { return f.d <= day; }), function (f) { return f.amt; }));
+    if (day >= anchorD) return r2(anchor + sum(flows.filter(function (f) { return f.d > anchorD && f.d <= day; }), function (f) { return f.amt; }));
+    return r2(anchor - sum(flows.filter(function (f) { return f.d > day && f.d <= anchorD; }), function (f) { return f.amt; }));
+  }
+  return { flows: flows, anchorD: anchorD, anchor: anchor, balOn: balOn, now: balOn(today()) };
+}
+function walletPage(n, range) {
+  range = range || UI.wrange || 90; UI.wrange = range;
+  var M = walletModel(n), t0 = today();
+  var start = range === 'all' ? (M.flows.length ? M.flows[M.flows.length - 1].d : t0) : addDays(t0, -(range - 1));
+  if (M.anchorD && M.anchorD < start && range === 'all') start = M.anchorD;
+  var inR = M.flows.filter(function (f) { return f.d >= start && f.d <= t0; });
+  var inn = r2(sum(inR.filter(function (f) { return f.amt > 0; }), function (f) { return f.amt; })), outt = r2(-sum(inR.filter(function (f) { return f.amt < 0; }), function (f) { return f.amt; }));
+  var rel = M.anchorD == null;
+  var body = '<div class="wal-hero"><span>' + (rel ? 'Change since first entry' : 'Balance now') + '</span><b>' + (rel ? signed(M.now) : money(M.now)) + '</b>' +
+    '<em>' + (rel ? 'Not counted yet. Count it once to see real balances.' : 'Counted ' + money(M.anchor) + ' on ' + dayLabel(M.anchorD) + (M.flows.some(function (f) { return f.d > M.anchorD; }) ? ', updated since' : '')) + '</em></div>' +
+    '<div class="seg wal-range" id="wr">' + [[30, '30 days'], [90, '90 days'], ['all', 'All']].map(function (r) { return '<button data-wr="' + r[0] + '" aria-pressed="' + (range === r[0]) + '">' + r[1] + '</button>'; }).join('') + '</div>' +
+    '<div class="wal-chart"><canvas id="wch" aria-label="Balance over time"></canvas></div>' +
+    '<div class="wal-stats"><div><b class="pos">+' + money(inn, 0) + '</b><span>In</span></div><div><b>\u2212' + money(outt, 0) + '</b><span>Out</span></div><div><b>' + inR.length + '</b><span>Entries</span></div></div>' +
+    '<div class="actions" style="margin:4px 0 14px"><button class="btn sm ghost" id="wmanage">Rename or delete</button><button class="btn sm" data-act="check">Count now</button></div>';
+  if (!inR.length) body += '<div class="empty">Nothing in this period. Choose ' + esc(n) + ' under "Paid with" when you log something.</div>';
+  else {
+    var run = M.now, lastDay = '', rows = '';
+    // running balance after each entry, newest first
+    var after = {}; var b0 = M.balOn(t0);
+    M.flows.forEach(function (f, i) { after[i] = b0; b0 = r2(b0 - f.amt); });
+    M.flows.forEach(function (f, i) {
+      if (f.d < start || f.d > t0) return;
+      if (f.d !== lastDay) { rows += '<div class="day">' + dayLabel(f.d) + '</div>'; lastDay = f.d; }
+      rows += '<button class="row" ' + f.attr + '><span class="av' + (f.kind === 'xfer' || f.kind === 'bill' || f.kind === 'inv' ? ' mv' : '') + '">' + esc(f.av) + '</span><div class="l"><b>' + esc(f.title) + '</b><span>' + esc(f.sub) + '</span></div>' +
+        '<div class="r ' + (f.amt > 0 ? 'pos' : '') + '">' + signed(f.amt) + '<span>' + (rel ? 'net ' + signed(after[i]) : 'bal ' + money(after[i])) + '</span></div></button>';
+    });
+    body += '<div class="panel wal-list">' + rows + '</div>';
+  }
+  openSheet(n, body, function (el) {
+    el.closest('dialog') && el.closest('dialog').classList.add('tall');
+    $('#wr', el).addEventListener('click', function (e) { var b = e.target.closest('[data-wr]'); if (!b) return; var v = b.dataset.wr === 'all' ? 'all' : +b.dataset.wr; walletPage(n, v); });
+    $('#wmanage', el).addEventListener('click', function () { walletSheet(n); });
+    drawWalletChart(el, M, start, t0, rel);
+  });
+}
+function drawWalletChart(el, M, start, end, rel) {
+  var cv = $('#wch', el); if (!cv || !window.Chart) return;
+  var days = [], d = start; while (d <= end && days.length < 800) { days.push(d); d = addDays(d, 1); }
+  var step = Math.max(1, Math.ceil(days.length / 120)), pts = days.filter(function (x, i) { return i % step === 0 || i === days.length - 1; });
+  var cs = getComputedStyle(document.documentElement), ink = cs.getPropertyValue('--accent').trim() || '#2f5cff', muted = cs.getPropertyValue('--muted').trim() || '#888';
+  if (walletPage.chart) { try { walletPage.chart.destroy(); } catch (e) { } }
+  walletPage.chart = new Chart(cv, {
+    type: 'line',
+    data: { labels: pts.map(function (x) { return dayLabel(x).replace(/^\w+, /, ''); }), datasets: [{ data: pts.map(M.balOn), borderColor: ink, backgroundColor: ink + '22', fill: true, tension: .25, pointRadius: 0, borderWidth: 2, stepped: false }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500 }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) { return (rel ? 'net ' : '') + money(c.parsed.y); } } } },
+      scales: { x: { grid: { display: false }, ticks: { color: muted, maxTicksLimit: 5, maxRotation: 0 } }, y: { grid: { color: muted + '22' }, ticks: { color: muted, maxTicksLimit: 4, callback: function (v) { return '$' + Math.round(v); } } } } }
+  });
+}
 function walletSheet(n) {
   var u = walletUsage(n), others = wallets().filter(function (w) { return w !== n; });
   var used = [u.tx && u.tx + ' purchase' + (u.tx === 1 ? '' : 's') + ' or income', u.xfer && u.xfer + ' transfer' + (u.xfer === 1 ? '' : 's'),
@@ -3129,7 +3231,7 @@ function balancesSection() {
   if (A.owed > 0.005) h += '<button class="row" data-acct="bills"><div class="l"><b>Owed on PayLater</b><span>From your bills, see Bills</span></div><div class="r neg">\u2212' + money(A.owed) + '</div></button>';
   h += '<div class="row"><div class="l"><b>Expected total now</b><span>What a count today should come to</span></div><div class="r">' + money(A.expected) + '</div></div></div>' +
     '<div class="actions" style="margin:10px 0 0"><button class="btn sm ghost" data-act="addwallet">+ Add a wallet</button></div>' +
-    '<p class="note">Tap a wallet to rename, merge or delete it. Each account starts from what you last counted and moves with anything since that names it. Set "Paid from" on purchases to keep each account exact; the rest waits in "Not assigned" until your next count.</p></section>';
+    '<p class="note">Tap a wallet to see its balance over time and every entry. Each account starts from what you last counted and moves with anything since that names it. Set "Paid from" on purchases to keep each account exact; the rest waits in "Not assigned" until your next count.</p></section>';
   return h;
 }
 function lastCheck() { var c = S.checks.slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; }); return c[c.length - 1] || null; }
@@ -4142,7 +4244,7 @@ function onClick(e) {
   if ((b = t.closest('[data-tab][data-acct]'))) { UI.acct = b.dataset.acct; }
   if ((b = t.closest('[data-tab]'))) { UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
-  if ((b = t.closest('[data-wallet]'))) { walletSheet(b.dataset.wallet); return; }
+  if ((b = t.closest('[data-wallet]'))) { walletPage(b.dataset.wallet); return; }
   if ((b = t.closest('[data-lump]'))) { lumpSheet(b.dataset.lump); return; }
   if ((b = t.closest('[data-plopen]'))) { payLaterSheet(b.dataset.plopen); return; }
   if ((b = t.closest('[data-quick]'))) {
