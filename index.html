@@ -411,6 +411,8 @@ label.f{margin:16px 2px 8px}
 .calcpad button.fn{color:var(--muted);font-size:17px}
 .calcpad button.eq{background:var(--accent);color:var(--accent-ink)}
 .calcpad button:active{transform:scale(.96)}
+.chip.on{background:var(--accent);color:var(--accent-ink)}
+.chip.x{min-width:44px;justify-content:center;padding:0;margin-left:-4px;color:var(--muted)}
 </style>
 </head>
 <body>
@@ -1271,6 +1273,47 @@ function moveRow(r) {
   return '<button class="row" ' + r.attr + '><span class="av mv">' + r.av + '</span><div class="l"><b>' + esc(r.title) + '</b><span>' + esc(r.sub) + '</span></div>' +
     '<div class="r ' + (r.cls || 'mut') + '">' + r.right + '</div></button>';
 }
+// Category and subcategory filtering lives behind one button, so the chip row stays short.
+function catPill() {
+  if (!UI.fcat) return '<button class="chip" data-act="catfilter">Category \u25be</button>';
+  return '<button class="chip on" data-act="catfilter" aria-pressed="true">' + esc(plain(UI.fcat)) + (UI.fsub ? ' \u203a ' + esc(UI.fsub) : '') + '</button>' +
+    '<button class="chip x" data-act="catclear" aria-label="Clear category filter">\u2715</button>';
+}
+function catFilterSheet(openCat) {
+  var scope = UI.all ? allTx() : (S.tx[UI.month] || []);
+  var cats = {};
+  scope.forEach(function (t) {
+    if (t.t !== 'exp' && t.t !== 'inc') return;
+    var c = cats[t.cat] = cats[t.cat] || { n: 0, amt: 0, subs: {} };
+    c.n++; c.amt += ea(t);
+    var sb = cleanSub(t.sub) || '(no subcategory)';
+    var o = c.subs[sb] = c.subs[sb] || { n: 0, amt: 0 }; o.n++; o.amt += ea(t);
+  });
+  var where = UI.all ? 'across all months' : 'in ' + monthLabel(UI.month);
+  var body;
+  if (openCat && cats[openCat]) {
+    var c = cats[openCat], subs = Object.keys(c.subs).sort(function (a, b) { return c.subs[b].amt - c.subs[a].amt; });
+    body = '<button class="row" data-back="1"><div class="l"><b>\u2039 All categories</b></div></button>' +
+      '<div class="panel" style="margin-top:8px"><button class="row" data-pick=""><span class="av">' + esc(avatar(openCat)) + '</span><div class="l"><b>All of ' + esc(plain(openCat)) + '</b><span>' + c.n + ' transactions</span></div><div class="r">' + money(c.amt) + '</div></button>' +
+      subs.map(function (x) {
+        return '<button class="row" data-pick="' + esc(x) + '"><div class="l"><b>' + esc(x) + '</b><span>' + c.subs[x].n + ' transaction' + (c.subs[x].n === 1 ? '' : 's') + '</span></div><div class="r">' + money(c.subs[x].amt) + '</div></button>';
+      }).join('') + '</div>';
+  } else {
+    var names = Object.keys(cats).sort(function (a, b) { return cats[b].amt - cats[a].amt; });
+    body = '<p class="note" style="margin-top:0">Pick a category, then a subcategory if you want to narrow it further. Counts are ' + where + '.</p>' +
+      (names.length ? '<div class="panel">' + names.map(function (n) {
+        var ns = Object.keys(cats[n].subs).filter(function (x) { return x !== '(no subcategory)'; }).length;
+        return '<button class="row" data-open="' + esc(n) + '"><span class="av">' + esc(avatar(n)) + '</span><div class="l"><b>' + esc(plain(n)) + '</b><span>' + cats[n].n + ' transactions' + (ns ? ', ' + ns + ' subcategor' + (ns === 1 ? 'y' : 'ies') : '') + '</span></div><div class="r">' + money(cats[n].amt) + '<span>\u203a</span></div></button>';
+      }).join('') + '</div>' : '<div class="empty">Nothing ' + where + '.</div>');
+  }
+  openSheet(openCat ? plain(openCat) : 'Filter by category', body, function (el) {
+    el.querySelectorAll('[data-open]').forEach(function (b) { b.addEventListener('click', function () { catFilterSheet(b.dataset.open); }); });
+    var bk = el.querySelector('[data-back]'); if (bk) bk.addEventListener('click', function () { catFilterSheet(); });
+    el.querySelectorAll('[data-pick]').forEach(function (b) {
+      b.addEventListener('click', function () { UI.fcat = openCat; UI.fsub = b.dataset.pick || ''; closeSheet(); render(); });
+    });
+  });
+}
 function renderActivity() {
   var m = UI.month, tx = (UI.all ? allTx().slice() : (S.tx[m] || []).slice()).filter(function (t) { return t.t !== 'xfer'; });
   var movs = movementRows().filter(function (r) { return UI.all || monthOf(r.d) === m; });
@@ -1278,7 +1321,7 @@ function renderActivity() {
   var chips = [['all', 'All'], ['exp', 'Spending'], ['inc', 'Income'], ['mov', 'Movements']];
   S.meta.tags.forEach(function (t) { chips.push(['tag:' + t, t]); });
   chips.push(['cat:❓ Unaccounted', 'Unaccounted']);
-  h += '<div class="chips">' + chips.map(function (c) { return '<button class="chip' + (c[0] === 'tag:Alaina' ? ' rose' : '') + '" data-filter="' + esc(c[0]) + '" aria-pressed="' + (UI.filter === c[0]) + '">' + esc(c[1]) + '</button>'; }).join('') + '</div>';
+  h += '<div class="chips">' + chips.map(function (c) { return '<button class="chip' + (c[0] === 'tag:Alaina' ? ' rose' : '') + '" data-filter="' + esc(c[0]) + '" aria-pressed="' + (UI.filter === c[0]) + '">' + esc(c[1]) + '</button>'; }).join('') + catPill() + '</div>';
   h += '<div style="display:flex;gap:8px;align-items:center"><input class="search" type="search" placeholder="Search notes, people or accounts" value="' + esc(UI.q) + '" id="q" style="flex:1">' +
     '<button class="chip" data-act="allmonths" aria-pressed="' + UI.all + '" style="margin-bottom:12px">All time</button></div>';
   var f = UI.filter, q = UI.q.toLowerCase();
@@ -1287,10 +1330,12 @@ function renderActivity() {
     if (f === 'inc' && t.t !== 'inc') return false;
     if (f.indexOf('tag:') === 0 && (t.tags || []).indexOf(f.slice(4)) < 0) return false;
     if (f.indexOf('cat:') === 0 && t.cat !== f.slice(4)) return false;
+    if (UI.fcat && t.cat !== UI.fcat) return false;
+    if (UI.fsub && (cleanSub(t.sub) || '(no subcategory)') !== UI.fsub) return false;
     if (q && ((t.note || '') + ' ' + t.cat + ' ' + (t.sub || '')).toLowerCase().indexOf(q) < 0) return false;
     return true;
   });
-  movs = (f === 'all' || f === 'mov') ? movs.filter(function (r) { return !q || r.text.toLowerCase().indexOf(q) > -1; }) : [];
+  movs = (!UI.fcat && (f === 'all' || f === 'mov')) ? movs.filter(function (r) { return !q || r.text.toLowerCase().indexOf(q) > -1; }) : [];
   var items = tx.map(function (t) { return { d: t.d, tx: t }; }).concat(movs.map(function (r) { return { d: r.d, mv: r }; }))
     .sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
   var tot = sum(tx, function (t) { return t.t === 'exp' ? ea(t) : 0; });
@@ -3489,6 +3534,8 @@ function onClick(e) {
     if (a === 'prev') { UI.month = addMonth(UI.month, -1); render(); }
     else if (a === 'accttab') render();
     else if (a === 'dupes') dupeSheet();
+    else if (a === 'catfilter') catFilterSheet(UI.fcat || null);
+    else if (a === 'catclear') { UI.fcat = ''; UI.fsub = ''; render(); }
     else if (a === 'health') healthSheet();
     else if (a === 'next') { UI.month = addMonth(UI.month, 1); render(); }
     else if (a === 'add-tx') txSheet();
