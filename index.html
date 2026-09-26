@@ -2266,11 +2266,60 @@ function installSheet() {
   });
 }
 function csvCell(v) { var x = String(v == null ? '' : v); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; }
+// Saving a file is unreliable inside installed phone apps, so try the routes in order:
+// the Claude viewer's own download, the phone's share sheet (Save to Files, Drive,
+// WhatsApp...), a normal browser download, and finally a copyable text box.
+function isTouch() { return (navigator.maxTouchPoints || 0) > 0 && matchMedia('(pointer: coarse)').matches; }
 function download(name, text, type) {
-  var a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([text], { type: type || 'text/csv;charset=utf-8' }));
-  a.download = name; document.body.appendChild(a); a.click();
-  setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  type = type || 'text/csv;charset=utf-8';
+  if (window.claude && window.claude.use) {
+    return window.claude.use('downloads').then(function (d) {
+      if (!d) return viaShareOrLink(name, text, type);
+      return d.save({ filename: name, data: text }).then(function () { toast('Saved ' + name); }, function () { toast('Download cancelled'); });
+    }, function () { return viaShareOrLink(name, text, type); });
+  }
+  return viaShareOrLink(name, text, type);
+}
+function viaShareOrLink(name, text, type) {
+  var file = null;
+  try { file = new File([text], name, { type: type }); } catch (e) { }
+  if (file && isTouch() && navigator.canShare && navigator.canShare({ files: [file] })) {
+    return navigator.share({ files: [file], title: name }).then(function () { toast('Shared ' + name); }, function (e) {
+      if (e && e.name === 'AbortError') return; // you closed the share sheet
+      viaLink(name, text, type);
+    });
+  }
+  viaLink(name, text, type);
+  return Promise.resolve();
+}
+function viaLink(name, text, type) {
+  try {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: type }));
+    a.download = name; a.rel = 'noopener'; document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+    toast('Downloading ' + name);
+    // if nothing happened (some in-app browsers), offer the text itself after a moment
+    if (isTouch()) setTimeout(function () { if (!document.hidden) copySheet(name, text, true); }, 1800);
+  } catch (e) { copySheet(name, text); }
+}
+function copySheet(name, text, soft) {
+  var body = '<p style="margin-top:0">' + (soft ? 'If the download did not start, copy this instead and paste it into a note or email to yourself. ' : 'Your browser blocked the download. ') +
+    'To restore, save it as a file ending in <b>' + esc(name.slice(name.lastIndexOf('.'))) + '</b>.</p>' +
+    '<textarea class="t" id="cp" rows="8" readonly style="font-size:12px;font-family:ui-monospace,monospace">' + esc(text.length > 200000 ? text.slice(0, 200000) + '\n\u2026' : text) + '</textarea>' +
+    '<div class="actions"><button class="btn" id="cpy">Copy all</button></div>';
+  openSheet(name, body, function (el) {
+    $('#cpy', el).addEventListener('click', function () {
+      var done = function () { toast('Copied ' + Math.round(text.length / 1024) + ' KB'); };
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, function () { $('#cp', el).select(); document.execCommand('copy'); done(); });
+      else { $('#cp', el).select(); document.execCommand('copy'); done(); }
+    });
+  });
+}
+function exportData() {
+  var snap = JSON.parse(JSON.stringify(S));
+  snap.exported = new Date().toISOString(); snap.app = 'ledger'; snap.v = SCHEMA;
+  download('ledger-backup-' + today() + '.json', JSON.stringify(snap), 'application/json');
 }
 var TX_COLS = ['id', 'date', 'type', 'amount', 'category', 'subcategory', 'note', 'tags', 'paid with', 'from', 'to'];
 var INV_COLS = ['id', 'date', 'account', 'group', 'action', 'amount', 'note'];
@@ -2391,15 +2440,25 @@ function csvImportSheet() {
   });
 }
 function restoreSheet() {
-  openSheet('Restore a backup', '<p style="margin-top:0">Choose a ledger backup .json file. It replaces everything in the app.</p><input type="file" id="rf" accept=".json,application/json" class="t"><p class="neg" id="rerr"></p>', function (el) {
+  var body = '<p style="margin-top:0">Choose a ledger backup file, or paste its contents. It replaces everything in the app, and you can undo straight after.</p>' +
+    '<input type="file" id="rf" accept=".json,application/json,text/plain" class="t">' +
+    '<label class="f" for="rt">Or paste a backup</label><textarea class="t" id="rt" rows="4" placeholder="{&quot;meta&quot;: ..."></textarea>' +
+    '<div class="actions"><button class="btn ghost" id="rgo">Restore pasted backup</button></div><p class="neg" id="rerr"></p>';
+  function apply(text, el) {
+    try {
+      var o = JSON.parse(text); if (!o || !o.meta || !o.tx) throw 0;
+      snapshot(); delete o.exported; delete o.app;
+      S = o; normalize(); markAll(); closeSheet(); UI.month = monthOf(today()); render();
+      toastUndo('Backup restored, ' + allTx().length + ' transactions');
+    } catch (e) { $('#rerr', el).textContent = 'That is not a ledger backup.'; }
+  }
+  openSheet('Restore a backup', body, function (el) {
     $('#rf', el).addEventListener('change', function () {
       var f = this.files[0]; if (!f) return; var rd = new FileReader();
-      rd.onload = function () {
-        try { var o = JSON.parse(rd.result); if (!o.meta || !o.tx) throw 0; S = o; normalize(); markAll(); closeSheet(); UI.month = monthOf(today()); render(); toast('Backup restored'); }
-        catch (e) { $('#rerr', el).textContent = 'That file is not a ledger backup.'; }
-      };
+      rd.onload = function () { apply(rd.result, el); };
       rd.readAsText(f);
     });
+    $('#rgo', el).addEventListener('click', function () { apply($('#rt', el).value.trim(), el); });
   });
 }
 function syncSheet() {
