@@ -418,6 +418,9 @@ label.f{margin:16px 2px 8px}
 #acctseg button{white-space:nowrap;flex:1 0 auto;padding:9px 12px}
 #pm .chip.pl{border:1px dashed color-mix(in srgb,var(--muted) 45%,transparent);background:transparent}
 #pm .chip.pl[aria-pressed="true"]{background:var(--ink);border-color:var(--ink)}
+.pill{display:inline-flex;align-items:center;gap:0}
+.chip em.cnt{font-style:normal;font-size:12px;color:var(--muted);margin-left:4px}
+.chip[aria-pressed="true"] em.cnt{color:inherit;opacity:.75}
 </style>
 </head>
 <body>
@@ -657,9 +660,10 @@ function normalize() {
   if (!m.walletsV1) {
     // one-time: everything paid by cash or bank so far is filed under the Cash wallet
     m.walletsV1 = 1;
-    ['Cash', 'GrabPay wallet'].forEach(function (n) { if (!m.accounts.some(function (a) { return a.name === n; })) m.accounts.push({ name: n, liability: false }); });
+    var first = (m.accounts.filter(function (a) { return !a.liability; })[0] || {}).name;
+    if (!first) { first = 'Cash'; m.accounts.push({ name: first, liability: false }); }
     var touched = {};
-    allTx().forEach(function (t) { if ((t.t === 'exp' || t.t === 'inc') && t.pm !== 'later' && !t.acct) { t.acct = 'Cash'; touched[monthOf(t.d)] = 1; } });
+    allTx().forEach(function (t) { if ((t.t === 'exp' || t.t === 'inc') && t.pm !== 'later' && !t.acct) { t.acct = first; touched[monthOf(t.d)] = 1; } });
     if (typeof store !== 'undefined' && store.dirty) { Object.keys(touched).forEach(function (k) { store.dirty['tx-' + k] = true; }); store.dirty.meta = true; }
   }
   S.v = SCHEMA;
@@ -725,7 +729,7 @@ function listOf(doc, body) {
   if (doc === 'meta') return [];
   return body.entries || [];
 }
-function idsOf(doc, body) { return listOf(doc, body).map(function (x) { return x.id; }); }
+function idsOf(doc, body) { return doc === 'meta' ? metaKeys(body) : listOf(doc, body).map(function (x) { return x.id; }); }
 function mergeList(local, remote, base) {
   var L = {}, R = {}, B = {}, out = [];
   local.forEach(function (x) { L[x.id] = x; });
@@ -740,18 +744,44 @@ function mergeBy(a, b, key) {
   (a || []).concat(b || []).forEach(function (x) { var k = key(x); if (!seen[k]) { seen[k] = 1; out.push(x); } });
   return out;
 }
+// Settings lists merge three ways too. base holds each list's keys as of the last sync, so
+// something deleted here stays deleted, and something added elsewhere still arrives.
+var META_LISTS = {
+  cats: function (c) { return c.name; }, tags: function (t) { return t; }, subs: function (x) { return x.id; },
+  accounts: function (x) { return x.name; }, budgets: function (x) { return x.key; }, rules: function (x) { return x.match + '>' + x.tag; },
+  plProviders: function (x) { return x.name; }
+};
+function metaKeys(m) {
+  var o = {};
+  Object.keys(META_LISTS).forEach(function (k) { o[k] = (m && m[k] || []).map(META_LISTS[k]); });
+  o.venues = Object.keys((m && m.venues) || {});
+  return o;
+}
+function merge3(local, remote, base, key) {
+  var L = {}, R = {}, B = {}, out = [];
+  (local || []).forEach(function (x) { L[key(x)] = 1; });
+  (remote || []).forEach(function (x) { R[key(x)] = 1; });
+  (base || []).forEach(function (k) { B[k] = 1; });
+  (local || []).forEach(function (x) { var k = key(x); if (R[k] || !B[k]) out.push(x); });      // deleted elsewhere: drop
+  (remote || []).forEach(function (x) { var k = key(x); if (!L[k] && !B[k]) out.push(x); });     // added elsewhere: keep
+  return out;
+}
 function mergeMeta(local, remote) {
   if (!remote) return local;
+  var base = store.base.meta || null;
   var m = JSON.parse(JSON.stringify(local));
-  m.cats = mergeBy(local.cats, remote.cats, function (c) { return c.name; });
-  m.tags = mergeBy(local.tags, remote.tags, function (t) { return t; });
-  m.subs = mergeBy(local.subs, remote.subs, function (x) { return x.id; });
-  m.accounts = mergeBy(local.accounts, remote.accounts, function (x) { return x.name; });
-  m.budgets = mergeBy(local.budgets, remote.budgets, function (x) { return x.key; });
-  m.rules = mergeBy(local.rules, remote.rules, function (x) { return x.match + '>' + x.tag; });
-  m.venues = Object.assign({}, remote.venues || {}, local.venues || {});
+  Object.keys(META_LISTS).forEach(function (k) {
+    m[k] = base ? merge3(local[k], remote[k], base[k], META_LISTS[k]) : mergeBy(local[k], remote[k], META_LISTS[k]);
+  });
+  var v = Object.assign({}, remote.venues || {}, local.venues || {});
+  if (base) Object.keys(v).forEach(function (n) {
+    var inL = local.venues && local.venues[n], inB = base.venues && base.venues.indexOf(n) > -1, inR = remote.venues && remote.venues[n];
+    if (!inL && inB) delete v[n]; else if (!inR && inB && inL) { /* deleted elsewhere */ delete v[n]; }
+  });
+  m.venues = v;
   m.subcats = JSON.parse(JSON.stringify(local.subcats || {}));
   Object.keys(remote.subcats || {}).forEach(function (c) {
+    if (base && !(local.subcats || {})[c]) return;
     m.subcats[c] = mergeBy(m.subcats[c] || [], remote.subcats[c], function (x) { return x; }).sort();
   });
   return m;
@@ -1245,7 +1275,7 @@ function movementRows() {
   var out = [];
   S.ledger.forEach(function (e) {
     var ty = venueType(e.venue), lab = (FLOW_LABELS[ty] || FLOW_LABELS.broker).filter(function (x) { return x[0] === e.f; })[0];
-    out.push({ d: e.d, kind: 'inv', sortAmt: e.amt,
+    out.push({ d: e.d, kind: 'inv', sortAmt: e.amt, wal: [e.acct],
       title: (lab ? lab[1] : e.f) + ' \u00b7 ' + e.venue, sub: (e.acct ? (e.f === 'out' ? e.venue + ' \u2192 ' + e.acct : e.f === 'in' ? e.acct + ' \u2192 ' + e.venue : '') + '. ' : '') + (e.who && e.who !== 'me' ? e.who + '\u2019s money' : venueType(e.venue) === 'prop' ? 'Prop firm' : venueType(e.venue) === 'poker' ? 'Poker' : 'Investment') + (e.note ? ', ' + e.note : ''),
 
       right: (e.f === 'bal' ? '' : e.f === 'in' ? '\u2192 ' : '\u2190 ') + money(e.amt), av: e.f === 'in' ? '\u2197' : e.f === 'out' ? '\u2199' : '=', attr: 'data-venue="' + esc(e.venue) + '"',
@@ -1264,7 +1294,7 @@ function movementRows() {
       : x.k === 'borrowed' ? 'Borrowed from ' + x.person
       : x.k === 'paid' ? 'Paid ' + x.person + ' back'
       : x.amt > 0 ? x.person + ' owes you more' : 'You owe ' + x.person + ' more';
-    out.push({ d: x.d, kind: 'ppl', title: what, sub: x.k === 'settle'
+    out.push({ d: x.d, kind: 'ppl', wal: [], title: what, sub: x.k === 'settle'
         ? money(x.paid) + (Math.abs(x.diff || 0) < 0.005 ? ', settled exactly' : x.diff > 0 ? ', ' + money(x.diff) + ' short, added to spending' : ', ' + money(-x.diff) + ' extra, kept as a gain')
         : x.k === 'part' ? money(x.paid) + ' part payment, the rest stays owing'
         : (x.note && !/settled|written off|part payment/i.test(x.note) ? x.note : (x.amt > 0 ? 'Balance moved your way' : 'Balance moved their way')),
@@ -1273,7 +1303,7 @@ function movementRows() {
   });
   allTx().forEach(function (t) {
     if (t.t !== 'xfer') return;
-    out.push({ d: t.d, kind: 'xfer', title: t.note || 'Transfer between my accounts',
+    out.push({ d: t.d, kind: 'xfer', wal: [t.from, t.to], title: t.note || 'Transfer between my accounts',
       sub: (t.from || '?') + ' \u2192 ' + (t.to || '?'), right: money(t.amt), av: '\u21c4',
       attr: 'data-edit-xfer="' + esc(t.id) + '"', text: (t.note || '') + ' ' + (t.from || '') + ' ' + (t.to || '') });
   });
@@ -1287,13 +1317,13 @@ function movementRows() {
   });
   Object.keys(lumps).forEach(function (k) {
     var L = lumps[k];
-    out.push({ d: L.d, kind: 'bill', title: 'Paid ' + L.prov, sub: (L.from ? L.from + ' \u2192 ' + L.prov + '. ' : '') + 'Covers ' + L.bills.join(' and ') + (L.bills.length > 1 ? ' bills' : ' bill') + (L.note && !/payment$/i.test(L.note) ? '. ' + L.note : ''),
+    out.push({ d: L.d, kind: 'bill', wal: [L.from, L.prov], title: 'Paid ' + L.prov, sub: (L.from ? L.from + ' \u2192 ' + L.prov + '. ' : '') + 'Covers ' + L.bills.join(' and ') + (L.bills.length > 1 ? ' bills' : ' bill') + (L.note && !/payment$/i.test(L.note) ? '. ' + L.note : ''),
       right: '\u2212' + money(L.amt), av: '\uD83D\uDCB3', attr: 'data-lump="' + esc(k) + '"', text: 'paylater ' + (L.note || '') });
   });
   S.bills.forEach(function (b) {
     (b.payments || []).forEach(function (pm) {
       if (pm.payId) return;
-      out.push({ d: pm.d, kind: 'bill', title: 'Paid ' + billProv(b), sub: (pm.from ? pm.from + ' \u2192 ' + billProv(b) + '. ' : '') + (pm.note || periodLabel(b.from) + ' bill'), right: money(pm.amt), av: '\u2713',
+      out.push({ d: pm.d, kind: 'bill', wal: [pm.from, billProv(b)], title: 'Paid ' + billProv(b), sub: (pm.from ? pm.from + ' \u2192 ' + billProv(b) + '. ' : '') + (pm.note || periodLabel(b.from) + ' bill'), right: money(pm.amt), av: '\u2713',
         attr: 'data-plopen="' + esc(billProv(b)) + '"', text: 'paylater ' + billProv(b) + ' ' + (pm.note || '') });
     });
   });
@@ -1304,10 +1334,56 @@ function moveRow(r) {
     '<div class="r ' + (r.cls || 'mut') + '">' + r.right + '</div></button>';
 }
 // Category and subcategory filtering lives behind one button, so the chip row stays short.
+function rangeLabel() {
+  if (!UI.fd1) return '';
+  if (UI.fd1 === UI.fd2) return dayLabel(UI.fd1);
+  var a = dayLabel(UI.fd1), b = dayLabel(UI.fd2);
+  return a + ' \u2013 ' + b;
+}
 function catPill() {
-  if (!UI.fcat) return '<button class="chip" data-act="catfilter">Category \u25be</button>';
-  return '<button class="chip on" data-act="catfilter" aria-pressed="true">' + esc(plain(UI.fcat)) + (UI.fsub ? ' \u203a ' + esc(UI.fsub) : '') + '</button>' +
-    '<button class="chip x" data-act="catclear" aria-label="Clear category filter">\u2715</button>';
+  var h = '<button class="chip' + (UI.fcat || UI.fwal || UI.fd1 ? '' : '') + '" data-act="filters">Filter \u25be</button>';
+  function pill(label, clear) { return '<span class="pill"><button class="chip on" data-act="filters">' + label + '</button><button class="chip x" data-act="' + clear + '" aria-label="Remove">\u2715</button></span>'; }
+  if (UI.fd1) h += pill(esc(rangeLabel()), 'clrdate');
+  if (UI.fwal) h += pill(esc(UI.fwal), 'clrwal');
+  if (UI.fcat) h += pill(esc(plain(UI.fcat)) + (UI.fsub ? ' \u203a ' + esc(UI.fsub) : ''), 'catclear');
+  return h;
+}
+function filterSheet() {
+  var t0 = today(), mStart = t0.slice(0, 8) + '01', lastM = addMonth(monthOf(t0), -1);
+  var presets = [['Today', t0, t0], ['Yesterday', addDays(t0, -1), addDays(t0, -1)], ['Last 7 days', addDays(t0, -6), t0],
+    ['This month', mStart, t0], ['Last month', lastM + '-01', addDays(mStart, -1)]];
+  var scope = UI.all ? allTx() : (S.tx[UI.month] || []);
+  var counts = {};
+  scope.forEach(function (t) { if (t.t === 'xfer') return; var w = t.pm === 'later' ? provOf(t) : t.acct; if (w) counts[w] = (counts[w] || 0) + 1; });
+  var ws = wallets().concat(providers().map(function (p) { return p.name; }));
+  var body = '<label class="f" style="margin-top:0">Dates</label><div class="wrap" id="fdp">' + presets.map(function (p, i) {
+      return '<button class="chip" data-pre="' + i + '" aria-pressed="' + (UI.fd1 === p[1] && UI.fd2 === p[2]) + '">' + p[0] + '</button>'; }).join('') + '</div>' +
+    '<div style="display:flex;gap:8px;margin-top:8px;align-items:center"><input class="t" type="date" id="fd1" value="' + (UI.fd1 || '') + '" aria-label="From">' +
+    '<span class="note" style="margin:0">to</span><input class="t" type="date" id="fd2" value="' + (UI.fd2 || '') + '" aria-label="To"></div>' +
+    '<label class="f">Wallet or PayLater</label><div class="wrap" id="fw">' + ws.map(function (w) {
+      return '<button class="chip" data-fw="' + esc(w) + '" aria-pressed="' + (UI.fwal === w) + '">' + esc(w) + (counts[w] ? ' <em class="cnt">' + counts[w] + '</em>' : '') + '</button>'; }).join('') + '</div>' +
+    '<label class="f">Category</label><button class="row" id="fcatbtn"><div class="l"><b>' + (UI.fcat ? esc(plain(UI.fcat)) + (UI.fsub ? ' \u203a ' + esc(UI.fsub) : '') : 'Any category') + '</b><span>Drill down into subcategories</span></div><div class="r">\u203a</div></button>' +
+    '<div class="actions"><button class="btn ghost" id="fclr">Clear all</button><button class="btn" id="fgo">Show results</button></div>';
+  openSheet('Filter', body, function (el) {
+    var d1 = UI.fd1 || '', d2 = UI.fd2 || '', wal = UI.fwal || '';
+    $('#fdp', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-pre]'); if (!b) return; var p = presets[+b.dataset.pre];
+      d1 = p[1]; d2 = p[2]; $('#fd1', el).value = d1; $('#fd2', el).value = d2;
+      el.querySelectorAll('#fdp .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
+    });
+    ['fd1', 'fd2'].forEach(function (id) { $('#' + id, el).addEventListener('change', function () { d1 = $('#fd1', el).value; d2 = $('#fd2', el).value || d1; el.querySelectorAll('#fdp .chip').forEach(function (x) { x.setAttribute('aria-pressed', 'false'); }); }); });
+    $('#fw', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-fw]'); if (!b) return; wal = wal === b.dataset.fw ? '' : b.dataset.fw;
+      el.querySelectorAll('#fw .chip').forEach(function (x) { x.setAttribute('aria-pressed', x.dataset.fw === wal); });
+    });
+    function apply() {
+      if (d1 && !d2) d2 = d1; if (d2 && !d1) d1 = d2; if (d1 && d2 && d1 > d2) { var tmp = d1; d1 = d2; d2 = tmp; }
+      UI.fd1 = d1; UI.fd2 = d2; UI.fwal = wal;
+    }
+    $('#fcatbtn', el).addEventListener('click', function () { apply(); catFilterSheet(UI.fcat || null); });
+    $('#fclr', el).addEventListener('click', function () { UI.fd1 = UI.fd2 = UI.fwal = UI.fcat = UI.fsub = ''; closeSheet(); render(); });
+    $('#fgo', el).addEventListener('click', function () { apply(); closeSheet(); render(); });
+  });
 }
 function catFilterSheet(openCat) {
   var scope = UI.all ? allTx() : (S.tx[UI.month] || []);
@@ -1344,15 +1420,28 @@ function catFilterSheet(openCat) {
     });
   });
 }
+// A search that is really a date: "12 sep", "sep 12", "12/9", "12/9/2026", "2026-09-12".
+function searchDate(q) {
+  q = String(q || '').trim(); if (q.length < 3 || !/\d/.test(q) || !/^[\d\s\/.\-a-z,]+$/i.test(q)) return null;
+  var d = parseDateAny(q), m;
+  var mons = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+  function thisOrLastYear(mo, da) { var y = +today().slice(0, 4), x = ymd(y, mo, da); return x > today() ? ymd(y - 1, mo, da) : x; }
+  if (!d && (m = q.match(/^(\d{1,2})[\/.](\d{1,2})$/)) && +m[2] <= 12) d = thisOrLastYear(+m[2], +m[1]);
+  if (!d && (m = q.match(/^([a-z]{3,4})[a-z]*\.?\s+(\d{1,2})$/i)) && mons[m[1].toLowerCase()]) d = thisOrLastYear(mons[m[1].toLowerCase()], +m[2]);
+  return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
+}
 function renderActivity() {
-  var m = UI.month, tx = (UI.all ? allTx().slice() : (S.tx[m] || []).slice()).filter(function (t) { return t.t !== 'xfer'; });
-  var movs = movementRows().filter(function (r) { return UI.all || monthOf(r.d) === m; });
+  // a date typed into search, like "12 sep" or "12/9", searches that day across all months
+  var qDate = searchDate(UI.q);
+  var d1 = qDate || UI.fd1, d2 = qDate || UI.fd2, ranged = !!d1;
+  var m = UI.month, tx = ((UI.all || ranged) ? allTx().slice() : (S.tx[m] || []).slice()).filter(function (t) { return t.t !== 'xfer' && (!ranged || (t.d >= d1 && t.d <= d2)); });
+  var movs = movementRows().filter(function (r) { return ranged ? (r.d >= d1 && r.d <= d2) : (UI.all || monthOf(r.d) === m); });
   var h = '<header class="top">' + monthSwitch() + '' + hdRight() + '</header>';
   var chips = [['all', 'All'], ['exp', 'Spending'], ['inc', 'Income'], ['mov', 'Movements']];
   S.meta.tags.forEach(function (t) { chips.push(['tag:' + t, t]); });
-  chips.push(['cat:❓ Unaccounted', 'Unaccounted']);
+
   h += '<div class="chips">' + chips.map(function (c) { return '<button class="chip' + (c[0] === 'tag:Alaina' ? ' rose' : '') + '" data-filter="' + esc(c[0]) + '" aria-pressed="' + (UI.filter === c[0]) + '">' + esc(c[1]) + '</button>'; }).join('') + catPill() + '</div>';
-  h += '<div style="display:flex;gap:8px;align-items:center"><input class="search" type="search" placeholder="Search notes, people or accounts" value="' + esc(UI.q) + '" id="q" style="flex:1">' +
+  h += '<div style="display:flex;gap:8px;align-items:center"><input class="search" type="search" placeholder="Search, or a date like 12 sep" value="' + esc(UI.q) + '" id="q" style="flex:1">' +
     '<button class="chip" data-act="allmonths" aria-pressed="' + UI.all + '" style="margin-bottom:12px">All time</button></div>';
   var f = UI.filter, q = UI.q.toLowerCase();
   tx = f === 'mov' ? [] : tx.filter(function (t) {
@@ -1361,17 +1450,21 @@ function renderActivity() {
     if (f.indexOf('tag:') === 0 && (t.tags || []).indexOf(f.slice(4)) < 0) return false;
     if (f.indexOf('cat:') === 0 && t.cat !== f.slice(4)) return false;
     if (UI.fcat && t.cat !== UI.fcat) return false;
+    if (UI.fwal && (t.pm === 'later' ? provOf(t) : t.acct) !== UI.fwal) return false;
     if (UI.fsub && (cleanSub(t.sub) || '(no subcategory)') !== UI.fsub) return false;
-    if (q && ((t.note || '') + ' ' + t.cat + ' ' + (t.sub || '')).toLowerCase().indexOf(q) < 0) return false;
+    if (q && !qDate && ((t.note || '') + ' ' + t.cat + ' ' + (t.sub || '') + ' ' + (t.acct || '')).toLowerCase().indexOf(q) < 0) return false;
     return true;
   });
   var movAll = movs.length;
-  movs = (!UI.fcat && (f === 'all' || f === 'mov')) ? movs.filter(function (r) { return !q || r.text.toLowerCase().indexOf(q) > -1; }) : [];
+  movs = (!UI.fcat && (f === 'all' || f === 'mov')) ? movs.filter(function (r) {
+    if (UI.fwal && (r.wal || []).indexOf(UI.fwal) < 0) return false;
+    return !q || qDate || r.text.toLowerCase().indexOf(q) > -1;
+  }) : [];
   var items = tx.map(function (t) { return { d: t.d, tx: t }; }).concat(movs.map(function (r) { return { d: r.d, mv: r }; }))
     .sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
   var tot = sum(tx, function (t) { return t.t === 'exp' ? ea(t) : 0; });
   h += '<div class="note" style="margin:0 2px 4px">' + tx.length + ' transaction' + (tx.length === 1 ? '' : 's') + (movs.length ? ', ' + movs.length + ' movement' + (movs.length === 1 ? '' : 's') : '') +
-    (UI.all ? ' across all months' : '') + ', ' + money(tot) + ' spent</div>';
+    (qDate ? ' on ' + dayYear(qDate) : ranged ? ', ' + rangeLabel() : UI.all ? ' across all months' : '') + ', ' + money(tot) + ' spent</div>';
   if (movAll && !movs.length && (UI.fcat || f === 'exp' || f === 'inc' || f.indexOf('tag:') === 0 || f.indexOf('cat:') === 0))
     h += '<button class="banner quiet hint" data-act="showmov"><b>' + movAll + ' repayment' + (movAll === 1 ? '' : 's') + ' and transfer' + (movAll === 1 ? '' : 's') + ' hidden by this filter</b><span>PayLater payments, loans and moves between accounts. Tap to show them</span></button>';
   if (!items.length) return h + '<div class="empty">Nothing matches. Tap + to add something.</div>';
@@ -1636,11 +1729,10 @@ function noteSuggest(q, cat, type) {
     return b.n - a.n || (a.last < b.last ? 1 : -1);
   }).slice(0, 6);
 }
-// Wallets you spend from (Cash, GrabPay wallet...) plus PayLater providers, as one choice.
+// Your wallets plus PayLater providers, as one choice. Only what you have created is shown.
 function wallets() {
   var w = S.meta.accounts.filter(function (a) { return !a.liability; }).map(function (a) { return a.name; });
-  if (!w.length) { S.meta.accounts.push({ name: 'Cash', liability: false }); w = ['Cash']; }
-  var i = w.indexOf('Cash'); if (i > 0) { w.splice(i, 1); w.unshift('Cash'); }
+  if (!w.length) { S.meta.accounts.push({ name: 'Cash', liability: false }); w = ['Cash']; } // something to pay with
   return w;
 }
 function defWallet() { var w = wallets(); return w.indexOf(S.meta.lastAcct) > -1 ? S.meta.lastAcct : w[0]; }
@@ -2890,7 +2982,8 @@ function balancesSection() {
   if (!A.lc) {
     return h + '<div class="panel" style="padding:14px 16px"><p style="margin:0 0 8px"><b>Start by counting what you have today.</b></p>' +
       '<p class="note" style="margin:0 0 12px">Enter the real balance of each place you keep money (bank, cash, GrabPay wallet) and what you owe on PayLater. That becomes the starting point. Nothing before it needs to be perfect.</p>' +
-      '<button class="btn sm" data-act="check">Set starting balances</button></div></section>';
+      '<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn sm" data-act="check">Set starting balances</button><button class="btn sm ghost" data-act="addwallet">+ Add a wallet</button></div></div>' +
+      (wallets().length ? '<div class="panel" style="margin-top:12px">' + wallets().map(function (n) { return '<button class="row" data-wallet="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>Not counted yet</span></div><div class="r">\u203a</div></button>'; }).join('') + '</div>' : '') + '</section>';
   }
   h += '<div class="panel">';
   A.accs.forEach(function (n) {
@@ -3896,6 +3989,9 @@ function onClick(e) {
     else if (a === 'accttab') render();
     else if (a === 'dupes') dupeSheet();
     else if (a === 'catfilter') catFilterSheet(UI.fcat || null);
+    else if (a === 'filters') filterSheet();
+    else if (a === 'clrdate') { UI.fd1 = UI.fd2 = ''; render(); }
+    else if (a === 'clrwal') { UI.fwal = ''; render(); }
     else if (a === 'catclear') { UI.fcat = ''; UI.fsub = ''; render(); }
     else if (a === 'addwallet') { var nw = (prompt('Name the wallet, e.g. YouTrip, PayLah, UOB') || '').trim(); if (nw) { ensureWallet(nw); render(); toast(nw + ' added'); } }
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
