@@ -12,11 +12,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Ledger">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@20..48,400..500,0..1,0&icon_names=add,donut_large,favorite,insights,more_horiz,receipt_long,trending_up&display=block" rel="stylesheet">
-<style>/* Radius rule: cards 22px, controls 14px, chips/buttons full pill. */
+<style>@font-face{font-family:'Geist';src:url('fonts/Geist-Regular.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}@font-face{font-family:'Geist';src:url('fonts/Geist-Medium.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}@font-face{font-family:'Geist';src:url('fonts/Geist-SemiBold.woff2') format('woff2');font-weight:600;font-style:normal;font-display:swap}@font-face{font-family:'Geist';src:url('fonts/Geist-Bold.woff2') format('woff2');font-weight:700;font-style:normal;font-display:swap}/* Radius rule: cards 22px, controls 14px, chips/buttons full pill. */
 :root{
   --bg:#F2F4F8;--surface:#FFFFFF;--sunk:#EBEEF4;--ink:#0D1017;--muted:#5D6472;--line:#E3E7EE;
   --accent:#2E5BFF;--accent-soft:#E6ECFF;--accent-ink:#FFFFFF;
@@ -456,6 +452,90 @@ dialog.tall{max-height:94vh}
 .actions.wrap-btns{flex-wrap:wrap;justify-content:flex-start}.actions.wrap-btns .btn{flex:0 1 auto}
 
 .wal-chart canvas{touch-action:pan-y}
+
+/* ---------- Insights 2: views, trends, tag lens ---------- */
+.ins-tabs{display:flex;gap:4px;padding:4px;background:var(--sunk);border-radius:999px;margin:4px 0 16px}
+.ins-tabs button{flex:1;border:0;background:transparent;border-radius:999px;padding:10px 8px;min-height:44px;font:600 14px "Geist",sans-serif;color:var(--muted);white-space:nowrap}
+.ins-tabs button[aria-selected="true"]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
+.tr-rail{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;scroll-padding-inline:0;scrollbar-width:none}
+.tr-rail::-webkit-scrollbar{display:none}
+.tr-chip{flex:0 0 auto;gap:7px}
+.tr-chip small{opacity:.65;font-size:12.5px;font-weight:500}
+.tr-chip[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.tr-main{padding-top:18px}
+.tr-crumb{display:inline-flex;align-items:center;gap:6px;margin:0 0 10px;border:0;background:var(--accent-soft);color:var(--accent);border-radius:999px;padding:6px 12px;min-height:36px;font:600 13.5px "Geist",sans-serif}
+.tr-title{font-size:20px;margin:0 0 4px;letter-spacing:-.01em}
+.tr-big{margin:0 0 8px;display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+.tr-big span{font-size:38px;font-weight:700;letter-spacing:-.03em;line-height:1.05;font-variant-numeric:tabular-nums}
+.tr-big small{font-size:15px;color:var(--muted)}
+.tr-insight{margin:0 0 12px;color:var(--ink);opacity:.86;line-height:1.5;max-width:62ch}
+.tr-insight .neg{color:var(--loss);font-weight:600}.tr-insight .pos{color:var(--gain);font-weight:600}
+.tr-chart{position:relative;height:210px}
+.tr-chart canvas{touch-action:pan-y}
+.tr-legend{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0 0;color:var(--muted);font-size:12.5px}
+.tr-legend b{display:inline-block;width:10px;height:10px;border-radius:3px;background:var(--accent);vertical-align:-1px;margin-right:6px}
+.tr-legend b.partial{background:repeating-linear-gradient(135deg,var(--accent) 0 2px,transparent 2px 5px);outline:1px solid var(--accent)}
+.tr-legend i{display:inline-block;width:18px;border-top:2px dashed var(--muted);vertical-align:middle;margin-right:6px}
+.linkbtn{border:0;background:transparent;color:var(--accent);font:600 14px "Geist",sans-serif;padding:8px 0;min-height:40px}
+.tr-table{width:100%;border-collapse:collapse;font-size:14px;margin-top:4px}
+.tr-table th,.tr-table td{text-align:left;padding:8px 4px;border-bottom:1px solid var(--line)}
+.tr-table .r{text-align:right;font-variant-numeric:tabular-nums}
+.tr-h{font-size:16px;margin:0 0 8px;letter-spacing:-.005em}
+.tr-list{display:grid}
+.tr-item{display:grid;grid-template-columns:1fr 84px auto;align-items:center;gap:12px;padding:12px 6px;min-height:58px;border:0;background:transparent;text-align:left;border-top:1px solid var(--line);width:100%;color:var(--ink);font:inherit;border-radius:0}
+.tr-item:first-child{border-top:0}
+.tr-t b{display:block;font-weight:600}
+.tr-t span{font-size:13px;color:var(--muted)}
+.tr-v{text-align:right;font-weight:600;font-variant-numeric:tabular-nums}
+.tr-v span{display:block;font-size:12.5px;color:var(--muted);font-weight:500}
+.spark{width:84px;height:28px;overflow:visible;color:var(--accent)}
+.tr-often div{display:flex;justify-content:space-between;gap:12px;padding:9px 0;border-top:1px solid var(--line);font-size:14.5px}
+.tr-often div:first-child{border-top:0}
+.tr-often p{margin:0}.tr-often span{color:var(--muted)}
+.ln-stats{display:grid;grid-template-columns:1.2fr 1fr;gap:10px;margin:0 0 14px}
+.ln-hero{grid-row:span 2;border-radius:20px;padding:16px;background:var(--accent);color:var(--accent-ink);display:flex;flex-direction:column;justify-content:space-between;gap:8px}
+.ln-hero p{margin:0;font-size:13.5px;font-weight:500}
+.ln-hero b{font-size:34px;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.ln-stat{background:var(--surface);border-radius:20px;padding:14px 16px;box-shadow:var(--shadow)}
+.ln-stat b{display:block;font-size:21px;font-variant-numeric:tabular-nums}
+.ln-stat p{margin:2px 0 0;font-size:13px;color:var(--muted)}
+.ln-bars{display:grid;gap:12px}
+.ln-bar div{display:flex;justify-content:space-between;gap:10px;font-size:14.5px;margin-bottom:6px}
+.ln-bar div span{font-variant-numeric:tabular-nums}.ln-bar small{color:var(--muted)}
+.ln-bar i{display:block;height:10px;border-radius:999px;background:var(--accent);width:var(--w);transform-origin:left}
+.ln-week{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;align-items:end;height:130px;margin-top:4px}
+.ln-day{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;height:100%}
+.ln-day i{display:block;width:100%;border-radius:10px 10px 6px 6px;background:var(--accent);opacity:var(--o);height:var(--h);min-height:4px;transform-origin:bottom}
+.ln-day span{font-size:12px;color:var(--muted)}
+.ln-day small{font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.ln-m{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;padding:10px 0;border:0;border-top:1px solid var(--line);background:transparent;width:100%;text-align:left;color:var(--ink);font:inherit}
+.ln-m:first-child{border-top:0}
+.ln-m .l b{display:block;font-weight:600}.ln-m .l span{font-size:13px;color:var(--muted)}
+.ln-m .r{font-weight:600;font-variant-numeric:tabular-nums}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+@media (prefers-reduced-motion:no-preference){
+  .ln-bar i{animation:lnGrow .7s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--k) * 50ms)}
+  .ln-day i{animation:lnRise .6s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--k) * 45ms)}
+  .tr-item,.ins-tabs button,.tr-chip{transition:background-color .18s,color .18s,transform .12s}
+  .tr-item:active,.tr-chip:active{transform:scale(.98)}
+  @keyframes lnGrow{from{transform:scaleX(0)}to{transform:none}}
+  @keyframes lnRise{from{transform:scaleY(0)}to{transform:none}}
+}
+@media (hover:hover){.tr-item:hover{background:var(--sunk);border-radius:12px}}
+@media (min-width:1024px){.ln-stats{grid-template-columns:1.4fr 1fr 1fr}.ln-hero{grid-row:auto}}
+
+/* Phosphor icons: sized by the same font-size rules the icon font used */
+.ms{font-family:inherit;overflow:visible;display:inline-flex;align-items:center;justify-content:center;width:1em;height:1em}
+.ms .pi{width:1em;height:1em;display:block}
+.ms .pi-line + .pi-fill{display:none}
+nav.tabs button[aria-current="page"] .ms .pi-line{display:none}
+nav.tabs button[aria-current="page"] .ms .pi-line + .pi-fill{display:block}
+.icon .ico{display:none}
+
+/* WCAG AA: light-mode status colours darkened to reach 4.5:1 on white, on the page, and on their own tinted badges */
+:root{--loss:#CD222F;--gain:#0B7C56;--rose:#CA1C62}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--loss:#FF6B75;--gain:#34D399;--rose:#FF6FA8}}
+:root[data-theme="dark"]{--loss:#FF6B75;--gain:#34D399;--rose:#FF6FA8}
 </style>
 </head>
 <body>
@@ -1046,6 +1126,12 @@ function pull() {
   });
 }
 document.addEventListener('keydown', function (e) {
+  var tb = e.target && e.target.closest && e.target.closest('.ins-tabs [role="tab"]');
+  if (tb && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
+    var all = [].slice.call(document.querySelectorAll('.ins-tabs [role="tab"]')), i = all.indexOf(tb);
+    var n = all[(i + (e.key === 'ArrowRight' ? 1 : all.length - 1)) % all.length]; UI.insView = n.dataset.insv; render();
+    var f = document.querySelector('[data-insv="' + UI.insView + '"]'); if (f) f.focus(); e.preventDefault(); return;
+  }
   if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== 'z') return;
   var tg = e.target; if (tg && (tg.tagName === 'INPUT' || tg.tagName === 'TEXTAREA' || tg.isContentEditable)) return;
   e.preventDefault(); if (e.shiftKey) redoLast(); else undoLast();
@@ -1206,6 +1292,13 @@ function auditData() {
   var mc = Object.keys(missingCats);
   if (mc.length) out.push({ sev: 'fix', key: 'cats', title: mc.length + ' categor' + (mc.length > 1 ? 'ies are' : 'y is') + ' used but not in your list', sub: mc.join(', '),
     fix: function () { mc.forEach(function (n) { S.meta.cats.push({ name: n, type: missingCats[n], kind: missingCats[n] === 'inc' ? 'other' : undefined }); }); mark('meta'); } });
+  var byPlain = {}; S.meta.cats.forEach(function (c) { var k = c.type + '|' + plain(c.name).toLowerCase(); (byPlain[k] = byPlain[k] || []).push(c); });
+  var dupCats = Object.keys(byPlain).filter(function (k) { return byPlain[k].length > 1 && byPlain[k].some(function (c) { return avatar(c.name) && c.name !== plain(c.name); }); }).map(function (k) {
+    var g = byPlain[k], keep = g.filter(function (c) { return c.name !== plain(c.name); })[0]; return { keep: keep.name, drop: g.filter(function (c) { return c !== keep; }).map(function (c) { return c.name; }) };
+  });
+  if (dupCats.length) out.push({ sev: 'fix', key: 'dupcat', title: dupCats.length + ' categor' + (dupCats.length > 1 ? 'ies appear' : 'y appears') + ' twice, once without an icon',
+    sub: dupCats.map(function (d) { var n = allTx().filter(function (t) { return d.drop.indexOf(t.cat) > -1; }).length; return d.drop.join(', ') + (n ? ' (' + n + ' entr' + (n === 1 ? 'y' : 'ies') + ')' : ' (empty)'); }).join('; ') + '. Fix merges each into its icon version.',
+    fix: function () { dupCats.forEach(function (d) { d.drop.forEach(function (n) { renameCat(n, d.keep); }); }); } });
   var badBud = S.meta.budgets.filter(function (b) { return b.key.indexOf('cat:') === 0 && !cats[b.key.slice(4)]; });
   if (badBud.length) out.push({ sev: 'fix', key: 'bud', title: badBud.length + ' budget' + (badBud.length > 1 ? 's' : '') + ' for categories that no longer exist', sub: 'They can never be spent against.',
     fix: function () { S.meta.budgets = S.meta.budgets.filter(function (b) { return badBud.indexOf(b) < 0; }); mark('meta'); } });
@@ -1257,16 +1350,16 @@ function healthSheet() {
 }
 // ---------- rendering ----------
 var ICON = {
-  home: '<span class="ms" aria-hidden="true">donut_large</span>', list: '<span class="ms" aria-hidden="true">receipt_long</span>',
-  pnl: '<span class="ms" aria-hidden="true">trending_up</span>', ins: '<span class="ms" aria-hidden="true">insights</span>',
-  more: '<span class="ms" aria-hidden="true">more_horiz</span>',
-  history: '<svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M4 4.5v3.8h3.8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12 8.2V12l2.6 1.7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  home: '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M128,24a8,8,0,0,0-8,8V88a8,8,0,0,0,8,8,32,32,0,1,1-27.72,16,8,8,0,0,0-2.93-10.93l-48.5-28A8,8,0,0,0,37.92,76,104,104,0,1,0,128,24ZM48.09,91.1,83,111.26A48.09,48.09,0,0,0,80,128c0,1.53.08,3,.22,4.52L41.28,143A88.16,88.16,0,0,1,48.09,91.1Zm-2.67,67.31,39-10.44A48.1,48.1,0,0,0,120,175.32v40.31A88.2,88.2,0,0,1,45.42,158.41ZM136,215.63V175.32a48,48,0,0,0,0-94.65V40.36a88,88,0,0,1,0,175.27Z"/></svg><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M120,161.94v65.34a4,4,0,0,1-4.46,4,104.28,104.28,0,0,1-84-64.5,4,4,0,0,1,2.69-5.34L97.32,144.5a4,4,0,0,1,4.35,1.66,32.25,32.25,0,0,0,15.59,12A4,4,0,0,1,120,161.94ZM128.06,24A8,8,0,0,0,120,32V88a7.94,7.94,0,0,0,7.87,8,32,32,0,0,1,10.86,62.15,4,4,0,0,0-2.73,3.79v65.34a4,4,0,0,0,4.45,4A104,104,0,0,0,128.06,24Zm-32,101.49a32,32,0,0,1,4.15-13.42l0-.07a8,8,0,0,0-.57-8.87A8.36,8.36,0,0,0,97.18,101L48.85,73.06A8,8,0,0,0,37.92,76,104.12,104.12,0,0,0,25,142.68,4,4,0,0,0,30,146L93.22,129A3.94,3.94,0,0,0,96.1,125.49Z"/></svg></span>', list: '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M72,104a8,8,0,0,1,8-8h96a8,8,0,0,1,0,16H80A8,8,0,0,1,72,104Zm8,40h96a8,8,0,0,0,0-16H80a8,8,0,0,0,0,16ZM232,56V208a8,8,0,0,1-11.58,7.15L192,200.94l-28.42,14.21a8,8,0,0,1-7.16,0L128,200.94,99.58,215.15a8,8,0,0,1-7.16,0L64,200.94,35.58,215.15A8,8,0,0,1,24,208V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56Zm-16,0H40V195.06l20.42-10.22a8,8,0,0,1,7.16,0L96,199.06l28.42-14.22a8,8,0,0,1,7.16,0L160,199.06l28.42-14.22a8,8,0,0,1,7.16,0L216,195.06Z"/></svg><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M216,40H40A16,16,0,0,0,24,56V208a8,8,0,0,0,11.58,7.15L64,200.94l28.42,14.21a8,8,0,0,0,7.16,0L128,200.94l28.42,14.21a8,8,0,0,0,7.16,0L192,200.94l28.42,14.21A8,8,0,0,0,232,208V56A16,16,0,0,0,216,40ZM176,144H80a8,8,0,0,1,0-16h96a8,8,0,0,1,0,16Zm0-32H80a8,8,0,0,1,0-16h96a8,8,0,0,1,0,16Z"/></svg></span>',
+  pnl: '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M240,56v64a8,8,0,0,1-16,0V75.31l-82.34,82.35a8,8,0,0,1-11.32,0L96,123.31,29.66,189.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L136,140.69,212.69,64H168a8,8,0,0,1,0-16h64A8,8,0,0,1,240,56Z"/></svg><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M240,56v64a8,8,0,0,1-13.66,5.66L200,99.31l-58.34,58.35a8,8,0,0,1-11.32,0L96,123.31,29.66,189.66a8,8,0,0,1-11.32-11.32l72-72a8,8,0,0,1,11.32,0L136,140.69,188.69,88,162.34,61.66A8,8,0,0,1,168,48h64A8,8,0,0,1,240,56Z"/></svg></span>', ins: '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M232,208a8,8,0,0,1-8,8H32a8,8,0,0,1-8-8V48a8,8,0,0,1,16,0V156.69l50.34-50.35a8,8,0,0,1,11.32,0L128,132.69,180.69,80H160a8,8,0,0,1,0-16h40a8,8,0,0,1,8,8v40a8,8,0,0,1-16,0V91.31l-58.34,58.35a8,8,0,0,1-11.32,0L96,123.31l-56,56V200H224A8,8,0,0,1,232,208Z"/></svg><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M216,40H40A16,16,0,0,0,24,56V200a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V56A16,16,0,0,0,216,40ZM200,192H56a8,8,0,0,1-8-8V72a8,8,0,0,1,16,0v76.69l34.34-34.35a8,8,0,0,1,11.32,0L128,132.69,172.69,88H144a8,8,0,0,1,0-16h48a8,8,0,0,1,8,8v48a8,8,0,0,1-16,0V99.31l-50.34,50.35a8,8,0,0,1-11.32,0L104,131.31l-40,40V176H200a8,8,0,0,1,0,16Z"/></svg></span>',
+  more: '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm56-12a12,12,0,1,0,12,12A12,12,0,0,0,196,116ZM60,116a12,12,0,1,0,12,12A12,12,0,0,0,60,116Z"/></svg></span>',
+  history: '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M136,80v43.47l36.12,21.67a8,8,0,0,1-8.24,13.72l-40-24A8,8,0,0,1,120,128V80a8,8,0,0,1,16,0Zm-8-48A95.44,95.44,0,0,0,60.08,60.15C52.81,67.51,46.35,74.59,40,82V64a8,8,0,0,0-16,0v40a8,8,0,0,0,8,8H72a8,8,0,0,0,0-16H49c7.15-8.42,14.27-16.35,22.39-24.57a80,80,0,1,1,1.66,114.75,8,8,0,1,0-11,11.64A96,96,0,1,0,128,32Z"/></svg></span>'
 };
 function avatar(cat) { var m = String(cat || '').match(/^(\p{Extended_Pictographic}\uFE0F?)/u); return m ? m[1] : String(cat || '?').charAt(0).toUpperCase(); }
 function nav() {
   function b(id, label, ic) { return '<button data-tab="' + id + '"' + (UI.tab === id ? ' aria-current="page"' : '') + '>' + ICON[ic] + label + '</button>'; }
   return '<nav class="tabs"><div class="in">' + b('home', 'Month', 'home') + b('activity', 'Activity', 'list') +
-    '<button class="add" data-act="add-tx" aria-label="Add transaction"><span class="ms" aria-hidden="true">add</span></button>' + b('insights', 'Insights', 'ins') + b('pnl', 'Accounts', 'pnl') + '</div></nav>';
+    '<button class="add" data-act="add-tx" aria-label="Add transaction"><span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/></svg></span></button>' + b('insights', 'Insights', 'ins') + b('pnl', 'Accounts', 'pnl') + '</div></nav>';
 }
 function hdRight() {
   return '<div class="hr"><span class="sync" id="sync"></span>' + (HIST.list.length ? '<button class="icon sm" data-act="history" aria-label="Change history">' + ICON.history + '</button>' : '') + (UI.tab === 'more' ? '' : '<button class="icon" data-tab="more" aria-label="More">' + ICON.more + '</button>') + '</div>';
@@ -1343,7 +1436,7 @@ function renderHome() {
     return '<button class="chip qa" data-quick="' + i + '"><span>' + esc(avatar(o.t.cat)) + '</span>' + esc(o.t.note.length > 22 ? o.t.note.slice(0, 21) + '\u2026' : o.t.note) + '<em>' + money(o.t.amt) + '</em></button>';
   }).join('') + '</div></section>';
   var cats = Object.keys(st.byCat).sort(function (a, b) { return st.byCat[b] - st.byCat[a]; });
-  var h = '<header class="top">' + monthSwitch() + '' + hdRight() + '</header>';
+  var h = '<header class="top">' + monthSwitch() + '' + hdRight() + '</header>' + '<h1 class="sr">Month</h1>';
   if (!allTx().length && !S.ledger.length) {
     return h + '<div class="empty"><p>Nothing logged yet. Bring in your Money Manager history, or add your first transaction.</p>' +
       '<button class="btn sm" data-act="import">Import from Money Manager</button></div>';
@@ -1365,7 +1458,7 @@ function renderHome() {
     cats.forEach(function (c, k) { if (rest[c] > 0.005) tape += '<i style="width:' + (rest[c] / st.spend * 100) + '%;background:' + SEGS[Math.min(k, 4)] + '"></i>'; });
     h += '<div class="tape" role="img" aria-label="Spending by category">' + tape + '</div>';
     h += '</div>' + quick + '<div class="panel legend-wrap"><ul class="legend">';
-    if (st.alaina > 0) h += '<li><span class="sw" style="background:var(--rose-soft);--c:var(--rose)"><span class="ms" style="font-size:20px;color:var(--rose);font-variation-settings:\'FILL\' 1">favorite</span></span><span>With Alaina <span class="note" style="display:inline;margin:0">all categories</span></span><span></span><span class="amt" style="color:var(--rose)">' + money(st.alaina, 0) + '</span></li>';
+    if (st.alaina > 0) h += '<li><span class="sw" style="background:var(--rose-soft);--c:var(--rose)"><span class="ms" style="font-size:20px;color:var(--rose)" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M240,102c0,70-103.79,126.66-108.21,129a8,8,0,0,1-7.58,0C119.79,228.66,16,172,16,102A62.07,62.07,0,0,1,78,40c20.65,0,38.73,8.88,50,23.89C139.27,48.88,157.35,40,178,40A62.07,62.07,0,0,1,240,102Z"/></svg></span></span><span>With Alaina <span class="note" style="display:inline;margin:0">all categories</span></span><span></span><span class="amt" style="color:var(--rose)">' + money(st.alaina, 0) + '</span></li>';
     cats.slice(0, 7).forEach(function (c, k) {
       var d = avg ? st.byCat[c] - (avg[c] || 0) : null, cls = d == null ? 'flat' : d > 5 ? 'up' : d < -5 ? 'down' : 'flat';
       h += '<li><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')) + '</span><span class="delta ' + cls + '">' +
@@ -1651,7 +1744,7 @@ function renderActivity() {
   var d1 = qDate || UI.fd1, d2 = qDate || UI.fd2, ranged = !!d1;
   var m = UI.month, tx = ((UI.all || ranged || qPrice) ? allTx().slice() : (S.tx[m] || []).slice()).filter(function (t) { return t.t !== 'xfer' && (!ranged || (t.d >= d1 && t.d <= d2)); });
   var movs = movementRows().filter(function (r) { return ranged ? (r.d >= d1 && r.d <= d2) : (UI.all || qPrice || monthOf(r.d) === m); });
-  var h = '<header class="top">' + monthSwitch() + '' + hdRight() + '</header>';
+  var h = '<header class="top">' + monthSwitch() + '' + hdRight() + '</header>' + '<h1 class="sr">Activity</h1>';
   var chips = [['all', 'All'], ['exp', 'Spending'], ['inc', 'Income'], ['mov', 'Movements']];
   S.meta.tags.forEach(function (t) { chips.push(['tag:' + t, t]); });
 
@@ -4340,8 +4433,253 @@ function catColorMap() {
   return { map: map, top: order.slice(0, 7) };
 }
 function normNote(n) { return (n || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/\b(w|with|for|to|at|and)\b.*$/, '').replace(/[0-9]+/g, '').replace(/\s+/g, ' ').trim(); }
+
+// ---------- Insights: Trends, a tag lens, and the original Overview ----------
+function insTabs() {
+  var tag = lensTag(), v = UI.insView || 'trends';
+  return '<div class="ins-tabs" role="tablist" aria-label="Insights views">' + [['trends', 'Trends'], ['lens', tag ? 'With ' + tag : 'Tags'], ['overview', 'Overview']].map(function (x) {
+    return '<button role="tab" id="it-' + x[0] + '" data-insv="' + x[0] + '" aria-selected="' + (v === x[0]) + '" tabindex="' + (v === x[0] ? 0 : -1) + '">' + esc(x[1]) + '</button>';
+  }).join('') + '</div>';
+}
 function renderInsights() {
-  var h = '<header class="top"><h1>Insights</h1>' + hdRight() + '</header>';
+  var h = '<header class="top"><h1>Insights</h1>' + hdRight() + '</header>' + insTabs();
+  var v = UI.insView || 'trends';
+  if (!allTx().length) return h + '<div class="empty">Log or import some transactions to see insights.</div>';
+  if (v === 'overview') return h + '<div role="tabpanel" aria-labelledby="it-overview">' + renderOverview() + '</div>';
+  if (v === 'lens') return h + '<div role="tabpanel" aria-labelledby="it-lens">' + renderLens() + '</div>';
+  return h + '<div role="tabpanel" aria-labelledby="it-trends">' + renderTrends() + '</div>';
+}
+function drawInsights() {
+  charts.forEach(function (c) { c.destroy(); }); charts = [];
+  var v = UI.insView || 'trends';
+  if (!window.Chart) { document.querySelectorAll('.cw, .tr-chart').forEach(function (w) { w.innerHTML = '<p class="note">Charts need a connection to load.</p>'; }); return; }
+  Chart.defaults.font.family = '"Geist", system-ui, sans-serif'; Chart.defaults.font.size = 11; Chart.defaults.color = cssv('--muted');
+  if (v === 'overview') drawOverview(); else if (v === 'lens') drawLens(); else drawTrendChart();
+}
+var REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+var MONTHS_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+// the months to chart: up to 12, ending this month
+function trendMonths() {
+  var end = monthOf(today()), first = null;
+  allTx().forEach(function (t) { var m = monthOf(t.d); if (!first || m < first) first = m; });
+  var out = [], m = end;
+  for (var i = 0; i < 12; i++) { out.unshift(m); if (m <= (first || end)) break; m = addMonth(m, -1); }
+  return out;
+}
+function monthProgress(m) {
+  if (m !== monthOf(today())) return 1;
+  var dim = new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
+  return Math.max(1, +today().slice(8, 10)) / dim;
+}
+function trendData() {
+  var ms = trendMonths(), ix = {}; ms.forEach(function (m, i) { ix[m] = i; });
+  var cats = {};
+  allTx().forEach(function (t) {
+    if (t.t !== 'exp' || ix[monthOf(t.d)] == null) return;
+    var c = cats[t.cat] = cats[t.cat] || { name: t.cat, m: ms.map(function () { return 0; }), subs: {}, notes: {} };
+    var v = ea(t), i = ix[monthOf(t.d)], sb = cleanSub(t.sub) || 'No subcategory';
+    c.m[i] += v;
+    var s = c.subs[sb] = c.subs[sb] || { name: sb, m: ms.map(function () { return 0; }), notes: {} }; s.m[i] += v;
+    var n = (t.note || '').trim().toLowerCase();
+    if (n) [c.notes, s.notes].forEach(function (bag) { var o = bag[n] = bag[n] || { note: t.note.trim(), n: 0, amt: 0 }; o.n++; o.amt += v; });
+  });
+  function tops(bag, k) { return Object.keys(bag).map(function (x) { return bag[x]; }).sort(function (a, b) { return b.n - a.n || b.amt - a.amt; }).slice(0, k); }
+  var list = Object.keys(cats).map(function (k) {
+    var c = cats[k];
+    c.subs = Object.keys(c.subs).map(function (x) { var s = c.subs[x]; s.top = tops(s.notes, 4); return s; })
+      .filter(function (s) { return sum(s.m, function (v) { return v; }) > 0.5; })
+      .sort(function (a, b) { return sum(b.m, function (v) { return v; }) - sum(a.m, function (v) { return v; }); });
+    c.top = tops(c.notes, 5); c.total = sum(c.m, function (v) { return v; });
+    return c;
+  }).filter(function (c) { return c.total > 0.5; }).sort(function (a, b) { return b.total - a.total; });
+  return { months: ms, cats: list };
+}
+function firstActive(m) { for (var i = 0; i < m.length; i++) if (m[i] > 0.5) return i; return 0; }
+// averages, the recent trend and the pace of the unfinished month, as numbers and as a sentence
+function describeSeries(ms, m) {
+  var P = ms.length - 1, prog = monthProgress(ms[P]), start = firstActive(m);
+  var full = m.slice(start, prog < 1 ? P : P + 1), avg = full.length ? sum(full, function (v) { return v; }) / full.length : m[P] / prog;
+  var end = prog < 1 ? P : P + 1;
+  var last3 = m.slice(Math.max(start, end - 3), end), prev3 = m.slice(Math.max(start, end - 6), Math.max(start, end - 3));
+  var l = last3.length ? sum(last3, function (v) { return v; }) / last3.length : 0, pv = prev3.length ? sum(prev3, function (v) { return v; }) / prev3.length : 0;
+  var txt = '';
+  if (prev3.length && pv > 1) {
+    var ch = (l - pv) / pv * 100;
+    txt = 'The last ' + last3.length + ' months averaged <b>' + money(l, 0) + '</b> a month, ' + (Math.abs(ch) < 5 ? 'about the same as' : '<span class="' + (ch > 0 ? 'neg' : 'pos') + '">' + Math.round(Math.abs(ch)) + '% ' + (ch > 0 ? 'more' : 'less') + '</span> than') + ' the ' + prev3.length + ' before.';
+  } else txt = 'Only a little history so far, so the trend is still forming.';
+  if (prog < 1) { var pace = m[P] / prog; txt += ' ' + MONTHS_FULL[+ms[P].slice(5) - 1] + ' is on pace for <b>' + money(pace, 0) + '</b>' + (avg > 1 ? (pace > avg * 1.1 ? ', above your usual.' : pace < avg * 0.9 ? ', below your usual.' : ', close to your usual.') : '.'); }
+  if (full.length > 1) { var best = Math.max.apply(null, full), bi = start + full.indexOf(best); if (best > 1) txt += ' Biggest month: ' + MONTHS_FULL[+ms[bi].slice(5) - 1] + ' at ' + money(best, 0) + '.'; }
+  return { avg: avg, text: txt, start: start, partial: prog < 1 ? P : -1 };
+}
+function sparkSvg(m) {
+  var start = firstActive(m), pts = m.slice(start), max = Math.max.apply(null, pts.concat([1])), w = 84, h = 28, n = Math.max(pts.length - 1, 1);
+  var xy = pts.map(function (v, i) { return [(i / n) * w, h - 3 - (v / max) * (h - 6)]; });
+  var d = xy.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' '), last = xy[xy.length - 1];
+  return '<svg viewBox="0 0 84 28" class="spark" aria-hidden="true"><path d="' + d + '" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="' + last[0] + '" cy="' + last[1] + '" r="2.6" fill="currentColor"/></svg>';
+}
+function renderTrends() {
+  var T = trendData(); UI.trend = T;
+  if (!T.cats.length) return '<div class="empty">No spending logged yet.</div>';
+  var ci = Math.min(UI.trCat || 0, T.cats.length - 1); UI.trCat = ci;
+  var c = T.cats[ci], si = UI.trSub != null && c.subs[UI.trSub] ? UI.trSub : null;
+  var ser = si == null ? { name: plain(c.name), m: c.m } : { name: c.subs[si].name, m: c.subs[si].m };
+  var d = describeSeries(T.months, ser.m); UI.trDesc = d; UI.trSer = ser;
+  var h = '<div class="tr-rail" role="group" aria-label="Categories">' + T.cats.map(function (x, i) {
+    return '<button class="chip tr-chip" data-trcat="' + i + '" aria-pressed="' + (i === ci) + '"><span aria-hidden="true">' + esc(avatar(x.name)) + '</span>' + esc(plain(x.name)) + ' <small>' + money(x.total, 0) + '</small></button>';
+  }).join('') + '</div>';
+  h += '<section class="panel tr-main">' + (si == null ? '' : '<button class="tr-crumb" data-trsub="-1" aria-label="Back to all of ' + esc(plain(c.name)) + '">' + esc(plain(c.name)) + ' \u203a ' + esc(ser.name) + ' <span aria-hidden="true">\u2715</span></button>') +
+    '<h2 class="tr-title"><span aria-hidden="true">' + esc(avatar(c.name)) + ' </span>' + esc(ser.name) + '</h2>' +
+    '<p class="tr-big"><span class="sr">' + money(d.avg, 0) + ' a month on average</span><span aria-hidden="true" data-countto="' + Math.round(d.avg) + '">' + money(d.avg, 0) + '</span><small aria-hidden="true">a month on average</small></p>' +
+    '<p class="tr-insight">' + d.text + '</p>' +
+    '<div class="tr-chart"><canvas id="trch" role="img" aria-label="' + esc(ser.name + ' by month: ' + T.months.map(function (m, i) { return monthLabel(m, true) + ' ' + money(ser.m[i], 0); }).join(', ')) + '"></canvas></div>' +
+    '<div class="tr-legend"><span><b></b>Each month</span>' + (d.partial > -1 ? '<span><b class="partial"></b>This month so far</span>' : '') + '<span><i></i>Average</span></div>' +
+    '<button class="linkbtn" data-trtable aria-expanded="' + !!UI.trTable + '">' + (UI.trTable ? 'Hide table' : 'Show as a table') + '</button>' +
+    (UI.trTable ? '<table class="tr-table"><caption class="sr">' + esc(ser.name) + ' by month</caption><thead><tr><th>Month</th><th class="r">Spent</th><th class="r">vs average</th></tr></thead><tbody>' +
+      T.months.map(function (m, i) { var dv = ser.m[i] - d.avg; return '<tr><td>' + monthLabel(m, true) + (i === d.partial ? ' (so far)' : '') + '</td><td class="r">' + money(ser.m[i]) + '</td><td class="r">' + (i < d.start ? '' : signed(dv, 0)) + '</td></tr>'; }).join('') + '</tbody></table>' : '') +
+    '</section>';
+  if (si == null) {
+    h += '<section class="panel"><h2 class="tr-h">Where ' + esc(plain(c.name).toLowerCase()) + ' money goes</h2>';
+    if (c.subs.length < 2 && (!c.subs[0] || c.subs[0].name === 'No subcategory')) h += '<p class="note">No subcategories here yet. Add one when you log a purchase and it appears here with its own trend.</p>';
+    else h += '<div class="tr-list">' + c.subs.map(function (x, i) {
+      var t = sum(x.m, function (v) { return v; }), pc = Math.round(t / c.total * 100), cur = x.m[x.m.length - 1];
+      return '<button class="tr-item" data-trsub="' + i + '" aria-label="' + esc(x.name) + ', ' + money(t, 0) + ', ' + pc + ' percent. Open its trend"><span class="tr-t"><b>' + esc(x.name) + '</b><span>' + pc + '% of ' + esc(plain(c.name).toLowerCase()) + '</span></span>' + sparkSvg(x.m) +
+        '<span class="tr-v">' + money(t, 0) + '<span>' + money(cur, 0) + ' this month</span></span></button>';
+    }).join('') + '</div>';
+    h += '</section>';
+  }
+  var top = si == null ? c.top : c.subs[si].top;
+  h += '<section class="panel"><h2 class="tr-h">' + (si == null ? 'Most often' : 'Most often in ' + esc(ser.name)) + '</h2>' +
+    (top.length ? '<div class="tr-often">' + top.map(function (o) { return '<div><p>' + esc(o.note) + ' <span>' + o.n + (o.n === 1 ? ' time' : ' times') + '</span></p><b>' + money(o.amt, 0) + '</b></div>'; }).join('') + '</div>' : '<p class="note">No notes on these entries yet.</p>') + '</section>';
+  return h;
+}
+function hatch(color) {
+  var cv = document.createElement('canvas'); cv.width = cv.height = 8; var x = cv.getContext && cv.getContext('2d');
+  if (!x) return color + '66'; // no canvas: a lighter solid still reads as "not finished"
+  x.strokeStyle = color; x.lineWidth = 2; x.beginPath(); x.moveTo(0, 8); x.lineTo(8, 0); x.stroke();
+  return x.createPattern(cv, 'repeat');
+}
+function tipStyle() { return { backgroundColor: cssv('--ink'), titleColor: cssv('--surface'), bodyColor: cssv('--surface'), padding: 10, cornerRadius: 10, displayColors: false, titleFont: { weight: '600' } }; }
+function kfmt(v) { return '$' + (Math.abs(v) >= 1000 ? (Math.round(v / 100) / 10) + 'k' : Math.round(v)); }
+function drawTrendChart() {
+  countUps();
+  var el = document.getElementById('trch'); if (!el || !UI.trend) return;
+  var T = UI.trend, ser = UI.trSer, d = UI.trDesc, acc = cssv('--accent'), mut = cssv('--muted');
+  // start at the first month with spending (showing at least three months)
+  var off = Math.max(0, Math.min(d.start, T.months.length - 3));
+  var months = T.months.slice(off), vals = ser.m.slice(off), part = d.partial > -1 ? d.partial - off : -1, st = d.start - off;
+  var tip = tipStyle();
+  tip.callbacks = { title: function (it) { var i = it[0].dataIndex + off; return MONTHS_FULL[+T.months[i].slice(5) - 1] + ' ' + T.months[i].slice(0, 4) + (i === d.partial ? ' (so far)' : ''); },
+    label: function (it) { return it.datasetIndex === 0 ? 'Spent ' + money(it.parsed.y) : 'Average ' + money(it.parsed.y, 0); } };
+  charts.push(new Chart(el, {
+    data: { labels: months.map(function (m) { return monthLabel(m, true).slice(0, 3); }), datasets: [
+      { type: 'bar', data: vals, backgroundColor: vals.map(function (v, i) { return i === part ? hatch(acc) : acc; }), borderColor: acc, borderWidth: vals.map(function (v, i) { return i === part ? 1.5 : 0; }), borderRadius: 6, maxBarThickness: 30, order: 2 },
+      { type: 'line', data: vals.map(function (v, i) { return i < st ? null : Math.round(d.avg * 100) / 100; }), borderColor: mut, borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, order: 1 }
+    ] },
+    options: { responsive: true, maintainAspectRatio: false, animation: REDUCED ? false : { duration: 600, easing: 'easeOutQuart' }, transitions: { resize: { animation: { duration: 0 } } },
+      interaction: { mode: 'index', intersect: false, axis: 'x' }, plugins: { legend: { display: false }, tooltip: tip },
+      scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 10 } }, y: { grid: { color: cssv('--line') }, border: { display: false }, ticks: { maxTicksLimit: 4, callback: kfmt } } } }
+  }));
+}
+// ----- a lens on one tag (Alaina by default) -----
+function lensTag() {
+  var tags = S.meta.tags || [], used = {};
+  allTx().forEach(function (t) { (t.tags || []).forEach(function (g) { used[g] = (used[g] || 0) + 1; }); });
+  var usable = tags.filter(function (g) { return used[g]; });
+  if (UI.lensTag && usable.indexOf(UI.lensTag) > -1) return UI.lensTag;
+  return usable.indexOf('Alaina') > -1 ? 'Alaina' : usable[0] || null;
+}
+function lensData(tag) {
+  var ms = trendMonths(), ix = {}; ms.forEach(function (m, i) { ix[m] = i; });
+  var L = { tag: tag, months: ms, m: ms.map(function () { return 0; }), days: ms.map(function () { return {}; }), cats: {}, wd: [0, 0, 0, 0, 0, 0, 0].map(function () { return { days: {}, amt: 0 }; }), items: [], covered: 0 };
+  var all = ms.map(function () { return 0; });
+  allTx().forEach(function (t) {
+    if (t.t !== 'exp' || ix[monthOf(t.d)] == null) return;
+    var i = ix[monthOf(t.d)], v = ea(t); all[i] += v;
+    if ((t.tags || []).indexOf(tag) < 0) return;
+    L.m[i] += v; L.days[i][t.d] = 1; L.cats[t.cat] = (L.cats[t.cat] || 0) + v;
+    var w = (new Date(t.d + 'T00:00:00').getDay() + 6) % 7; L.wd[w].amt += v; L.wd[w].days[t.d] = 1;
+    L.items.push(t); if (t.split) L.covered += t.amt - v;
+  });
+  L.all = all; L.total = sum(L.m, function (v) { return v; });
+  L.nDays = Object.keys(L.items.reduce(function (o, t) { o[t.d] = 1; return o; }, {})).length;
+  L.first = L.items.reduce(function (a, t) { return !a || t.d < a ? t.d : a; }, null);
+  L.catList = Object.keys(L.cats).map(function (k) { return { name: k, amt: L.cats[k] }; }).sort(function (a, b) { return b.amt - a.amt; });
+  L.top = L.items.slice().sort(function (a, b) { return ea(b) - ea(a); }).slice(0, 6);
+  var low = tag.toLowerCase();
+  L.paybacks = sum(allTx().filter(function (t) { return t.t === 'inc' && incKind(t.cat) === 'reimb' && (t.note || '').toLowerCase().indexOf(low) > -1; }), function (t) { return t.amt; });
+  L.invested = sum(S.ledger.filter(function (e) { return e.who === tag && e.f === 'in'; }), function (e) { return e.amt; });
+  var bal = 0; S.debts.forEach(function (x) { if (x.person === tag) bal += x.amt; }); L.balance = r2(bal);
+  return L;
+}
+function renderLens() {
+  var tag = lensTag();
+  if (!tag) return '<div class="empty">Tag entries (for example with the person you were with) and this view shows what you spend together, when and on what.</div>';
+  var L = lensData(tag); UI.lens = L;
+  var tags = (S.meta.tags || []).filter(function (g) { return allTx().some(function (t) { return (t.tags || []).indexOf(g) > -1; }); });
+  var h = tags.length > 1 ? '<div class="tr-rail" role="group" aria-label="Tags">' + tags.map(function (g) { return '<button class="chip tr-chip" data-lens="' + esc(g) + '" aria-pressed="' + (g === tag) + '">' + esc(g) + '</button>'; }).join('') + '</div>' : '';
+  if (!L.items.length) return h + '<div class="empty">Nothing tagged ' + esc(tag) + ' in the last 12 months.</div>';
+  var start = firstActive(L.m), shareBase = sum(L.all.slice(start), function (v) { return v; }), share = shareBase ? L.total / shareBase * 100 : 0;
+  var perDay = L.total / Math.max(1, L.nDays), fd = new Date(L.first + 'T00:00:00');
+  h += '<div class="ln-stats"><div class="ln-hero"><p>Spent together since ' + fd.getDate() + ' ' + MONTHS_FULL[fd.getMonth()].slice(0, 3) + '</p><b><span class="sr">' + money(L.total, 0) + '</span><span aria-hidden="true" data-countto="' + Math.round(L.total) + '">' + money(L.total, 0) + '</span></b><p>' + Math.round(share) + '% of everything you spent since then</p></div>' +
+    '<div class="ln-stat"><b><span class="sr">' + L.nDays + '</span><span aria-hidden="true" data-countto="' + L.nDays + '" data-plain="1">' + L.nDays + '</span></b><p>days out together</p></div>' +
+    '<div class="ln-stat"><b><span class="sr">' + money(perDay, 0) + '</span><span aria-hidden="true" data-countto="' + Math.round(perDay) + '">' + money(perDay, 0) + '</span></b><p>on a typical day out</p></div></div>';
+  // month by month
+  var P = L.months.length - 1, prog = monthProgress(L.months[P]), bi = start;
+  for (var k = start; k < (prog < 1 ? P : P + 1); k++) if (L.m[k] > L.m[bi]) bi = k;
+  var nd = function (i) { return Object.keys(L.days[i]).length; };
+  var mtxt = MONTHS_FULL[+L.months[bi].slice(5) - 1] + ' was the biggest: <b>' + money(L.m[bi], 0) + '</b> over ' + nd(bi) + ' days out.';
+  if (prog < 1 && bi !== P && nd(P)) mtxt += ' ' + MONTHS_FULL[+L.months[P].slice(5) - 1] + ' so far: <b>' + money(L.m[P], 0) + '</b> over ' + nd(P) + ' days, about <b>' + money(L.m[P] / nd(P), 0) + '</b> a day out against <b>' + money(L.m[bi] / Math.max(1, nd(bi)), 0) + '</b> in ' + MONTHS_FULL[+L.months[bi].slice(5) - 1] + '.';
+  h += '<section class="panel"><h2 class="tr-h">Month by month</h2><p class="tr-insight">' + mtxt + '</p><div class="tr-chart" style="height:180px"><canvas id="lnch" role="img" aria-label="' + esc(L.months.slice(start).map(function (m, i) { return monthLabel(m, true) + ' ' + money(L.m[start + i], 0) + ' over ' + nd(start + i) + ' days'; }).join(', ')) + '"></canvas></div></section>';
+  var max = L.catList[0].amt;
+  h += '<section class="panel"><h2 class="tr-h">What it goes on</h2><div class="ln-bars">' + L.catList.map(function (c, i) {
+    return '<div class="ln-bar"><div><b><span aria-hidden="true">' + esc(avatar(c.name)) + ' </span>' + esc(plain(c.name)) + '</b><span>' + money(c.amt, 0) + ' <small>(' + Math.round(c.amt / L.total * 100) + '%)</small></span></div><i style="--w:' + (c.amt / max * 100) + '%;--k:' + i + '" aria-hidden="true"></i></div>';
+  }).join('') + '</div></section>';
+  var names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], FULLD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+  var wmax = Math.max.apply(null, L.wd.map(function (w) { return w.amt; }).concat([1])), topD = 0;
+  L.wd.forEach(function (w, i) { if (w.amt > L.wd[topD].amt) topD = i; });
+  var wk = (L.wd[4].amt + L.wd[5].amt + L.wd[6].amt) / L.total * 100, nTop = Object.keys(L.wd[topD].days).length;
+  h += '<section class="panel"><h2 class="tr-h">Which days</h2><p class="tr-insight">Fridays to Sundays make up <b>' + Math.round(wk) + '%</b>. ' + FULLD[topD] + ' is the biggest day: ' + money(L.wd[topD].amt, 0) + ' over ' + nTop + ' ' + FULLD[topD] + (nTop === 1 ? '' : 's') + '.</p>' +
+    '<div class="ln-week" role="list" aria-label="Spending together by day of the week">' + L.wd.map(function (w, i) {
+      var n = Object.keys(w.days).length;
+      return '<div class="ln-day" role="listitem" aria-label="' + FULLD[i] + ': ' + money(w.amt, 0) + ' over ' + n + ' days"><small>' + (w.amt ? '$' + Math.round(w.amt) : '') + '</small><i style="--h:' + (w.amt / wmax * 100) + '%;--o:' + (0.35 + 0.65 * w.amt / wmax) + ';--k:' + i + '"></i><span>' + names[i] + '</span></div>';
+    }).join('') + '</div></section>';
+  h += '<section class="panel"><h2 class="tr-h">Biggest moments</h2><div class="ln-moments">' + L.top.map(function (t) {
+    return '<button class="ln-m" data-edit-tx="' + esc(t.id) + '"><span class="av" aria-hidden="true">' + esc(avatar(t.cat)) + '</span><span class="l"><b>' + esc(t.note || plain(t.cat)) + '</b><span>' + dayLabel(t.d) + (t.split ? ', your share of ' + money(t.amt) : '') + '</span></span><span class="r">' + money(ea(t)) + '</span></button>';
+  }).join('') + '</div></section>';
+  h += '<section class="panel"><h2 class="tr-h">Money between you</h2><div class="kv" style="margin:0">' +
+    '<span>Covered for ' + esc(tag) + ' in split bills</span><span>' + money(L.covered) + '</span>' +
+    '<span>Paid back to you</span><span>' + money(L.paybacks) + '</span>' +
+    (L.invested ? '<span>' + esc(tag) + '\u2019s money you are investing</span><span>' + money(L.invested) + '</span>' : '') +
+    (Math.abs(L.balance) > 0.005 ? '<span>' + (L.balance > 0 ? esc(tag) + ' owes you' : 'You owe ' + esc(tag)) + '</span><span>' + money(Math.abs(L.balance)) + '</span>' : '') + '</div></section>';
+  return h;
+}
+function drawLens() {
+  countUps();
+  var el = document.getElementById('lnch'), L = UI.lens; if (!el || !L) return;
+  var start = firstActive(L.m), P = L.months.length - 1, prog = monthProgress(L.months[P]), acc = cssv('--accent');
+  var labels = L.months.slice(start).map(function (m) { return monthLabel(m, true).slice(0, 3); }), vals = L.m.slice(start), days = L.days.slice(start).map(function (o) { return Object.keys(o).length; });
+  var tip = tipStyle();
+  tip.callbacks = { title: function (it) { var i = start + it[0].dataIndex; return MONTHS_FULL[+L.months[i].slice(5) - 1] + ' ' + L.months[i].slice(0, 4) + (i === P && prog < 1 ? ' (so far)' : ''); },
+    label: function (it) { return money(it.parsed.y) + ' together'; },
+    afterLabel: function (it) { var d = days[it.dataIndex]; return d + (d === 1 ? ' day out' : ' days out') + (d ? ', ' + money(it.parsed.y / d, 0) + ' a day' : ''); } };
+  charts.push(new Chart(el, {
+    type: 'bar', data: { labels: labels, datasets: [{ data: vals, backgroundColor: vals.map(function (v, i) { return start + i === P && prog < 1 ? hatch(acc) : acc; }), borderColor: acc, borderWidth: vals.map(function (v, i) { return start + i === P && prog < 1 ? 1.5 : 0; }), borderRadius: 8, maxBarThickness: 56 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: REDUCED ? false : { duration: 600, easing: 'easeOutQuart' }, transitions: { resize: { animation: { duration: 0 } } },
+      interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false }, tooltip: tip },
+      scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 10 } }, y: { grid: { color: cssv('--line') }, border: { display: false }, ticks: { maxTicksLimit: 4, callback: kfmt } } } }
+  }));
+}
+// numbers count up to their value once, unless you asked your phone for less motion
+function countUps() {
+  document.querySelectorAll('[data-countto]').forEach(function (el) {
+    var to = +el.dataset.countto, plainN = el.dataset.plain, fmt = function (v) { return plainN ? String(Math.round(v)) : money(v, 0); };
+    if (REDUCED || !window.requestAnimationFrame) { el.textContent = fmt(to); return; }
+    var t0 = null; (function step(t) { if (!t0) t0 = t; var p = Math.min(1, (t - t0) / 650), e = 1 - Math.pow(1 - p, 4); el.textContent = fmt(to * e); if (p < 1) requestAnimationFrame(step); })(performance.now());
+  });
+}
+
+function renderOverview() {
+  var h = '';
   var ms = dataMonths();
   h += '<div class="seg" id="rng">' + [[3, '3 months'], [6, '6 months'], [12, '12 months'], [0, 'All']].map(function (r) { return '<button data-range="' + r[0] + '" aria-pressed="' + (UI.range === r[0]) + '">' + r[1] + '</button>'; }).join('') + '</div>';
   if (!ms.length) return h + '<div class="empty">Import or log some transactions to see insights.</div>';
@@ -4434,8 +4772,7 @@ function heatmap(byDay) {
   }
   return '<div class="heat" role="img" aria-label="Daily spending for the last 20 weeks">' + cells + '</div><div class="lg" style="margin-top:6px"><span>Less</span><span><i class="h0"></i><i class="h1"></i><i class="h2"></i><i class="h3"></i><i class="h4"></i></span><span>More</span></div>';
 }
-function drawInsights() {
-  charts.forEach(function (c) { c.destroy(); }); charts = [];
+function drawOverview() {
   if (!window.Chart) { document.querySelectorAll('.cw').forEach(function (w) { w.innerHTML = '<p class="note">Charts need a connection to load.</p>'; }); return; }
   var ms = dataMonths(); if (!ms.length) return;
   var ink = cssv('--ink'), mut = cssv('--muted'), grid = isDark() ? '#252B37' : '#E3E7EE', pal = isDark() ? COVE_D : COVE_L;
@@ -4513,6 +4850,11 @@ function onClick(e) {
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-gapfind]'))) { gapSheet(b.dataset.gapfind, +b.dataset.gapamt); return; }
   if ((b = t.closest('[data-wallet]'))) { walletPage(b.dataset.wallet); return; }
+  if ((b = t.closest('[data-insv]'))) { UI.insView = b.dataset.insv; render(); var f = document.querySelector('[data-insv="' + UI.insView + '"]'); if (f) f.focus(); return; }
+  if ((b = t.closest('[data-trcat]'))) { UI.trCat = +b.dataset.trcat; UI.trSub = null; render(); return; }
+  if ((b = t.closest('[data-trsub]'))) { UI.trSub = +b.dataset.trsub < 0 ? null : +b.dataset.trsub; render(); var ti = document.querySelector('.tr-title'); if (ti) ti.scrollIntoView({ block: 'center', behavior: REDUCED ? 'auto' : 'smooth' }); return; }
+  if ((b = t.closest('[data-trtable]'))) { UI.trTable = !UI.trTable; render(); return; }
+  if ((b = t.closest('[data-lens]'))) { UI.lensTag = b.dataset.lens; render(); return; }
   if ((b = t.closest('[data-hm]'))) { UI.homeMode = b.dataset.hm; render(); return; }
   if ((b = t.closest('[data-lump]'))) { lumpSheet(b.dataset.lump); return; }
   if ((b = t.closest('[data-plopen]'))) { payLaterSheet(b.dataset.plopen); return; }

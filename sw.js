@@ -1,6 +1,7 @@
 // Keeps the app opening offline. Pages and scripts: try the network, fall back to the cached copy.
-const CACHE = 'ledger-v44';
-const SHELL = ['./', './index.html', './config.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png'];
+const CACHE = 'ledger-v51';
+const SHELL = ['./', './index.html', './config.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
+  './fonts/Geist-Regular.woff2', './fonts/Geist-Medium.woff2', './fonts/Geist-SemiBold.woff2', './fonts/Geist-Bold.woff2'];
 self.addEventListener('install', e => {
   // Cache files one by one: a single missing file must not stop the worker installing,
   // because without an active worker Chrome refuses to treat the site as installable.
