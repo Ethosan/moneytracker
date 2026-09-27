@@ -454,6 +454,8 @@ dialog.tall{max-height:94vh}
 .hero.earn{background:radial-gradient(120% 90% at 100% 0%,#0f5c43 0%,transparent 55%),#0c1210}
 .strip [data-hm]{cursor:pointer}
 .actions.wrap-btns{flex-wrap:wrap;justify-content:flex-start}.actions.wrap-btns .btn{flex:0 1 auto}
+
+.wal-chart canvas{touch-action:pan-y}
 </style>
 </head>
 <body>
@@ -1613,28 +1615,48 @@ function catFilterSheet(openCat) {
     });
   });
 }
+// A search that is really an amount: "29.40", "$29.4", ">50", "<=10", "20-30".
+function priceQuery(q) {
+  var t = String(q || '').replace(/[\s,$]/g, ''), m;
+  if (!t || !/\d/.test(t)) return null;
+  if ((m = t.match(/^(>=|<=|>|<)(\d+(?:\.\d+)?)$/))) {
+    var v = +m[2], op = m[1];
+    return { label: (op[0] === '>' ? 'over ' : 'under ') + money(v), test: function (a) { return op === '>' ? a > v : op === '<' ? a < v : op === '>=' ? a >= v - 0.005 : a <= v + 0.005; } };
+  }
+  if ((m = t.match(/^(\d+(?:\.\d+)?)(?:-|to)(\d+(?:\.\d+)?)$/i))) {
+    var lo = Math.min(+m[1], +m[2]), hi = Math.max(+m[1], +m[2]);
+    return { label: 'between ' + money(lo) + ' and ' + money(hi), test: function (a) { return a >= lo - 0.005 && a <= hi + 0.005; } };
+  }
+  // a decimal or a $ sign means money; a plain whole number also matches text (a bus route, a year)
+  if ((m = t.match(/^(\d+(?:\.\d{1,2})?)$/)) && (/\./.test(t) || /\$/.test(q) || true)) {
+    var x = +m[1];
+    return { label: 'of ' + money(x), exact: true, loose: !/\.|\$/.test(q), test: function (a) { return Math.abs(a - x) < 0.005; } };
+  }
+  return null;
+}
 // A search that is really a date: "12 sep", "sep 12", "12/9", "12/9/2026", "2026-09-12".
 function searchDate(q) {
   q = String(q || '').trim(); if (q.length < 3 || !/\d/.test(q) || !/^[\d\s\/.\-a-z,]+$/i.test(q)) return null;
   var d = parseDateAny(q), m;
   var mons = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
   function thisOrLastYear(mo, da) { var y = +today().slice(0, 4), x = ymd(y, mo, da); return x > today() ? ymd(y - 1, mo, da) : x; }
-  if (!d && (m = q.match(/^(\d{1,2})[\/.](\d{1,2})$/)) && +m[2] <= 12) d = thisOrLastYear(+m[2], +m[1]);
+  if (!d && (m = q.match(/^(\d{1,2})\/(\d{1,2})$/)) && +m[2] <= 12) d = thisOrLastYear(+m[2], +m[1]);
+  if (/^\$?\d+\.\d{1,2}$/.test(q)) return null; // "29.40" is an amount
   if (!d && (m = q.match(/^([a-z]{3,4})[a-z]*\.?\s+(\d{1,2})$/i)) && mons[m[1].toLowerCase()]) d = thisOrLastYear(mons[m[1].toLowerCase()], +m[2]);
   return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : null;
 }
 function renderActivity() {
   // a date typed into search, like "12 sep" or "12/9", searches that day across all months
-  var qDate = searchDate(UI.q);
+  var qDate = searchDate(UI.q), qPrice = qDate ? null : priceQuery(UI.q);
   var d1 = qDate || UI.fd1, d2 = qDate || UI.fd2, ranged = !!d1;
-  var m = UI.month, tx = ((UI.all || ranged) ? allTx().slice() : (S.tx[m] || []).slice()).filter(function (t) { return t.t !== 'xfer' && (!ranged || (t.d >= d1 && t.d <= d2)); });
-  var movs = movementRows().filter(function (r) { return ranged ? (r.d >= d1 && r.d <= d2) : (UI.all || monthOf(r.d) === m); });
+  var m = UI.month, tx = ((UI.all || ranged || qPrice) ? allTx().slice() : (S.tx[m] || []).slice()).filter(function (t) { return t.t !== 'xfer' && (!ranged || (t.d >= d1 && t.d <= d2)); });
+  var movs = movementRows().filter(function (r) { return ranged ? (r.d >= d1 && r.d <= d2) : (UI.all || qPrice || monthOf(r.d) === m); });
   var h = '<header class="top">' + monthSwitch() + '' + hdRight() + '</header>';
   var chips = [['all', 'All'], ['exp', 'Spending'], ['inc', 'Income'], ['mov', 'Movements']];
   S.meta.tags.forEach(function (t) { chips.push(['tag:' + t, t]); });
 
   h += '<div class="chips">' + chips.map(function (c) { return '<button class="chip' + (c[0] === 'tag:Alaina' ? ' rose' : '') + '" data-filter="' + esc(c[0]) + '" aria-pressed="' + (UI.filter === c[0]) + '">' + esc(c[1]) + '</button>'; }).join('') + catPill() + '</div>';
-  h += '<div style="display:flex;gap:8px;align-items:center"><input class="search" type="search" placeholder="Search, or a date like 12 sep" value="' + esc(UI.q) + '" id="q" style="flex:1">' +
+  h += '<div style="display:flex;gap:8px;align-items:center"><input class="search" type="search" placeholder="Search words, 12 sep, or $29.40" value="' + esc(UI.q) + '" id="q" style="flex:1">' +
     '<button class="chip" data-act="allmonths" aria-pressed="' + UI.all + '" style="margin-bottom:12px">All time</button></div>';
   var f = UI.filter, q = UI.q.toLowerCase();
   tx = f === 'mov' ? [] : tx.filter(function (t) {
@@ -1645,19 +1667,23 @@ function renderActivity() {
     if (UI.fcat && t.cat !== UI.fcat) return false;
     if (UI.fwal && (t.pm === 'later' ? provOf(t) : t.acct) !== UI.fwal) return false;
     if (UI.fsub && (cleanSub(t.sub) || '(no subcategory)') !== UI.fsub) return false;
-    if (q && !qDate && ((t.note || '') + ' ' + t.cat + ' ' + (t.sub || '') + ' ' + (t.acct || '')).toLowerCase().indexOf(q) < 0) return false;
+    if (qPrice) {
+      var hit = qPrice.test(t.amt) || qPrice.test(ea(t));
+      if (!hit && !(qPrice.loose && ((t.note || '') + ' ' + (t.sub || '')).toLowerCase().indexOf(q) > -1)) return false;
+    } else if (q && !qDate && ((t.note || '') + ' ' + t.cat + ' ' + (t.sub || '') + ' ' + (t.acct || '')).toLowerCase().indexOf(q) < 0) return false;
     return true;
   });
   var movAll = movs.length;
   movs = (!UI.fcat && (f === 'all' || f === 'mov')) ? movs.filter(function (r) {
     if (UI.fwal && (r.wal || []).indexOf(UI.fwal) < 0) return false;
+    if (qPrice) { var ra = Math.abs(parseFloat(String(r.right || '').replace(/[^0-9.]/g, ''))); return qPrice.test(ra) || (qPrice.loose && r.text.toLowerCase().indexOf(q) > -1); }
     return !q || qDate || r.text.toLowerCase().indexOf(q) > -1;
   }) : [];
   var items = tx.map(function (t) { return { d: t.d, tx: t }; }).concat(movs.map(function (r) { return { d: r.d, mv: r }; }))
     .sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
   var tot = sum(tx, function (t) { return t.t === 'exp' ? ea(t) : 0; });
   h += '<div class="note" style="margin:0 2px 4px">' + tx.length + ' transaction' + (tx.length === 1 ? '' : 's') + (movs.length ? ', ' + movs.length + ' movement' + (movs.length === 1 ? '' : 's') : '') +
-    (qDate ? ' on ' + dayYear(qDate) : ranged ? ', ' + rangeLabel() : UI.all ? ' across all months' : '') + ', ' + money(tot) + ' spent</div>';
+    (qDate ? ' on ' + dayYear(qDate) : qPrice ? ' ' + qPrice.label + (ranged ? ', ' + rangeLabel() : ' across all months') : ranged ? ', ' + rangeLabel() : UI.all ? ' across all months' : '') + ', ' + money(tot) + ' spent</div>';
   if (movAll && !movs.length && (UI.fcat || f === 'exp' || f === 'inc' || f.indexOf('tag:') === 0 || f.indexOf('cat:') === 0))
     h += '<button class="banner quiet hint" data-act="showmov"><b>' + movAll + ' repayment' + (movAll === 1 ? '' : 's') + ' and transfer' + (movAll === 1 ? '' : 's') + ' hidden by this filter</b><span>PayLater payments, loans and moves between accounts. Tap to show them</span></button>';
   if (!items.length) return h + '<div class="empty">Nothing matches. Tap + to add something.</div>';
@@ -3265,17 +3291,45 @@ function walletPage(n, range) {
     drawWalletChart(el, M, start, t0, rel);
   });
 }
+// Vertical guide line where you touch or hover, so the tooltip is easy to read on a phone.
+var CROSSHAIR = {
+  id: 'crosshair',
+  afterDatasetsDraw: function (chart) {
+    var a = chart.tooltip && chart.tooltip.getActiveElements ? chart.tooltip.getActiveElements() : [];
+    if (!a.length) return;
+    var x = a[0].element.x, ctx = chart.ctx, top = chart.chartArea.top, bottom = chart.chartArea.bottom;
+    ctx.save(); ctx.beginPath(); ctx.moveTo(x, top); ctx.lineTo(x, bottom);
+    ctx.lineWidth = 1; ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--muted').trim() || '#888';
+    ctx.setLineDash([3, 3]); ctx.stroke(); ctx.restore();
+  }
+};
 function drawWalletChart(el, M, start, end, rel) {
   var cv = $('#wch', el); if (!cv || !window.Chart) return;
   var days = [], d = start; while (d <= end && days.length < 800) { days.push(d); d = addDays(d, 1); }
-  var step = Math.max(1, Math.ceil(days.length / 120)), pts = days.filter(function (x, i) { return i % step === 0 || i === days.length - 1; });
+  // every day is a point, so touching anywhere shows that exact day
   var cs = getComputedStyle(document.documentElement), ink = cs.getPropertyValue('--accent').trim() || '#2f5cff', muted = cs.getPropertyValue('--muted').trim() || '#888';
+  var surface = cs.getPropertyValue('--surface').trim() || '#fff', text = cs.getPropertyValue('--ink').trim() || '#111';
+  var vals = days.map(M.balOn);
+  var moved = {}; M.flows.forEach(function (f) { moved[f.d] = (moved[f.d] || 0) + f.amt; });
   if (walletPage.chart) { try { walletPage.chart.destroy(); } catch (e) { } }
   walletPage.chart = new Chart(cv, {
     type: 'line',
-    data: { labels: pts.map(function (x) { return dayLabel(x).replace(/^\w+, /, ''); }), datasets: [{ data: pts.map(M.balOn), borderColor: ink, backgroundColor: ink + '22', fill: true, tension: .25, pointRadius: 0, borderWidth: 2, stepped: false }] },
-    options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500 }, plugins: { legend: { display: false }, tooltip: { callbacks: { label: function (c) { return (rel ? 'net ' : '') + money(c.parsed.y); } } } },
-      scales: { x: { grid: { display: false }, ticks: { color: muted, maxTicksLimit: 5, maxRotation: 0 } }, y: { grid: { color: muted + '22' }, ticks: { color: muted, maxTicksLimit: 4, callback: function (v) { return '$' + Math.round(v); } } } } }
+    data: { labels: days.map(function (x) { return dayLabel(x).replace(/^\w+, /, ''); }),
+      datasets: [{ data: vals, borderColor: ink, backgroundColor: ink + '22', fill: true, tension: .25, pointRadius: 0, pointHitRadius: 12,
+        pointHoverRadius: 5, pointHoverBackgroundColor: ink, pointHoverBorderColor: surface, pointHoverBorderWidth: 2, borderWidth: 2 }] },
+    options: { responsive: true, maintainAspectRatio: false, animation: { duration: 500 },
+      interaction: { mode: 'index', intersect: false, axis: 'x' },
+      plugins: { legend: { display: false },
+        tooltip: { enabled: true, displayColors: false, backgroundColor: text, titleColor: surface, bodyColor: surface, padding: 10, cornerRadius: 10,
+          titleFont: { weight: '600' }, bodyFont: { size: 13 },
+          callbacks: {
+            title: function (items) { var x = days[items[0].dataIndex]; return dayLabel(x) + ' ' + x.slice(0, 4); },
+            label: function (c) { return (rel ? 'Change so far ' + signed(c.parsed.y) : 'Balance ' + money(c.parsed.y)); },
+            afterLabel: function (c) { var mv = moved[days[c.dataIndex]]; return mv ? 'That day ' + signed(r2(mv)) : ''; }
+          } } },
+      scales: { x: { grid: { display: false }, ticks: { color: muted, maxTicksLimit: 5, maxRotation: 0, autoSkip: true } },
+        y: { grid: { color: muted + '22' }, ticks: { color: muted, maxTicksLimit: 4, callback: function (v) { return '$' + Math.round(v); } } } } },
+    plugins: [CROSSHAIR]
   });
 }
 function walletSheet(n) {
@@ -3313,6 +3367,90 @@ function walletSheet(n) {
     });
   });
 }
+// ---------- gap finder ----------
+// When what a provider says you owe differs from what your ledger adds up to, look for the
+// usual causes and try to explain the exact amount.
+function gapCandidates(prov, gap) {
+  var out = [];
+  var mine = S.bills.filter(function (b) { return billProv(b) === prov; });
+  var pays = []; mine.forEach(function (b) { (b.payments || []).forEach(function (p) { pays.push(p); }); });
+  // 1. the same amount paid twice on one day
+  var byKey = {};
+  pays.forEach(function (p) { var k = p.d + '|' + p.amt; (byKey[k] = byKey[k] || []).push(p); });
+  Object.keys(byKey).forEach(function (k) {
+    var g = byKey[k]; if (g.length < 2) return;
+    var plain = g.filter(function (p) { return !p.note || /payment$/i.test(p.note); })[0] || g[g.length - 1];
+    out.push({ kind: 'dup', amt: plain.amt, title: 'Payment recorded twice?', sub: money(plain.amt) + ' paid ' + g.length + ' times on ' + dayLabel(plain.d) + (g.some(function (p) { return p.note && !/payment$/i.test(p.note); }) ? ', one labelled "' + g.filter(function (p) { return p.note && !/payment$/i.test(p.note); })[0].note + '"' : ''), act: 'Open payment', payId: plain.payId || plain.id });
+  });
+  // 2. instalments that cost more than the price: a fee that was never recorded
+  var counts = {}; pays.forEach(function (p) { counts[p.amt] = (counts[p.amt] || 0) + 1; });
+  allTx().forEach(function (t) {
+    if (t.pm !== 'later' || provOf(t) !== prov || !t.inst || t.inst.n < 2 || t.inst.fee) return;
+    Object.keys(counts).forEach(function (a) {
+      a = +a; var tot = r2(a * t.inst.n), fee = r2(tot - t.amt);
+      var words = (t.note || '').toLowerCase().split(/\W+/).filter(function (w) { return w.length > 3 && w !== 'grab' && w !== 'shopee'; });
+      var named = pays.some(function (p) { return p.amt === a && p.note && words.some(function (w) { return p.note.toLowerCase().indexOf(w.slice(0, 5)) > -1; }); });
+      if (fee > 0.5 && fee < t.amt * 0.4 && (named || counts[a] >= 2) && Math.abs(r2(t.amt / t.inst.n) - a) > 0.02)
+        out.push({ kind: 'fee', amt: fee, title: 'Instalment fee not recorded?', sub: (t.note || plain(t.cat)) + ': ' + t.inst.n + ' \u00d7 ' + money(a) + ' = ' + money(tot) + ', but recorded as ' + money(t.amt), act: 'Record ' + money(fee) + ' fee', txId: t.id, fee: fee, strong: named });
+    });
+  });
+  // keep the best fee guess per purchase
+  var bestFee = {}; out.filter(function (c) { return c.kind === 'fee'; }).forEach(function (c) { if (!bestFee[c.txId] || (c.strong && !bestFee[c.txId].strong)) bestFee[c.txId] = c; });
+  out = out.filter(function (c) { return c.kind !== 'fee' || bestFee[c.txId] === c; });
+  // 3. recent purchases that look like this provider but were paid another way
+  var key = prov.toLowerCase().replace(/s?pay ?later|pay/g, ' ').trim().split(/\s+/)[0] || prov.toLowerCase(), since = addDays(today(), -75);
+  allTx().forEach(function (t) {
+    if (t.t !== 'exp' || t.pm === 'later' || t.d < since) return;
+    if (((t.note || '') + ' ' + (t.sub || '')).toLowerCase().indexOf(key) < 0 || /subscription|top ?up/i.test(t.note || '')) return;
+    out.push({ kind: 'moved', amt: t.amt, title: (t.note || plain(t.cat)), sub: dayLabel(t.d) + ', recorded as ' + (t.acct || 'cash'), act: 'Move to ' + prov, txId: t.id });
+  });
+  // 4. an exact explanation: as many likely causes as possible, topped up with at most two
+  //    purchases. Anything looser is too easy to hit by coincidence, so it is not offered.
+  var strongC = out.filter(function (c) { return c.kind !== 'moved'; }), movedC = out.filter(function (c) { return c.kind === 'moved'; });
+  var exact = null, subsets = [];
+  for (var mask = 0; mask < (1 << Math.min(strongC.length, 10)); mask++) {
+    var pick = strongC.filter(function (c, k) { return mask & (1 << k); });
+    subsets.push(pick);
+  }
+  subsets.sort(function (a, b) { return b.length - a.length; });
+  subsets.some(function (pick) {
+    var left = r2(gap - sum(pick, function (c) { return c.amt; }));
+    if (Math.abs(left) < 0.015) { if (pick.length) exact = pick; return !!pick.length; }
+    for (var a = 0; a < movedC.length; a++) {
+      if (Math.abs(movedC[a].amt - left) < 0.015) { exact = pick.concat([movedC[a]]); return true; }
+      for (var b = a + 1; b < movedC.length; b++) if (Math.abs(movedC[a].amt + movedC[b].amt - left) < 0.015) { exact = pick.concat([movedC[a], movedC[b]]); return true; }
+    }
+    return false;
+  });
+  return { list: out, exact: exact };
+}
+function gapSheet(prov, gap) {
+  var G = gapCandidates(prov, gap);
+  var strong = G.list.filter(function (c) { return c.kind !== 'moved'; }), moved = G.list.filter(function (c) { return c.kind === 'moved'; });
+  var explained = r2(sum(strong, function (c) { return c.amt; }));
+  function row(c) {
+    var ix = G.list.indexOf(c);
+    return '<div class="row"><div class="l"><b>' + esc(c.title) + ' <span class="gapamt">+' + money(c.amt) + '</span></b><span style="white-space:normal">' + esc(c.sub) + '</span></div><button class="chip sm" data-gap="' + ix + '">' + esc(c.act) + '</button></div>';
+  }
+  var body = '<div class="kv" style="margin-top:0"><span>' + esc(prov) + ' says you owe</span><span>' + money(gap + laterOwed(prov)) + '</span><span>Your ledger adds up to</span><span>' + money(laterOwed(prov)) + '</span><span><b>Unexplained</b></span><span class="neg"><b>' + money(gap) + '</b></span></div>' +
+    (G.exact ? '<div class="banner" style="margin:6px 0 14px"><b>' + G.exact.length + ' of these add up to exactly ' + money(gap) + '</b><span>' + G.exact.map(function (c) { return c.title + ' ' + money(c.amt); }).join(' + ') + '. Check these first: with many rides an exact match can be coincidence.</span></div>' : '') +
+    (strong.length ? '<label class="f">Most likely</label><div class="panel">' + strong.map(row).join('') + '</div><p class="note">Together these account for ' + money(explained) + ' of the ' + money(gap) + '.' + (explained < gap - 0.01 ? ' The remaining ' + money(r2(gap - explained)) + ' is probably something not logged at all, or among the purchases below.' : '') + '</p>' : '') +
+    (moved.length ? '<label class="f">Paid another way, but look like ' + esc(prov.split(' ')[0]) + '</label><div class="panel">' + moved.slice(0, 25).map(row).join('') + '</div>' : '') +
+    (!G.list.length ? '<div class="empty">Nothing in the ledger explains it. Check the provider\u2019s app for a purchase, fee or late charge that was never logged, and add it here.</div>' : '') +
+    '<p class="note">Nothing changes until you tap a button, and every change can be undone from the history.</p>';
+  openSheet('Find the ' + money(gap) + ' on ' + prov, body, function (el) {
+    el.querySelectorAll('[data-gap]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var c = G.list[+b.dataset.gap];
+        if (c.kind === 'dup') { closeSheet(); lumpSheet(c.payId); return; }
+        if (c.kind === 'fee') { var t = findTx(c.txId); if (t) { t.inst.fee = c.fee; syncInstFee(t); markMonth(monthOf(t.d)); toast('Fee of ' + money(c.fee) + ' recorded'); } }
+        if (c.kind === 'moved') { var t2 = findTx(c.txId); if (t2) { t2.pm = 'later'; t2.plp = prov; delete t2.acct; markMonth(monthOf(t2.d)); toast('Moved to ' + prov); } }
+        render(); var A = accountBalances(), l = A.liabs.filter(function (x) { return x.name === prov; })[0];
+        closeSheet(); var ng = l ? r2(l.now - l.bills) : 0; if (Math.abs(ng) > 0.005) gapSheet(prov, ng); else toast('All explained');
+      });
+    });
+  });
+}
 function balancesSection() {
   var A = accountBalances(), h = '<section class="blk"><h2>Balances <button data-act="check">Count now</button></h2>';
   if (!A.lc) {
@@ -3337,8 +3475,9 @@ function balancesSection() {
   }
   var lc0 = !!A.lc;
   A.liabs.forEach(function (l) {
-    var diff = l.counted != null && Math.abs(l.now - l.bills) > 0.5;
-    h += '<button class="row" data-plopen="' + esc(l.name) + '"><div class="l"><b>' + esc(l.name) + '</b><span>' + (l.counted != null ? 'You counted ' + money(l.counted) + (diff ? '; your bills here show ' + money(l.bills) + ', so a purchase or fee may be missing' : '') : (lc0 ? 'From your bills. Not in your last count, so only changes since then affect the total' : 'From your bills')) + '</span></div><div class="r neg">\u2212' + money(l.now) + '</div></button>';
+    var diff = l.counted != null && Math.abs(l.now - l.bills) > 0.005, gp = r2(l.now - l.bills);
+    h += '<button class="row" data-plopen="' + esc(l.name) + '"><div class="l"><b>' + esc(l.name) + '</b><span>' + (l.counted != null ? 'You counted ' + money(l.counted) + (diff ? ', your ledger adds up to ' + money(l.bills) : ', matches your ledger') : (lc0 ? 'From your bills. Not in your last count, so only changes since then affect the total' : 'From your bills')) + '</span></div><div class="r neg">\u2212' + money(l.now) + '</div></button>';
+    if (diff) h += '<button class="row gaprow" data-gapfind="' + esc(l.name) + '" data-gapamt="' + gp + '"><span class="av warn">!</span><div class="l"><b>' + money(Math.abs(gp)) + ' unexplained on ' + esc(l.name) + '</b><span>' + (gp > 0 ? l.name + ' says you owe more than your ledger shows. Tap to find it' : 'Your ledger shows more owed than ' + l.name + ' does. Tap to look') + '</span></div><div class="r">Find \u203a</div></button>';
   });
   h += '<div class="row"><div class="l"><b>Expected total now</b><span>What a count today should come to</span></div><div class="r">' + money(A.expected) + '</div></div></div>' +
     '<div class="actions wrap-btns" style="margin:10px 0 0"><button class="btn sm ghost" data-act="addwallet">+ Add a wallet</button><button class="btn sm ghost" data-act="checkplan">Reminder: ' + checkPlanLabel() + '</button></div>' +
@@ -3390,6 +3529,12 @@ function checkSheet() {
     function refresh() {
       readVals();
       var tot = total(), c = $('#calc', el), acts = $('#acts', el);
+      // a PayLater figure that disagrees with the ledger is either a typo or something unlogged: say so now
+      var warns = Object.keys(plOwedBy).filter(function (n) { return vals[n] != null && Math.abs(vals[n] - plOwedBy[n]) > 0.009; }).map(function (n) {
+        return n + ': you entered ' + money(vals[n]) + ', the ledger says ' + money(plOwedBy[n]) + '. If that\u2019s what the ' + n.split(' ')[0] + ' app shows, it will appear as unexplained on Balances for you to find; otherwise fix the number.';
+      });
+      var wbox = $('#plwarn', el); if (!wbox) { wbox = document.createElement('p'); wbox.id = 'plwarn'; wbox.className = 'warn'; c.parentNode.insertBefore(wbox, c); }
+      wbox.textContent = warns.join(' '); wbox.hidden = !warns.length;
       if (!prev) {
         c.innerHTML = '<div class="kv"><span>Total you have</span><span>' + money(tot) + '</span></div><p class="note">This first check sets your starting point. Next time, the app shows any gap.</p>';
         acts.innerHTML = '<button class="btn" id="sv" data-mode="none">Save starting point</button>';
@@ -3723,10 +3868,13 @@ function lumpParts(payId) {
 }
 // A date that cannot be right: after today, or before the bill period it pays for.
 function dayYear(d) { return dayLabel(d) + ' ' + d.slice(0, 4); }
+// Payments roll forward in date order, so an early payment landing on a later bill is normal.
+// A date is only impossible if it is in the future or before anything was ever bought there.
 function payDateProblem(d, bills) {
   if (d > addDays(today(), 1)) return 'is in the future';
-  var early = bills.filter(function (b) { return d < b.from; });
-  if (early.length) return 'is before the ' + periodLabel(early[0].from, billProv(early[0])) + ' bill it pays for even started';
+  var prov = bills.length ? billProv(bills[0]) : null; if (!prov) return '';
+  var first = periods(prov).slice().sort()[0];
+  if (first && d < first) return 'is before your first ' + prov + ' purchase';
   return '';
 }
 function lumpSheet(payId) {
@@ -4298,6 +4446,14 @@ function drawInsights() {
       scales: { x: { stacked: stacked, grid: { display: !!horiz, color: grid }, border: { display: false }, ticks: horiz ? { callback: fmt } : { autoSkip: false, maxRotation: 0 } },
         y: { stacked: stacked, grid: { display: !horiz, color: grid }, border: { display: false }, ticks: horiz ? { autoSkip: false } : { callback: fmt, maxTicksLimit: 5 } } } };
     if (horiz) o.indexAxis = 'y';
+    // respond anywhere along the chart, not only on the exact bar or line
+    o.interaction = { mode: 'index', intersect: false, axis: horiz ? 'y' : 'x' };
+    var tt = o.plugins.tooltip;
+    tt.backgroundColor = cssv('--ink'); tt.titleColor = cssv('--surface'); tt.bodyColor = cssv('--surface');
+    tt.padding = 10; tt.cornerRadius = 10; tt.boxPadding = 4; tt.titleFont = { weight: '600' };
+    var val = function (it) { return horiz ? it.parsed.x : it.parsed.y; };
+    tt.filter = function (it) { return Math.abs(val(it) || 0) > 0.005; }; // nothing spent there: leave it out
+    if (stacked) { tt.footerFont = { weight: '600' }; tt.callbacks.footer = function (items) { var t = 0; items.forEach(function (it) { t += val(it) || 0; }); return items.length > 1 ? 'Total ' + fmt(t) : ''; }; }
     return o;
   };
   var labels = ms.map(function (m) { return monthLabel(m, true); }), st = ms.map(monthStats), cc = catColorMap();
@@ -4355,6 +4511,7 @@ function onClick(e) {
   if ((b = t.closest('[data-tab][data-acct]'))) { UI.acct = b.dataset.acct; }
   if ((b = t.closest('[data-tab]'))) { UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
+  if ((b = t.closest('[data-gapfind]'))) { gapSheet(b.dataset.gapfind, +b.dataset.gapamt); return; }
   if ((b = t.closest('[data-wallet]'))) { walletPage(b.dataset.wallet); return; }
   if ((b = t.closest('[data-hm]'))) { UI.homeMode = b.dataset.hm; render(); return; }
   if ((b = t.closest('[data-lump]'))) { lumpSheet(b.dataset.lump); return; }
