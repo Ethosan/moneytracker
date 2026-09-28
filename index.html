@@ -536,6 +536,61 @@ nav.tabs button[aria-current="page"] .ms .pi-line + .pi-fill{display:block}
 :root{--loss:#CD222F;--gain:#0B7C56;--rose:#CA1C62}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--loss:#FF6B75;--gain:#34D399;--rose:#FF6FA8}}
 :root[data-theme="dark"]{--loss:#FF6B75;--gain:#34D399;--rose:#FF6FA8}
+
+/* ---------- Insights layout across screen sizes ----------
+   Phone: one column. Tablet (768+): the view spans the page in two columns.
+   Desktop (1024+): three columns, charts get two of them. The Overview view
+   reuses the page grid so its original layout rules still apply. */
+.ins-view > .panel{margin:0 0 14px}
+@media (min-width:768px){
+  main > .ins-tabs{grid-column:1 / -1;max-width:520px;margin:0}
+  main > .ins-view{grid-column:1 / -1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 20px;align-items:start}
+  .ins-view > *{grid-column:1 / -1;margin:0}
+  .ins-view > .panel{margin:0}
+  .ins-trends > .tr-subs,.ins-trends > .tr-often-p{grid-column:auto}
+  .ins-lens > .ln-cats,.ins-lens > .ln-days,.ins-lens > .ln-mom,.ins-lens > .ln-between{grid-column:auto}
+  .ins-ov > .kpis,.ins-ov > .seg{grid-column:1 / -1}
+  .ins-ov > section.blk{grid-column:1 / -1}
+  .kpis b{font-size:clamp(22px,2.6vw,28px);overflow-wrap:anywhere}
+}
+@media (min-width:1024px){
+  main > .ins-view{grid-template-columns:repeat(3,minmax(0,1fr));gap:20px 22px}
+  .tr-rail{flex-wrap:wrap;overflow:visible;padding-bottom:0}
+  .ins-trends > .tr-main{grid-column:span 2;grid-row:span 2}
+  .ins-trends > .tr-subs,.ins-trends > .tr-often-p{grid-column:3}
+  .ins-trends > .tr-main .tr-chart{height:300px}
+  .ins-lens > .ln-stats{grid-column:1 / -1}
+  .ins-lens > .ln-month{grid-column:span 2}
+  .ins-lens > .ln-month .tr-chart{height:240px !important}
+  .ins-lens > .ln-cats{grid-column:3}
+  .ins-ov > section.blk{grid-column:span 1}
+  .ins-ov > section.blk:has(.cw),.ins-ov > section.blk:has(.heat),.ins-ov > section.blk:has(.tbl){grid-column:span 2}
+  .ins-ov > .seg{max-width:520px}
+}
+@media (min-width:1024px){
+  /* smaller panels fill the column beside wide charts instead of queueing below */
+  main > .ins-ov{grid-auto-flow:row dense}
+  /* panels in the same row share a height, so rows don't leave ragged gaps */
+  main > .ins-lens{align-items:stretch}
+  /* the narrower right-hand column: keep names on one line, a smaller sparkline */
+  .ins-trends > .tr-subs .tr-item{grid-template-columns:minmax(0,1fr) 56px auto;gap:10px;padding:10px 4px}
+  .ins-trends > .tr-subs .tr-t b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ins-trends > .tr-subs .spark{width:56px}
+}
+@media (min-width:1024px){
+  /* Overview: headline charts wide, smaller charts one column each, heatmap and table full width */
+  .ins-ov > section.blk[data-c="c1"],.ins-ov > section.blk[data-c="c2"]{grid-column:span 2}
+  .ins-ov > section.blk[data-c="c3"],.ins-ov > section.blk[data-c="c4"],.ins-ov > section.blk[data-c="c5"],
+  .ins-ov > section.blk[data-c="c6"],.ins-ov > section.blk[data-c="c7"]{grid-column:span 1}
+  .ins-ov > section.blk:has(.heat),.ins-ov > section.blk:has(.tbl){grid-column:1 / -1}
+}
+@media (min-width:1024px){ .ins-ov > section.blk[data-c="c7"]{grid-column:span 2} }
+@media (min-width:768px){
+  .ins-trends > .tr-subs .tr-item{grid-template-columns:minmax(0,1fr) 56px auto;gap:10px;padding:10px 4px}
+  .ins-trends > .tr-subs .tr-t b{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ins-trends > .tr-subs .spark{width:56px}
+}
+.ul-w{margin-top:8px;gap:6px}.ul-w .chip.sm{min-height:34px;padding:0 12px;font-size:13px}.ul-row{align-items:flex-start}
 </style>
 </head>
 <body>
@@ -883,6 +938,17 @@ function normalize() {
     var touched = {};
     allTx().forEach(function (t) { if ((t.t === 'exp' || t.t === 'inc') && t.pm !== 'later' && !t.acct) { t.acct = first; touched[monthOf(t.d)] = 1; } });
     if (typeof store !== 'undefined' && store.dirty) { Object.keys(touched).forEach(function (k) { store.dirty['tx-' + k] = true; }); store.dirty.meta = true; }
+  }
+  if (!m.peopleWalletV1) {
+    // people entries recorded before wallets existed on them: file them under Cash
+    m.peopleWalletV1 = 1;
+    var cashW = (m.accounts.filter(function (a) { return !a.liability && /^cash$/i.test(a.name); })[0] || m.accounts.filter(function (a) { return !a.liability; })[0] || {}).name;
+    if (cashW) {
+      var chg = 0;
+      S.debts.forEach(function (x) { if (!x.acct && !x.txId && !x.ledgerId) { x.acct = cashW; chg++; } });
+      allTx().forEach(function (t) { if (!t.acct && t.pm !== 'later' && /settling up with/i.test(t.note || '')) { t.acct = cashW; chg++; } });
+      if (chg && typeof store !== 'undefined' && store.dirty) { store.dirty.debts = true; Object.keys(S.tx).forEach(function (k) { store.dirty['tx-' + k] = true; }); store.dirty.meta = true; }
+    }
   }
   S.bills.forEach(function (b) { (b.payments || []).forEach(function (p) { if (!p.payId) p.payId = p.id; }); });
   if (typeof reallocAll === 'function' && S.bills.length && reallocAll() && typeof store !== 'undefined' && store.dirty) store.dirty.bills = true;
@@ -1583,8 +1649,8 @@ function movementRows() {
       : x.k === 'paid' ? 'Paid ' + x.person + ' back'
       : x.amt > 0 ? x.person + ' owes you more' : 'You owe ' + x.person + ' more';
     out.push({ d: x.d, kind: 'ppl', wal: [], title: what, sub: x.k === 'settle'
-        ? money(x.paid) + (Math.abs(x.diff || 0) < 0.005 ? ', settled exactly' : x.diff > 0 ? ', ' + money(x.diff) + ' short, added to spending' : ', ' + money(-x.diff) + ' extra, kept as a gain')
-        : x.k === 'part' ? money(x.paid) + ' part payment, the rest stays owing'
+        ? money(x.paid) + (Math.abs(x.diff || 0) < 0.005 ? ', settled exactly' : x.diff > 0 ? ', ' + money(x.diff) + ' short, added to spending' : ', ' + money(-x.diff) + ' extra, kept as a gain') + (x.acct ? ', ' + (x.amt < 0 ? 'into ' : 'from ') + x.acct : '')
+        : x.k === 'part' ? money(x.paid) + ' part payment, the rest stays owing' + (x.acct ? ', into ' + x.acct : '')
         : (x.note && !/settled|written off|part payment/i.test(x.note) ? x.note : (x.amt > 0 ? 'Balance moved your way' : 'Balance moved their way')),
       right: (x.amt > 0 ? '\u2212' : '+') + money(Math.abs(x.amt)), cls: x.amt > 0 ? '' : 'pos', av: '\u21c4', attr: 'data-person="' + esc(x.person) + '"',
       text: x.person + ' ' + (x.note || '') });
@@ -2576,12 +2642,22 @@ var DEBT_ACTS = [
   ['lent', 'I lent them', 1, 'out'], ['repaid', 'They paid me back', -1, 'in'],
   ['borrowed', 'I borrowed', -1, 'in'], ['paid', 'I paid them back', 1, 'out'],
   ['held', 'They gave me money to invest or hold', -1, 'in'], ['returned', 'I gave their money back', 1, 'out']];
+function walletChips(id, chosen) {
+  return '<div class="wrap" id="' + id + '">' + wallets().map(function (w) { return '<button class="chip" data-w="' + esc(w) + '" aria-pressed="' + (w === chosen) + '">' + esc(w) + '</button>'; }).join('') + '</div>';
+}
+function wireWalletChips(el, id, set) {
+  $('#' + id, el).addEventListener('click', function (e) {
+    var b = e.target.closest('[data-w]'); if (!b) return; set(b.dataset.w);
+    el.querySelectorAll('#' + id + ' .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
+  });
+}
 function debtSheet(person) {
   var act = 'lent', ppl = {}; S.debts.forEach(function (d) { ppl[d.person] = 1; });
   var hist = person ? S.debts.filter(function (d) { return d.person === person; }).sort(function (a, b) { return a.d < b.d ? 1 : -1; }) : [];
   var body = '<label class="f" for="per">Person</label><input class="t" id="per" list="pl" value="' + esc(person || '') + '"><datalist id="pl">' + Object.keys(ppl).map(function (p) { return '<option value="' + esc(p) + '">'; }).join('') + '</datalist>' +
     '<label class="f">What happened</label><div class="wrap" id="da">' + DEBT_ACTS.map(function (a) { return '<button class="chip" data-a="' + a[0] + '" aria-pressed="' + (a[0] === act) + '">' + a[1] + ' \u00b7 ' + (a[3] === 'out' ? 'money out' : 'money in') + '</button>'; }).join('') + '</div>' +
     '<div class="amt-in" style="margin-top:12px"><span>$</span><input id="amt" inputmode="decimal" placeholder="0.00" aria-label="Amount"></div>' +
+    '<label class="f" id="dwl">Paid from</label>' + walletChips('dwal', defWallet()) +
     '<label class="f" for="note">Note</label><input class="t" id="note">' +
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + today() + '">' +
     '<div class="actions"><button class="btn" id="save">Save</button></div>';
@@ -2600,14 +2676,18 @@ function debtSheet(person) {
     }).join('') + '</div><p class="note">Amounts show what happened to your money. Money you lend or pay out is a minus; money coming back is a plus. The balance at the top is what is still between you.</p>';
   }
   openSheet(person || 'Money between friends', body, function (el) {
-    $('#da', el).addEventListener('click', function (e) { var b = e.target.closest('[data-a]'); if (!b) return; act = b.dataset.a; el.querySelectorAll('#da .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
+    var dw = defWallet();
+    wireWalletChips(el, 'dwal', function (w) { dw = w; });
+    function dLabel() { var a = DEBT_ACTS.filter(function (x) { return x[0] === act; })[0]; $('#dwl', el).textContent = a[3] === 'out' ? 'Paid from' : 'Received into'; }
+    dLabel();
+    $('#da', el).addEventListener('click', function (e) { var b = e.target.closest('[data-a]'); if (!b) return; act = b.dataset.a; dLabel(); el.querySelectorAll('#da .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
     var stl = $('#settle', el);
     if (stl) stl.addEventListener('click', function () { settleSheet(person); });
     $('#save', el).addEventListener('click', function () {
       var p = $('#per', el).value.trim(), a = calcVal($('#amt', el).value);
       if (!p) { toast('Add a name'); return; } if (!(a > 0)) { toast('Enter an amount'); return; }
       var sgn = DEBT_ACTS.filter(function (x) { return x[0] === act; })[0][2];
-      S.debts.push({ id: uid(), d: $('#dt', el).value || today(), person: p, amt: r2(a * sgn), note: $('#note', el).value.trim(), k: act, src: 'app' }); mark('debts');
+      S.debts.push({ id: uid(), d: $('#dt', el).value || today(), person: p, amt: r2(a * sgn), note: $('#note', el).value.trim(), k: act, acct: dw, src: 'app' }); S.meta.lastAcct = dw; mark('debts');
       closeSheet(); render(); toast('Saved');
     });
     el.querySelectorAll('[data-dd]').forEach(function (b) { b.addEventListener('click', function () { snapshot(); S.debts = S.debts.filter(function (d) { return d.id !== b.dataset.dd; }); mark('debts'); closeSheet(); render(); toastUndo('Entry deleted'); }); });
@@ -2620,11 +2700,13 @@ function settleSheet(person) {
   var bal = r2(sum(S.debts.filter(function (d) { return d.person === person; }), function (d) { return d.amt; }));
   var body = '<div class="kv" style="margin-top:0"><span>Balance</span><span>' + (bal > 0 ? esc(person) + ' owes you ' : 'You owe ' + esc(person) + ' ') + money(Math.abs(bal)) + '</span></div>' +
     '<label class="f">Amount actually ' + (bal > 0 ? 'received' : 'paid') + '</label><div class="amt-in"><span>$</span><input id="sa" inputmode="decimal" value="' + Math.abs(bal) + '" aria-label="Amount"></div>' +
+    '<label class="f">' + (bal > 0 ? 'Received into' : 'Paid from') + '</label>' + walletChips('swal', defWallet()) +
     '<label class="f" for="sd">Date</label><input class="t" type="date" id="sd" value="' + today() + '">' +
     '<label class="f">If it does not cover the balance</label><div class="seg" id="sm"><button data-sm="close" aria-pressed="true">Call it settled</button><button data-sm="part" aria-pressed="false">Leave the rest owing</button></div>' +
     '<p class="note" id="smsg"></p><div class="actions"><button class="btn" id="sgo">Record it</button></div>';
   openSheet('Settle up with ' + person, body, function (el) {
-    var mode = 'close';
+    var mode = 'close', sw = defWallet();
+    wireWalletChips(el, 'swal', function (w) { sw = w; });
     $('#sm', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-sm]'); if (!b) return; mode = b.dataset.sm;
       el.querySelectorAll('#sm button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); msg();
@@ -2655,19 +2737,19 @@ function settleSheet(person) {
       if (isNaN(a) || a < 0) { toast('Enter an amount'); return; }
       var paid = r2(a), diff = r2(Math.abs(bal) - paid);
       if (mode === 'part') {
-        S.debts.push({ id: uid(), d: d, person: person, amt: bal > 0 ? -paid : paid, note: 'Part payment', k: 'part', paid: paid, src: 'app' });
+        S.debts.push({ id: uid(), d: d, person: person, amt: bal > 0 ? -paid : paid, note: 'Part payment', k: 'part', paid: paid, acct: sw, src: 'app' }); S.meta.lastAcct = sw;
         mark('debts'); closeSheet(); render(); toast('Recorded'); return;
       }
       // one entry clears the balance, whatever was actually paid
-      S.debts.push({ id: uid(), d: d, person: person, amt: -bal, note: 'Settled up', k: 'settle', paid: paid, diff: diff, src: 'app' });
+      S.debts.push({ id: uid(), d: d, person: person, amt: -bal, note: 'Settled up', k: 'settle', paid: paid, diff: diff, acct: sw, src: 'app' }); S.meta.lastAcct = sw;
       if (Math.abs(diff) > 0.005) {
         var short = (bal > 0 && diff > 0) || (bal < 0 && diff < 0);
         var m = monthOf(d), amt = Math.abs(diff);
         if (short) {
           var c = '📦 Other'; if (!catObj(c)) S.meta.cats.push({ name: c, type: 'exp' });
-          (S.tx[m] = S.tx[m] || []).push({ id: uid(), d: d, t: 'exp', amt: amt, cat: c, sub: '', note: 'Shortfall settling up with ' + person, tags: [], src: 'app' });
+          (S.tx[m] = S.tx[m] || []).push({ id: uid(), d: d, t: 'exp', amt: amt, cat: c, sub: '', note: 'Shortfall settling up with ' + person, tags: [], acct: sw, src: 'app' });
         } else {
-          (S.tx[m] = S.tx[m] || []).push({ id: uid(), d: d, t: 'adj', amt: amt, cat: '🔧 Adjustment', sub: '', note: 'Extra from settling up with ' + person, tags: [], src: 'app' });
+          (S.tx[m] = S.tx[m] || []).push({ id: uid(), d: d, t: 'adj', amt: amt, cat: '🔧 Adjustment', sub: '', note: 'Extra from settling up with ' + person, tags: [], acct: sw, src: 'app' });
         }
         markMonth(m); mark('meta');
       }
@@ -3119,15 +3201,32 @@ function csvImportSheet() {
     });
   });
 }
+// Restore points: a full copy of your data taken just before each restore, kept separately
+// from the change history (which only holds the last 40 changes), so a restore can always
+// be reversed, even much later. The last three are kept on this device.
+var RP_KEY = 'ledger-restore-points-v1';
+function restorePoints() { try { return JSON.parse(localStorage.getItem(RP_KEY) || '[]'); } catch (e) { return []; } }
+function saveRestorePoint(label) {
+  var list = restorePoints();
+  list.unshift({ t: Date.now(), label: label, n: allTx().length, data: JSON.stringify(S) });
+  for (var k = 3; k > 0; k--) { try { localStorage.setItem(RP_KEY, JSON.stringify(list.slice(0, k))); return true; } catch (e) { } }
+  return false;
+}
 function restoreSheet() {
-  var body = '<p style="margin-top:0">Choose a ledger backup file, or paste its contents. It replaces everything in the app, and you can undo straight after.</p>' +
+  var pts = restorePoints();
+  var body = '<p style="margin-top:0">Choose a ledger backup file, or paste its contents. It replaces everything in the app. What you have now is saved first as a restore point, so you can always come back to it.</p>' +
     '<input type="file" id="rf" accept=".json,application/json,text/plain" class="t">' +
     '<label class="f" for="rt">Or paste a backup</label><textarea class="t" id="rt" rows="4" placeholder="{&quot;meta&quot;: ..."></textarea>' +
-    '<div class="actions"><button class="btn ghost" id="rgo">Restore pasted backup</button></div><p class="neg" id="rerr"></p>';
-  function apply(text, el) {
+    '<div class="actions"><button class="btn ghost" id="rgo">Restore pasted backup</button></div><p class="neg" id="rerr"></p>' +
+    (pts.length ? '<label class="f" style="margin-top:18px">Go back to how things were</label><div class="panel">' + pts.map(function (p, i) {
+      var dt = new Date(p.t);
+      return '<div class="row"><div class="l"><b>' + esc(p.label) + '</b><span>' + dayLabel(dt.toISOString().slice(0, 10)) + ' ' + dt.toTimeString().slice(0, 5) + ', ' + p.n + ' transaction' + (p.n === 1 ? '' : 's') + '</span></div><button class="chip sm" data-rp="' + i + '">Go back</button></div>';
+    }).join('') + '</div><p class="note">Restore points are kept on this device. Going back also saves what you have now, so it can be undone too.</p>' : '');
+  function apply(text, el, label) {
     try {
       var o = JSON.parse(text); if (!o || !o.meta || !o.tx) throw 0;
-      snapshot(); delete o.exported; delete o.app;
+      saveRestorePoint(label || 'Before restoring a backup');
+      delete o.exported; delete o.app;
       S = o; normalize(); markAll(); closeSheet(); UI.month = monthOf(today()); render();
       toastUndo('Backup restored, ' + allTx().length + ' transactions');
     } catch (e) { $('#rerr', el).textContent = 'That is not a ledger backup.'; }
@@ -3135,10 +3234,17 @@ function restoreSheet() {
   openSheet('Restore a backup', body, function (el) {
     $('#rf', el).addEventListener('change', function () {
       var f = this.files[0]; if (!f) return; var rd = new FileReader();
-      rd.onload = function () { apply(rd.result, el); };
+      rd.onload = function () { apply(rd.result, el, 'Before restoring ' + f.name); };
       rd.readAsText(f);
     });
     $('#rgo', el).addEventListener('click', function () { apply($('#rt', el).value.trim(), el); });
+    el.querySelectorAll('[data-rp]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var p = restorePoints()[+b.dataset.rp]; if (!p) return;
+        if (!confirm('Go back to your data from ' + new Date(p.t).toLocaleString('en-SG') + '? What you have now is kept as a restore point.')) return;
+        apply(p.data, el, 'Before going back to an earlier point');
+      });
+    });
   });
 }
 function syncSheet() {
@@ -3222,7 +3328,10 @@ function accountBalances() {
   S.ledger.forEach(function (e) { if (e.f === 'bal') return; var amt = e.f === 'out' ? e.amt : -e.amt; if (!mv(e.acct, amt, e.d) && since && e.d > since) { noWallet += amt; noWalletN++; } });
   S.bills.forEach(function (b) { (b.payments || []).forEach(function (p) { mv(p.from, -p.amt, p.d); }); });
   var people = 0;
-  S.debts.forEach(function (x) { if (!x.txId && !x.ledgerId && since && x.d > since) people -= x.amt; });
+  S.debts.forEach(function (x) {
+    if (x.txId || x.ledgerId || !since || x.d <= since) return;
+    if (!mv(x.acct, -x.amt, x.d)) people -= x.amt;
+  });
   // what you owe on each PayLater line: your count, moved by purchases, fees and payments since
   var liabNames = {};
   S.meta.accounts.forEach(function (a) { if (a.liability) liabNames[a.name] = 1; });
@@ -3326,6 +3435,10 @@ function walletFlows(n) {
   S.ledger.forEach(function (e) {
     if (e.acct !== n || e.f === 'bal') return;
     out.push({ d: e.d, amt: e.f === 'out' ? e.amt : -e.amt, title: e.venue + (e.f === 'out' ? ' withdrawal' : ' deposit'), sub: e.note || 'Investment', attr: 'data-venue="' + esc(e.venue) + '"', av: '\u2197', kind: 'inv' });
+  });
+  S.debts.forEach(function (x) {
+    if (x.acct !== n || x.txId || x.ledgerId) return;
+    out.push({ d: x.d, amt: -x.amt, title: x.k === 'settle' ? 'Settled up with ' + x.person : x.amt > 0 ? (x.k === 'paid' ? 'Paid ' + x.person + ' back' : 'Lent to ' + x.person) : x.person + ' paid you', sub: x.note || 'People', attr: 'data-person="' + esc(x.person) + '"', av: '\u21c4', kind: 'xfer' });
   });
   var lumps = {};
   S.bills.forEach(function (b) {
@@ -3544,6 +3657,46 @@ function gapSheet(prov, gap) {
     });
   });
 }
+// Money that moved since your last count without naming a wallet, with a quick way to say which.
+function unlinkedItems() {
+  var lc = lastCheck(); if (!lc) return [];
+  var since = lc.d, ws = wallets(), out = [];
+  allTx().forEach(function (t) {
+    if (t.d <= since || t.t === 'xfer' || t.pm === 'later' || t.feeOf || /Finance fees/.test(t.cat || '')) return;
+    if (t.acct && ws.indexOf(t.acct) > -1) return;
+    out.push({ kind: 'tx', ref: t, d: t.d, amt: t.t === 'exp' ? -t.amt : t.amt, title: t.note || plain(t.cat), sub: plain(t.cat) });
+  });
+  S.debts.forEach(function (x) {
+    if (x.d <= since || x.txId || x.ledgerId || (x.acct && ws.indexOf(x.acct) > -1)) return;
+    out.push({ kind: 'debt', ref: x, d: x.d, amt: -x.amt, title: x.k === 'settle' ? 'Settled up with ' + x.person : x.amt > 0 ? 'Lent to ' + x.person : x.person + ' paid you', sub: 'People' });
+  });
+  S.ledger.forEach(function (e) {
+    if (e.d <= since || e.f === 'bal' || (e.acct && ws.indexOf(e.acct) > -1)) return;
+    out.push({ kind: 'inv', ref: e, d: e.d, amt: e.f === 'out' ? e.amt : -e.amt, title: e.venue + (e.f === 'out' ? ' withdrawal' : ' deposit'), sub: 'Investments' });
+  });
+  return out.sort(function (a, b) { return a.d < b.d ? 1 : -1; });
+}
+function assignWallet(it, w) {
+  it.ref.acct = w;
+  if (it.kind === 'tx') markMonth(monthOf(it.ref.d)); else mark(it.kind === 'debt' ? 'debts' : 'ledger');
+}
+function unlinkedSheet() {
+  var items = unlinkedItems(), ws = wallets(), dw = defWallet();
+  var body = !items.length ? '<div class="empty">Everything since your last count is linked to a wallet.</div>' :
+    '<p style="margin-top:0">These moved money since your last count without saying which wallet. Tap the wallet each one used, and it joins that wallet\u2019s balance.</p>' +
+    '<div class="actions" style="margin:4px 0 12px"><button class="btn sm ghost" id="ulall">Put all ' + items.length + ' in ' + esc(dw) + '</button></div>' +
+    '<div class="panel">' + items.map(function (it, i) {
+      return '<div class="row ul-row"><div class="l"><b>' + esc(it.title) + '</b><span>' + dayLabel(it.d) + ', ' + esc(it.sub) + '</span>' +
+        '<div class="wrap ul-w">' + ws.map(function (w) { return '<button class="chip sm" data-ul="' + i + '" data-w="' + esc(w) + '">' + esc(w) + '</button>'; }).join('') + '</div></div>' +
+        '<div class="r ' + (it.amt > 0 ? 'pos' : '') + '">' + signed(it.amt) + '</div></div>';
+    }).join('') + '</div>';
+  openSheet('Not linked to a wallet', body, function (el) {
+    el.querySelectorAll('[data-ul]').forEach(function (b) {
+      b.addEventListener('click', function () { assignWallet(items[+b.dataset.ul], b.dataset.w); render(); unlinkedSheet(); toast('Linked to ' + b.dataset.w); });
+    });
+    var all = $('#ulall', el); if (all) all.addEventListener('click', function () { items.forEach(function (it) { assignWallet(it, dw); }); render(); unlinkedSheet(); toast('All linked to ' + dw); });
+  });
+}
 function balancesSection() {
   var A = accountBalances(), h = '<section class="blk"><h2>Balances <button data-act="check">Count now</button></h2>';
   if (!A.lc) {
@@ -3564,7 +3717,7 @@ function balancesSection() {
     var why = [];
     if (A.noWalletN) why.push(A.noWalletN + ' entr' + (A.noWalletN === 1 ? 'y' : 'ies') + ' with no wallet');
     if (Math.abs(A.people) > 0.005) why.push('loans and repayments ' + signed(A.people));
-    h += '<div class="row"><div class="l"><b>Not linked to a wallet</b><span>Since ' + dayLabel(A.since) + (why.length ? ': ' + why.join(', ') : '') + '</span></div><div class="r ' + (A.unassigned < 0 ? 'neg' : 'pos') + '">' + signed(A.unassigned) + '</div></div>';
+    h += '<button class="row" data-act="unlinked"><div class="l"><b>Not linked to a wallet</b><span>Since ' + dayLabel(A.since) + (why.length ? ': ' + why.join(', ') : '') + '. Tap to link them</span></div><div class="r ' + (A.unassigned < 0 ? 'neg' : 'pos') + '">' + signed(A.unassigned) + '</div></button>';
   }
   var lc0 = !!A.lc;
   A.liabs.forEach(function (l) {
@@ -4445,9 +4598,9 @@ function renderInsights() {
   var h = '<header class="top"><h1>Insights</h1>' + hdRight() + '</header>' + insTabs();
   var v = UI.insView || 'trends';
   if (!allTx().length) return h + '<div class="empty">Log or import some transactions to see insights.</div>';
-  if (v === 'overview') return h + '<div role="tabpanel" aria-labelledby="it-overview">' + renderOverview() + '</div>';
-  if (v === 'lens') return h + '<div role="tabpanel" aria-labelledby="it-lens">' + renderLens() + '</div>';
-  return h + '<div role="tabpanel" aria-labelledby="it-trends">' + renderTrends() + '</div>';
+  if (v === 'overview') return h + '<div role="tabpanel" class="ins-view ins-ov" aria-labelledby="it-overview">' + renderOverview() + '</div>';
+  if (v === 'lens') return h + '<div role="tabpanel" class="ins-view ins-lens" aria-labelledby="it-lens">' + renderLens() + '</div>';
+  return h + '<div role="tabpanel" class="ins-view ins-trends" aria-labelledby="it-trends">' + renderTrends() + '</div>';
 }
 function drawInsights() {
   charts.forEach(function (c) { c.destroy(); }); charts = [];
@@ -4538,7 +4691,7 @@ function renderTrends() {
       T.months.map(function (m, i) { var dv = ser.m[i] - d.avg; return '<tr><td>' + monthLabel(m, true) + (i === d.partial ? ' (so far)' : '') + '</td><td class="r">' + money(ser.m[i]) + '</td><td class="r">' + (i < d.start ? '' : signed(dv, 0)) + '</td></tr>'; }).join('') + '</tbody></table>' : '') +
     '</section>';
   if (si == null) {
-    h += '<section class="panel"><h2 class="tr-h">Where ' + esc(plain(c.name).toLowerCase()) + ' money goes</h2>';
+    h += '<section class="panel tr-subs"><h2 class="tr-h">Where ' + esc(plain(c.name).toLowerCase()) + ' money goes</h2>';
     if (c.subs.length < 2 && (!c.subs[0] || c.subs[0].name === 'No subcategory')) h += '<p class="note">No subcategories here yet. Add one when you log a purchase and it appears here with its own trend.</p>';
     else h += '<div class="tr-list">' + c.subs.map(function (x, i) {
       var t = sum(x.m, function (v) { return v; }), pc = Math.round(t / c.total * 100), cur = x.m[x.m.length - 1];
@@ -4548,7 +4701,7 @@ function renderTrends() {
     h += '</section>';
   }
   var top = si == null ? c.top : c.subs[si].top;
-  h += '<section class="panel"><h2 class="tr-h">' + (si == null ? 'Most often' : 'Most often in ' + esc(ser.name)) + '</h2>' +
+  h += '<section class="panel tr-often-p"><h2 class="tr-h">' + (si == null ? 'Most often' : 'Most often in ' + esc(ser.name)) + '</h2>' +
     (top.length ? '<div class="tr-often">' + top.map(function (o) { return '<div><p>' + esc(o.note) + ' <span>' + o.n + (o.n === 1 ? ' time' : ' times') + '</span></p><b>' + money(o.amt, 0) + '</b></div>'; }).join('') + '</div>' : '<p class="note">No notes on these entries yet.</p>') + '</section>';
   return h;
 }
@@ -4629,24 +4782,24 @@ function renderLens() {
   var nd = function (i) { return Object.keys(L.days[i]).length; };
   var mtxt = MONTHS_FULL[+L.months[bi].slice(5) - 1] + ' was the biggest: <b>' + money(L.m[bi], 0) + '</b> over ' + nd(bi) + ' days out.';
   if (prog < 1 && bi !== P && nd(P)) mtxt += ' ' + MONTHS_FULL[+L.months[P].slice(5) - 1] + ' so far: <b>' + money(L.m[P], 0) + '</b> over ' + nd(P) + ' days, about <b>' + money(L.m[P] / nd(P), 0) + '</b> a day out against <b>' + money(L.m[bi] / Math.max(1, nd(bi)), 0) + '</b> in ' + MONTHS_FULL[+L.months[bi].slice(5) - 1] + '.';
-  h += '<section class="panel"><h2 class="tr-h">Month by month</h2><p class="tr-insight">' + mtxt + '</p><div class="tr-chart" style="height:180px"><canvas id="lnch" role="img" aria-label="' + esc(L.months.slice(start).map(function (m, i) { return monthLabel(m, true) + ' ' + money(L.m[start + i], 0) + ' over ' + nd(start + i) + ' days'; }).join(', ')) + '"></canvas></div></section>';
+  h += '<section class="panel ln-month"><h2 class="tr-h">Month by month</h2><p class="tr-insight">' + mtxt + '</p><div class="tr-chart" style="height:180px"><canvas id="lnch" role="img" aria-label="' + esc(L.months.slice(start).map(function (m, i) { return monthLabel(m, true) + ' ' + money(L.m[start + i], 0) + ' over ' + nd(start + i) + ' days'; }).join(', ')) + '"></canvas></div></section>';
   var max = L.catList[0].amt;
-  h += '<section class="panel"><h2 class="tr-h">What it goes on</h2><div class="ln-bars">' + L.catList.map(function (c, i) {
+  h += '<section class="panel ln-cats"><h2 class="tr-h">What it goes on</h2><div class="ln-bars">' + L.catList.map(function (c, i) {
     return '<div class="ln-bar"><div><b><span aria-hidden="true">' + esc(avatar(c.name)) + ' </span>' + esc(plain(c.name)) + '</b><span>' + money(c.amt, 0) + ' <small>(' + Math.round(c.amt / L.total * 100) + '%)</small></span></div><i style="--w:' + (c.amt / max * 100) + '%;--k:' + i + '" aria-hidden="true"></i></div>';
   }).join('') + '</div></section>';
   var names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], FULLD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   var wmax = Math.max.apply(null, L.wd.map(function (w) { return w.amt; }).concat([1])), topD = 0;
   L.wd.forEach(function (w, i) { if (w.amt > L.wd[topD].amt) topD = i; });
   var wk = (L.wd[4].amt + L.wd[5].amt + L.wd[6].amt) / L.total * 100, nTop = Object.keys(L.wd[topD].days).length;
-  h += '<section class="panel"><h2 class="tr-h">Which days</h2><p class="tr-insight">Fridays to Sundays make up <b>' + Math.round(wk) + '%</b>. ' + FULLD[topD] + ' is the biggest day: ' + money(L.wd[topD].amt, 0) + ' over ' + nTop + ' ' + FULLD[topD] + (nTop === 1 ? '' : 's') + '.</p>' +
+  h += '<section class="panel ln-days"><h2 class="tr-h">Which days</h2><p class="tr-insight">Fridays to Sundays make up <b>' + Math.round(wk) + '%</b>. ' + FULLD[topD] + ' is the biggest day: ' + money(L.wd[topD].amt, 0) + ' over ' + nTop + ' ' + FULLD[topD] + (nTop === 1 ? '' : 's') + '.</p>' +
     '<div class="ln-week" role="list" aria-label="Spending together by day of the week">' + L.wd.map(function (w, i) {
       var n = Object.keys(w.days).length;
       return '<div class="ln-day" role="listitem" aria-label="' + FULLD[i] + ': ' + money(w.amt, 0) + ' over ' + n + ' days"><small>' + (w.amt ? '$' + Math.round(w.amt) : '') + '</small><i style="--h:' + (w.amt / wmax * 100) + '%;--o:' + (0.35 + 0.65 * w.amt / wmax) + ';--k:' + i + '"></i><span>' + names[i] + '</span></div>';
     }).join('') + '</div></section>';
-  h += '<section class="panel"><h2 class="tr-h">Biggest moments</h2><div class="ln-moments">' + L.top.map(function (t) {
+  h += '<section class="panel ln-mom"><h2 class="tr-h">Biggest moments</h2><div class="ln-moments">' + L.top.map(function (t) {
     return '<button class="ln-m" data-edit-tx="' + esc(t.id) + '"><span class="av" aria-hidden="true">' + esc(avatar(t.cat)) + '</span><span class="l"><b>' + esc(t.note || plain(t.cat)) + '</b><span>' + dayLabel(t.d) + (t.split ? ', your share of ' + money(t.amt) : '') + '</span></span><span class="r">' + money(ea(t)) + '</span></button>';
   }).join('') + '</div></section>';
-  h += '<section class="panel"><h2 class="tr-h">Money between you</h2><div class="kv" style="margin:0">' +
+  h += '<section class="panel ln-between"><h2 class="tr-h">Money between you</h2><div class="kv" style="margin:0">' +
     '<span>Covered for ' + esc(tag) + ' in split bills</span><span>' + money(L.covered) + '</span>' +
     '<span>Paid back to you</span><span>' + money(L.paybacks) + '</span>' +
     (L.invested ? '<span>' + esc(tag) + '\u2019s money you are investing</span><span>' + money(L.invested) + '</span>' : '') +
@@ -4700,7 +4853,7 @@ function renderOverview() {
   var alTx = exps.filter(function (t) { return (t.tags || []).indexOf('Alaina') > -1; }), alDays = {};
   alTx.forEach(function (t) { alDays[t.d] = (alDays[t.d] || 0) + ea(t); });
   var nd = Object.keys(alDays).length, big = alTx.slice().sort(function (a, b) { return b.amt - a.amt; }).slice(0, 3);
-  h += '<section class="blk"><h2>Time with Alaina</h2><div class="panel" style="padding:12px 14px">' +
+  h += '<section class="blk" data-c="c3"><h2>Time with Alaina</h2><div class="panel" style="padding:12px 14px">' +
     '<div class="kv"><span>Days with spending together</span><span>' + nd + '</span><span>Average per day together</span><span>' + money(nd ? alTot / nd : 0) + '</span><span>Share of all spending</span><span>' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</span></div>' +
     '<div class="cw" style="height:150px"><canvas id="c3" role="img" aria-label="Monthly spending with Alaina"></canvas></div>' +
     (big.length ? '<div class="note" style="margin-top:8px">Biggest: ' + big.map(function (t) { return esc(t.note || t.cat) + ' ' + money(t.amt, 0); }).join(', ') + '</div>' : '') + '</div></section>';
@@ -4758,7 +4911,7 @@ function renderOverview() {
   return h;
 }
 function chartBlock(id, title, sub, hgt, legend) {
-  return '<section class="blk"><h2 style="display:block">' + esc(title) + '<span class="note" style="display:block;margin:2px 0 0;font-weight:400">' + esc(sub) + '</span></h2>' + legend +
+  return '<section class="blk" data-c="' + id + '"><h2 style="display:block">' + esc(title) + '<span class="note" style="display:block;margin:2px 0 0;font-weight:400">' + esc(sub) + '</span></h2>' + legend +
     '<div class="cw" style="height:' + hgt + 'px"><canvas id="' + id + '" role="img" aria-label="' + esc(title) + '"></canvas></div></section>';
 }
 function heatmap(byDay) {
@@ -4895,6 +5048,7 @@ function onClick(e) {
     else if (a === 'addwallet') { var nw = (prompt('Name the wallet, e.g. YouTrip, PayLah, UOB') || '').trim(); if (nw) { ensureWallet(nw); render(); toast(nw + ' added'); } }
     else if (a === 'history') historySheet();
     else if (a === 'checkplan') checkPlanSheet();
+    else if (a === 'unlinked') unlinkedSheet();
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
     else if (a === 'next') { UI.month = addMonth(UI.month, 1); render(); }
