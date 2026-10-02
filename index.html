@@ -591,6 +591,16 @@ nav.tabs button[aria-current="page"] .ms .pi-line + .pi-fill{display:block}
   .ins-trends > .tr-subs .spark{width:56px}
 }
 .ul-w{margin-top:8px;gap:6px}.ul-w .chip.sm{min-height:34px;padding:0 12px;font-size:13px}.ul-row{align-items:flex-start}
+
+/* Trends history: every entry behind the chart */
+.tr-hist-h{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:4px}
+.tr-hist-h .tr-h{margin:0}
+.tr-month{display:flex;justify-content:space-between;gap:10px;padding:14px 2px 6px;font-size:12.5px;font-weight:600;letter-spacing:.02em;text-transform:uppercase;color:var(--muted);border-bottom:1px solid var(--line)}
+.tr-month span:last-child{text-transform:none;letter-spacing:0;font-weight:500;font-variant-numeric:tabular-nums}
+.tr-hist-list .tr-hrow{width:100%}
+.tr-hd{display:block;font-size:12.5px;color:var(--muted);font-weight:500;margin-bottom:1px}
+.tr-chart canvas{cursor:pointer}
+@media (min-width:768px){ .ins-trends > .tr-hist{grid-column:1 / -1} }
 </style>
 </head>
 <body>
@@ -944,6 +954,98 @@ function syncPropMirror() {
   return Object.keys(changed).length > 0;
 }
 
+// ---------- tags: people vs topics, and automatic tagging ----------
+// A tag is a "person" if money moves with them (People entries or shared investing);
+// otherwise it is a topic, like Trading. Wording and the Month screen follow from that.
+function isPersonTag(g) { return S.debts.some(function (x) { return x.person === g; }) || S.ledger.some(function (e) { return e.who === g; }); }
+function personTag() { var t = (S.meta.tags || []).filter(isPersonTag); return t[0] || null; }
+// Rules add a tag to every entry in a category and/or subcategory. Removing an auto tag by
+// hand is remembered (t.untag), so it is never put back.
+function ruleTags(t) {
+  if (t.t !== 'exp' && t.t !== 'inc') return [];
+  return (S.meta.tagRules || []).filter(function (r) {
+    if (!r.cat && !r.sub) return false;
+    if (r.cat && t.cat !== r.cat) return false;
+    if (r.sub && (cleanSub(t.sub) || '').toLowerCase() !== r.sub.toLowerCase()) return false;
+    return true;
+  }).map(function (r) { return r.tag; });
+}
+function applyTagRules() {
+  var changed = {};
+  Object.keys(S.tx).forEach(function (m) {
+    S.tx[m].forEach(function (t) {
+      ruleTags(t).forEach(function (g) {
+        if ((t.tags || []).indexOf(g) < 0 && (t.untag || []).indexOf(g) < 0) { t.tags = (t.tags || []).concat(g); changed[m] = 1; }
+      });
+    });
+  });
+  if (typeof store !== 'undefined' && store.dirty) Object.keys(changed).forEach(function (m) { store.dirty['tx-' + m] = true; });
+  return Object.keys(changed).length;
+}
+var TAG_ICON = '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi"><path d="M243.31,136,144,36.69A15.86,15.86,0,0,0,132.69,32H40a8,8,0,0,0-8,8v92.69A15.86,15.86,0,0,0,36.69,144L136,243.31a16,16,0,0,0,22.63,0l84.68-84.68a16,16,0,0,0,0-22.63ZM84,96A12,12,0,1,1,96,84,12,12,0,0,1,84,96Z"/></svg></span>';
+// Untagged entries that probably belong: they mention the tag, one of your investment
+// accounts (for topic tags), or a word that mostly appears on entries already tagged.
+function tagSuggestions(g) {
+  var low = g.toLowerCase(), words = {}, tot = {}, person = isPersonTag(g);
+  var tok = function (s) { return (s || '').toLowerCase().split(/[^a-z0-9]+/).filter(function (w) { return w.length >= 4; }); };
+  allTx().forEach(function (t) {
+    if (t.t !== 'exp') return; var tagged = (t.tags || []).indexOf(g) > -1, seen = {};
+    tok(t.note).forEach(function (w) { if (seen[w]) return; seen[w] = 1; tot[w] = (tot[w] || 0) + 1; if (tagged) words[w] = (words[w] || 0) + 1; });
+  });
+  var key = Object.keys(words).filter(function (w) { return words[w] / tot[w] >= 0.6; });
+  if (!person) Object.keys(S.meta.venues || {}).forEach(function (v) { tok(v).forEach(function (w) { key.push(w); }); });
+  tok(low).forEach(function (w) { key.push(w); });
+  var K = {}; key.forEach(function (w) { K[w] = 1; });
+  return allTx().filter(function (t) {
+    if (t.t !== 'exp' || (t.tags || []).indexOf(g) > -1 || (t.untag || []).indexOf(g) > -1 || t.propOf) return false;
+    return tok((t.note || '') + ' ' + (t.sub || '')).some(function (w) { return K[w]; });   // whole words only
+  }).sort(function (a, b) { return a.d < b.d ? 1 : -1; });
+}
+function tagSheet(g) {
+  var rules = (S.meta.tagRules || []).filter(function (r) { return r.tag === g; }), sug = tagSuggestions(g).slice(0, 40);
+  var n = allTx().filter(function (t) { return (t.tags || []).indexOf(g) > -1; }).length;
+  var body = '<div class="kv" style="margin-top:0"><span>Tagged</span><span>' + n + ' entr' + (n === 1 ? 'y' : 'ies') + '</span></div>' +
+    '<label class="f">Tag automatically</label>' +
+    (rules.length ? '<div class="panel">' + rules.map(function (r) {
+      return '<div class="row"><div class="l"><b>' + esc(r.cat ? plain(r.cat) : 'Any category') + (r.sub ? ' \u203a ' + esc(r.sub) : '') + '</b><span>Everything here gets ' + esc(g) + ', including new entries</span></div><button class="chip sm" data-rmrule="' + (S.meta.tagRules || []).indexOf(r) + '">Remove</button></div>';
+    }).join('') + '</div>' : '<p class="note">No rules yet.</p>') +
+    '<div style="display:grid;grid-template-columns:1fr 1fr auto;gap:8px;margin-top:10px"><select class="t" id="rcat" aria-label="Category"><option value="">Any category</option>' +
+      S.meta.cats.filter(function (c) { return c.type === 'exp'; }).map(function (c) { return '<option value="' + esc(c.name) + '">' + esc(plain(c.name)) + '</option>'; }).join('') + '</select>' +
+      '<input class="t" id="rsub" placeholder="Subcategory (optional)" aria-label="Subcategory"><button class="btn sm" id="radd">Add</button></div>' +
+    '<label class="f" style="margin-top:20px" for="tsq">Find entries to tag</label><input class="search" id="tsq" type="search" placeholder="e.g. sierra, tradingview" autocomplete="off"><div id="tsl"></div>' +
+    '<label class="f" style="margin-top:20px">Probably ' + esc(g) + '</label>' +
+    (sug.length ? '<div class="actions" style="margin:2px 0 10px"><button class="btn sm ghost" id="sgall">Tag all ' + sug.length + '</button></div><div class="panel">' + sug.map(function (t, i) {
+      return '<div class="row"><div class="l"><b>' + esc(t.note || plain(t.cat)) + '</b><span>' + dayLabel(t.d) + ', ' + esc(plain(t.cat)) + (t.sub ? ' \u00b7 ' + esc(t.sub) : '') + ', ' + money(ea(t)) + '</span></div>' +
+        '<div style="display:flex;gap:6px"><button class="chip sm" data-sgno="' + i + '" aria-label="Not ' + esc(g) + '">Not this</button><button class="chip sm on" data-sgyes="' + i + '">Tag</button></div></div>';
+    }).join('') + '</div>' : '<p class="note">No suggestions right now. You can also tag any entry from its edit screen.</p>');
+  openSheet(g, body, function (el) {
+    $('#radd', el).addEventListener('click', function () {
+      var c = $('#rcat', el).value, sb = $('#rsub', el).value.trim(); if (!c && !sb) { toast('Choose a category or type a subcategory'); return; }
+      S.meta.tagRules = (S.meta.tagRules || []).concat({ tag: g, cat: c || undefined, sub: sb || undefined });
+      mark('meta'); var k = applyTagRules(); render(); tagSheet(g); toast(k ? 'Rule added and applied' : 'Rule added');
+    });
+    el.querySelectorAll('[data-rmrule]').forEach(function (b) { b.addEventListener('click', function () { S.meta.tagRules.splice(+b.dataset.rmrule, 1); mark('meta'); render(); tagSheet(g); }); });
+    function tag(t, yes) { if (yes) { t.tags = (t.tags || []).concat(g); t.untag = (t.untag || []).filter(function (x) { return x !== g; }); } else t.untag = (t.untag || []).concat(g); markMonth(monthOf(t.d)); }
+    el.querySelectorAll('[data-sgyes]').forEach(function (b) { b.addEventListener('click', function () { tag(sug[+b.dataset.sgyes], true); render(); tagSheet(g); }); });
+    el.querySelectorAll('[data-sgno]').forEach(function (b) { b.addEventListener('click', function () { tag(sug[+b.dataset.sgno], false); render(); tagSheet(g); }); });
+    var all = $('#sgall', el); if (all) all.addEventListener('click', function () { sug.forEach(function (t) { tag(t, true); }); render(); tagSheet(g); toast('Tagged ' + sug.length); });
+    var found = [];
+    function drawFound() {
+      var q = $('#tsq', el).value.trim().toLowerCase();
+      found = q.length < 2 ? [] : allTx().filter(function (t) { return t.t === 'exp' && (t.tags || []).indexOf(g) < 0 && ((t.note || '') + ' ' + (t.sub || '') + ' ' + plain(t.cat)).toLowerCase().indexOf(q) > -1; })
+        .sort(function (a, b) { return a.d < b.d ? 1 : -1; }).slice(0, 25);
+      $('#tsl', el).innerHTML = !q || q.length < 2 ? '' : found.length ? '<div class="panel" style="margin-top:8px">' + found.map(function (t, i) {
+        return '<div class="row"><div class="l"><b>' + esc(t.note || plain(t.cat)) + '</b><span>' + dayLabel(t.d) + ', ' + esc(plain(t.cat)) + ', ' + money(ea(t)) + '</span></div><button class="chip sm on" data-fd="' + i + '">Tag</button></div>';
+      }).join('') + '</div>' + (found.length > 1 ? '<button class="linkbtn" id="fdall">Tag all ' + found.length + '</button>' : '') : '<p class="note">Nothing untagged matches.</p>';
+    }
+    $('#tsq', el).addEventListener('input', drawFound);
+    $('#tsl', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-fd]'); if (b) { tag(found[+b.dataset.fd], true); render(); drawFound(); toast('Tagged'); return; }
+      if (e.target.closest('#fdall')) { found.forEach(function (t) { tag(t, true); }); render(); drawFound(); toast('Tagged ' + found.length); }
+    });
+  });
+}
+
 function normalize() {
   S.meta = S.meta || freshMeta();
   ['bills', 'inbox', 'checks', 'ledger', 'debts'].forEach(function (k) { if (!Array.isArray(S[k])) S[k] = []; });
@@ -999,7 +1101,14 @@ function normalize() {
       if (chg && typeof store !== 'undefined' && store.dirty) { store.dirty.debts = true; Object.keys(S.tx).forEach(function (k) { store.dirty['tx-' + k] = true; }); store.dirty.meta = true; }
     }
   }
+  if (!m.tradingTagV1) {
+    m.tradingTagV1 = 1;
+    if ((m.tags || []).indexOf('Trading') < 0) m.tags = (m.tags || []).concat('Trading');
+    m.tagRules = (m.tagRules || []).concat([{ tag: 'Trading', cat: '\uD83D\uDCC9 Prop firms' }, { tag: 'Trading', sub: 'Trading' }]);
+    if (typeof store !== 'undefined' && store.dirty) store.dirty.meta = true;
+  }
   if (typeof syncPropMirror === 'function') syncPropMirror();
+  if (typeof applyTagRules === 'function') applyTagRules();
   S.bills.forEach(function (b) { (b.payments || []).forEach(function (p) { if (!p.payId) p.payId = p.id; }); });
   if (typeof reallocAll === 'function' && S.bills.length && reallocAll() && typeof store !== 'undefined' && store.dirty) store.dirty.bills = true;
   S.v = SCHEMA;
@@ -1040,7 +1149,7 @@ function loadLocal() {
 }
 function mark(key) {
   store.dirty[key] = true;
-  if (key === 'ledger' || key === 'meta') syncPropMirror();
+  if (key === 'ledger' || key === 'meta') { syncPropMirror(); applyTagRules(); }
   if ((key === 'bills' || key.indexOf('tx-') === 0) && typeof reallocAll === 'function' && reallocAll()) store.dirty.bills = true;
   saveLocal(); saveDirty(); schedule(); histTouch();
 }
@@ -1090,7 +1199,8 @@ function mergeBy(a, b, key) {
 var META_LISTS = {
   cats: function (c) { return c.name; }, tags: function (t) { return t; }, subs: function (x) { return x.id; },
   accounts: function (x) { return x.name; }, budgets: function (x) { return x.key; }, rules: function (x) { return x.match + '>' + x.tag; },
-  plProviders: function (x) { return x.name; }
+  plProviders: function (x) { return x.name; },
+  tagRules: function (x) { return x.tag + '|' + (x.cat || '') + '|' + (x.sub || ''); }
 };
 function metaKeys(m) {
   var o = {};
@@ -1280,12 +1390,13 @@ function wireLogin() {
 // ---------- calculations ----------
 function monthStats(m) {
   var tx = S.tx[m] || [];
-  var o = { spend: 0, earned: 0, other: 0, reimb: 0, alaina: 0, byCat: {} };
+  var o = { spend: 0, earned: 0, other: 0, reimb: 0, alaina: 0, byCat: {}, byTag: {} }, PT = personTag();
   tx.forEach(function (t) {
     if (t.t === 'exp') {
       var v = ea(t);
       o.spend += v; o.byCat[t.cat] = (o.byCat[t.cat] || 0) + v;
-      if ((t.tags || []).indexOf('Alaina') > -1) o.alaina += v;
+      if (PT && (t.tags || []).indexOf(PT) > -1) o.alaina += v;
+      (t.tags || []).forEach(function (g) { o.byTag[g] = (o.byTag[g] || 0) + v; });
     } else if (t.t === 'inc') {
       var k = incKind(t.cat); o[k === 'earned' ? 'earned' : k === 'reimb' ? 'reimb' : 'other'] += t.amt;
     }
@@ -1570,12 +1681,17 @@ function renderHome() {
     // tape: Alaina-tagged share drawn as its own hatched segment
     var tape = '', i = 0;
     var rest = {}; cats.forEach(function (c) { rest[c] = st.byCat[c]; });
-    (S.tx[m] || []).forEach(function (t) { if (t.t === 'exp' && (t.tags || []).indexOf('Alaina') > -1) rest[t.cat] -= ea(t); });
-    if (st.alaina > 0) tape += '<i class="al" style="width:' + (st.alaina / st.spend * 100) + '%" title="Alaina"></i>';
+    var PT = personTag();
+    (S.tx[m] || []).forEach(function (t) { if (PT && t.t === 'exp' && (t.tags || []).indexOf(PT) > -1) rest[t.cat] -= ea(t); });
+    if (st.alaina > 0) tape += '<i class="al" style="width:' + (st.alaina / st.spend * 100) + '%" title="' + esc(PT) + '"></i>';
     cats.forEach(function (c, k) { if (rest[c] > 0.005) tape += '<i style="width:' + (rest[c] / st.spend * 100) + '%;background:' + SEGS[Math.min(k, 4)] + '"></i>'; });
     h += '<div class="tape" role="img" aria-label="Spending by category">' + tape + '</div>';
     h += '</div>' + quick + '<div class="panel legend-wrap"><ul class="legend">';
-    if (st.alaina > 0) h += '<li><span class="sw" style="background:var(--rose-soft);--c:var(--rose)"><span class="ms" style="font-size:20px;color:var(--rose)" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M240,102c0,70-103.79,126.66-108.21,129a8,8,0,0,1-7.58,0C119.79,228.66,16,172,16,102A62.07,62.07,0,0,1,78,40c20.65,0,38.73,8.88,50,23.89C139.27,48.88,157.35,40,178,40A62.07,62.07,0,0,1,240,102Z"/></svg></span></span><span>With Alaina <span class="note" style="display:inline;margin:0">all categories</span></span><span></span><span class="amt" style="color:var(--rose)">' + money(st.alaina, 0) + '</span></li>';
+    if (st.alaina > 0) h += '<li class="tagrow" data-lensgo="' + esc(PT) + '" role="button" tabindex="0"><span class="sw" style="background:var(--rose-soft);--c:var(--rose)"><span class="ms" style="font-size:20px;color:var(--rose)" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M240,102c0,70-103.79,126.66-108.21,129a8,8,0,0,1-7.58,0C119.79,228.66,16,172,16,102A62.07,62.07,0,0,1,78,40c20.65,0,38.73,8.88,50,23.89C139.27,48.88,157.35,40,178,40A62.07,62.07,0,0,1,240,102Z"/></svg></span></span><span>With ' + esc(PT) + ' <span class="note" style="display:inline;margin:0">all categories</span></span><span></span><span class="amt" style="color:var(--rose)">' + money(st.alaina, 0) + '</span></li>';
+    (S.meta.tags || []).forEach(function (g) {
+      var v = st.byTag[g] || 0; if (g === PT || v < 0.005) return;
+      h += '<li class="tagrow" data-lensgo="' + esc(g) + '" role="button" tabindex="0"><span class="sw" style="background:var(--accent-soft);--c:var(--accent)"><span style="font-size:19px;color:var(--accent);display:inline-flex">' + TAG_ICON + '</span></span><span>' + esc(g) + ' <span class="note" style="display:inline;margin:0">all categories</span></span><span></span><span class="amt">' + money(v, 0) + '</span></li>';
+    });
     cats.slice(0, 7).forEach(function (c, k) {
       var d = avg ? st.byCat[c] - (avg[c] || 0) : null, cls = d == null ? 'flat' : d > 5 ? 'up' : d < -5 ? 'down' : 'flat';
       h += '<li><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')) + '</span><span class="delta ' + cls + '">' +
@@ -1668,7 +1784,7 @@ function txRow(t) {
   if (t.calc && isSum(t.calc)) { var np = sumParts(t.calc).length; sub = (sub ? sub + ' \u00b7 ' : '') + (np > 1 && !/[*/()]/.test(t.calc) ? np + ' items: ' + sumParts(t.calc).join(' + ') : t.calc); }
   if (t._inst) sub = 'Instalment ' + t._inst + ' of ' + money(t._full) + (sub ? ' \u00b7 ' + sub : '');
   else if (t.inst && t.inst.n > 1) sub = (sub ? sub + ' \u00b7 ' : '') + t.inst.n + ' instalments of ' + money(r2((t.amt + (t.inst.fee || 0)) / t.inst.n)) + (t.inst.fee ? ' incl. ' + money(t.inst.fee) + ' interest' : '');
-  return '<button class="row" data-edit-tx="' + esc(t.id) + '"><span class="av' + ((t.tags || []).indexOf('Alaina') > -1 ? ' al' : '') + '">' + esc(avatar(t.cat)) + '</span>' +
+  return '<button class="row" data-edit-tx="' + esc(t.id) + '"><span class="av' + (personTag() && (t.tags || []).indexOf(personTag()) > -1 ? ' al' : '') + '">' + esc(avatar(t.cat)) + '</span>' +
     '<div class="l"><b>' + esc(title) + tags + '</b>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div>' +
     (t.split && t.split.mine === 0
       ? '<div class="r mut">' + money(t.amt) + '<span>paid out, owed back</span></div></button>'
@@ -2220,7 +2336,7 @@ function txSheet(existing, asNew) {
     return S.meta.cats.filter(function (c) { return c.type === t.t; }).map(function (c) { return '<button class="chip" data-cat="' + esc(c.name) + '" aria-pressed="' + (t.cat === c.name) + '">' + esc(c.name) + '</button>'; }).join('');
   }
   function tagChips() {
-    return S.meta.tags.map(function (g) { return '<button class="chip' + (g === 'Alaina' ? ' rose' : '') + '" data-tag="' + esc(g) + '" aria-pressed="' + (t.tags.indexOf(g) > -1) + '">' + (g === 'Alaina' ? 'With ' : '') + esc(g) + '</button>'; }).join('');
+    return S.meta.tags.map(function (g) { var pp = isPersonTag(g); return '<button class="chip' + (pp ? ' rose' : '') + '" data-tag="' + esc(g) + '" aria-pressed="' + (t.tags.indexOf(g) > -1) + '">' + (pp ? 'With ' : '') + esc(g) + '</button>'; }).join('');
   }
   var body = '<div class="seg" id="tt"><button data-t="exp" aria-pressed="' + (t.t === 'exp') + '">Expense</button><button data-t="inc" aria-pressed="' + (t.t === 'inc') + '">Income</button>' +
     (existing ? '' : '<button data-t="move" aria-pressed="false">Move money</button>') +
@@ -2351,7 +2467,7 @@ function txSheet(existing, asNew) {
             t.cat = o.tx.cat; t.sub = cleanSub(o.tx.sub);
             $('#cats', el).innerHTML = catChips();
             $('#sub', el).value = t.sub; $('#subchips', el).innerHTML = subChips();
-            if ((o.tx.tags || []).indexOf('Alaina') > -1 && t.tags.indexOf('Alaina') < 0) { t.tags.push('Alaina'); $('#tags', el).innerHTML = tagChips(); }
+            (o.tx.tags || []).forEach(function (g) { if (t.tags.indexOf(g) < 0) t.tags.push(g); }); $('#tags', el).innerHTML = tagChips();
             if (o.tx.pm === 'later') { t.pm = 'later'; t.plp = provOf(o.tx); delete t.acct; } else if (o.tx.acct) { delete t.pm; t.acct = o.tx.acct; }
             $('#pm', el).innerHTML = payChips(t); $('#instbox', el).hidden = t.pm !== 'later';
             toast('Filled in from last time');
@@ -2378,6 +2494,16 @@ function txSheet(existing, asNew) {
       t.sub = cleanSub($('#sub', el).value);
       if (t.pm === 'later') delete t.acct; else { t.acct = t.acct || defWallet(); ensureWallet(t.acct); S.meta.lastAcct = t.acct; }
       var ex = exprOf($('#amt', el)); if (ex) t.calc = ex.replace(/\s+/g, ''); else delete t.calc;
+      (function () {
+        var rt = ruleTags(t), had = existing ? (existing.tags || []) : [];
+        t.untag = (t.untag || []).filter(function (g) { return t.tags.indexOf(g) < 0; });
+        rt.forEach(function (g) {
+          if (t.tags.indexOf(g) > -1) return;
+          if (had.indexOf(g) > -1) t.untag.push(g);          // you took it off: keep it off
+          else if (t.untag.indexOf(g) < 0) t.tags.push(g);    // new match: tag it
+        });
+        if (!t.untag.length) delete t.untag;
+      })();
       if (t.inst && t.inst.n > 1) { var ifee = calcVal($('#instfee', el).value); if (ifee > 0) t.inst.fee = r2(ifee); else delete t.inst.fee; }
       var mineV = parseFloat(($('#mine', el) || {}).value);
       if (!$('#spbox', el).hidden && mineV >= 0 && mineV < t.amt) {
@@ -2972,7 +3098,7 @@ function catSheet() {
         '</span></div><div class="r mut">' + money(u.amt, 0) + '</div></button>';
     }).join('');
   }
-  var body = '<label class="f" style="margin-top:0">Tags work across categories</label><div class="wrap">' + S.meta.tags.map(function (t) { return '<span class="chip">' + esc(t) + '</span>'; }).join('') + '</div>' +
+  var body = '<label class="f" style="margin-top:0">Tags work across categories</label><div class="wrap">' + S.meta.tags.map(function (t) { return '<button class="chip" data-tagsheet="' + esc(t) + '">' + esc(t) + ' <span aria-hidden="true">\u203a</span></button>'; }).join('') + '</div>' +
     '<div style="display:flex;gap:8px;margin-top:8px"><input class="t" id="nt" placeholder="New tag, e.g. Holiday"><button class="btn sm ghost" id="at">Add</button></div>' +
     '<label class="f" style="margin-top:20px">Spending categories</label><div class="panel">' + catRows('exp') + '</div>' +
     '<label class="f" style="margin-top:20px">Income categories</label><div class="panel">' + catRows('inc') + '</div>' +
@@ -4654,7 +4780,7 @@ function normNote(n) { return (n || '').toLowerCase().replace(/\(.*?\)/g, '').re
 // ---------- Insights: Trends, a tag lens, and the original Overview ----------
 function insTabs() {
   var tag = lensTag(), v = UI.insView || 'trends';
-  return '<div class="ins-tabs" role="tablist" aria-label="Insights views">' + [['trends', 'Trends'], ['lens', tag ? 'With ' + tag : 'Tags'], ['overview', 'Overview']].map(function (x) {
+  return '<div class="ins-tabs" role="tablist" aria-label="Insights views">' + [['trends', 'Trends'], ['lens', tag ? (isPersonTag(tag) ? 'With ' + tag : tag) : 'Tags'], ['overview', 'Overview']].map(function (x) {
     return '<button role="tab" id="it-' + x[0] + '" data-insv="' + x[0] + '" aria-selected="' + (v === x[0]) + '" tabindex="' + (v === x[0] ? 0 : -1) + '">' + esc(x[1]) + '</button>';
   }).join('') + '</div>';
 }
@@ -4734,6 +4860,7 @@ function sparkSvg(m) {
   var d = xy.map(function (p, i) { return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1); }).join(' '), last = xy[xy.length - 1];
   return '<svg viewBox="0 0 84 28" class="spark" aria-hidden="true"><path d="' + d + '" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><circle cx="' + last[0] + '" cy="' + last[1] + '" r="2.6" fill="currentColor"/></svg>';
 }
+function histDate(t) { return '<span class="tr-hd">' + dayLabel(t.d) + '</span>'; }
 function renderTrends() {
   var T = trendData(); UI.trend = T;
   if (!T.cats.length) return '<div class="empty">No spending logged yet.</div>';
@@ -4767,6 +4894,26 @@ function renderTrends() {
   var top = si == null ? c.top : c.subs[si].top;
   h += '<section class="panel tr-often-p"><h2 class="tr-h">' + (si == null ? 'Most often' : 'Most often in ' + esc(ser.name)) + '</h2>' +
     (top.length ? '<div class="tr-often">' + top.map(function (o) { return '<div><p>' + esc(o.note) + ' <span>' + o.n + (o.n === 1 ? ' time' : ' times') + '</span></p><b>' + money(o.amt, 0) + '</b></div>'; }).join('') + '</div>' : '<p class="note">No notes on these entries yet.</p>') + '</section>';
+  // every entry behind the chart: newest first, by month; a tapped bar narrows it to that month
+  var inWin = {}; T.months.forEach(function (m) { inWin[m] = 1; });
+  var rows = allTx().filter(function (t) {
+    return t.t === 'exp' && t.cat === c.name && inWin[monthOf(t.d)] && (si == null || (cleanSub(t.sub) || 'No subcategory') === ser.name) && (!UI.trMonth || monthOf(t.d) === UI.trMonth);
+  }).sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
+  var limit = UI.trMonth ? rows.length : (UI.trHistN || 30), shown = rows.slice(0, limit), byM = {}, order = [];
+  rows.forEach(function (t) { var m = monthOf(t.d); if (!byM[m]) { byM[m] = { n: 0, amt: 0 }; order.push(m); } byM[m].n++; byM[m].amt += ea(t); });
+  h += '<section class="panel tr-hist"><div class="tr-hist-h"><h2 class="tr-h">History</h2>' +
+    (UI.trMonth ? '<button class="chip sm on" data-trmonth="" aria-label="Show all months">' + esc(monthLabel(UI.trMonth)) + ' <span aria-hidden="true">\u2715</span></button>' : '<span class="note" style="margin:0">Tap a bar to see one month</span>') + '</div>';
+  if (!rows.length) h += '<p class="note">Nothing here yet.</p>';
+  else {
+    var lastM = '';
+    h += '<div class="tr-hist-list">' + shown.map(function (t) {
+      var m = monthOf(t.d), head = '';
+      if (m !== lastM) { lastM = m; head = '<div class="tr-month"><span>' + esc(monthLabel(m)) + '</span><span>' + byM[m].n + (byM[m].n === 1 ? ' entry, ' : ' entries, ') + money(byM[m].amt) + '</span></div>'; }
+      return head + txRow(t).replace('<button class="row"', '<button class="row tr-hrow"').replace('<div class="l">', '<div class="l">' + histDate(t));
+    }).join('') + '</div>';
+    if (rows.length > shown.length) h += '<button class="linkbtn" data-trmore>Show ' + Math.min(30, rows.length - shown.length) + ' more of ' + (rows.length - shown.length) + '</button>';
+  }
+  h += '</section>';
   return h;
 }
 function hatch(color) {
@@ -4794,6 +4941,13 @@ function drawTrendChart() {
     ] },
     options: { responsive: true, maintainAspectRatio: false, animation: REDUCED ? false : { duration: 600, easing: 'easeOutQuart' }, transitions: { resize: { animation: { duration: 0 } } },
       interaction: { mode: 'index', intersect: false, axis: 'x' }, plugins: { legend: { display: false }, tooltip: tip },
+      onClick: function (evt, els, chart) {
+        var hit = chart.getElementsAtEventForMode(evt, 'index', { intersect: false }, false); if (!hit.length) return;
+        var mo = months[hit[0].index]; UI.trMonth = UI.trMonth === mo ? '' : mo;
+        // redraw after the chart has finished handling this tap (redrawing destroys the chart)
+        setTimeout(function () { render(); var hl = document.querySelector('.tr-hist'); if (hl) hl.scrollIntoView({ block: 'start', behavior: REDUCED ? 'auto' : 'smooth' }); }, 0);
+      },
+      onHover: function (evt, els, chart) { chart.canvas.style.cursor = 'pointer'; },
       scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 10 } }, y: { grid: { color: cssv('--line') }, border: { display: false }, ticks: { maxTicksLimit: 4, callback: kfmt } } } }
   }));
 }
@@ -4831,21 +4985,22 @@ function lensData(tag) {
 function renderLens() {
   var tag = lensTag();
   if (!tag) return '<div class="empty">Tag entries (for example with the person you were with) and this view shows what you spend together, when and on what.</div>';
-  var L = lensData(tag); UI.lens = L;
+  var L = lensData(tag); UI.lens = L; var P = isPersonTag(tag);
+  var dOut = P ? ' days out' : ' days', aDay = P ? ' a day out' : ' a day';
   var tags = (S.meta.tags || []).filter(function (g) { return allTx().some(function (t) { return (t.tags || []).indexOf(g) > -1; }); });
   var h = tags.length > 1 ? '<div class="tr-rail" role="group" aria-label="Tags">' + tags.map(function (g) { return '<button class="chip tr-chip" data-lens="' + esc(g) + '" aria-pressed="' + (g === tag) + '">' + esc(g) + '</button>'; }).join('') + '</div>' : '';
   if (!L.items.length) return h + '<div class="empty">Nothing tagged ' + esc(tag) + ' in the last 12 months.</div>';
   var start = firstActive(L.m), shareBase = sum(L.all.slice(start), function (v) { return v; }), share = shareBase ? L.total / shareBase * 100 : 0;
   var perDay = L.total / Math.max(1, L.nDays), fd = new Date(L.first + 'T00:00:00');
-  h += '<div class="ln-stats"><div class="ln-hero"><p>Spent together since ' + fd.getDate() + ' ' + MONTHS_FULL[fd.getMonth()].slice(0, 3) + '</p><b><span class="sr">' + money(L.total, 0) + '</span><span aria-hidden="true" data-countto="' + Math.round(L.total) + '">' + money(L.total, 0) + '</span></b><p>' + Math.round(share) + '% of everything you spent since then</p></div>' +
-    '<div class="ln-stat"><b><span class="sr">' + L.nDays + '</span><span aria-hidden="true" data-countto="' + L.nDays + '" data-plain="1">' + L.nDays + '</span></b><p>days out together</p></div>' +
-    '<div class="ln-stat"><b><span class="sr">' + money(perDay, 0) + '</span><span aria-hidden="true" data-countto="' + Math.round(perDay) + '">' + money(perDay, 0) + '</span></b><p>on a typical day out</p></div></div>';
+  h += '<div class="ln-stats"><div class="ln-hero"><p>' + (P ? 'Spent together since ' : 'Spent on ' + esc(tag) + ' since ') + fd.getDate() + ' ' + MONTHS_FULL[fd.getMonth()].slice(0, 3) + '</p><b><span class="sr">' + money(L.total, 0) + '</span><span aria-hidden="true" data-countto="' + Math.round(L.total) + '">' + money(L.total, 0) + '</span></b><p>' + Math.round(share) + '% of everything you spent since then</p></div>' +
+    '<div class="ln-stat"><b><span class="sr">' + L.nDays + '</span><span aria-hidden="true" data-countto="' + L.nDays + '" data-plain="1">' + L.nDays + '</span></b><p>' + (P ? 'days out together' : 'days with ' + esc(tag) + ' spending') + '</p></div>' +
+    '<div class="ln-stat"><b><span class="sr">' + money(perDay, 0) + '</span><span aria-hidden="true" data-countto="' + Math.round(perDay) + '">' + money(perDay, 0) + '</span></b><p>' + (P ? 'on a typical day out' : 'on a typical day') + '</p></div></div>';
   // month by month
-  var P = L.months.length - 1, prog = monthProgress(L.months[P]), bi = start;
-  for (var k = start; k < (prog < 1 ? P : P + 1); k++) if (L.m[k] > L.m[bi]) bi = k;
+  var Pm = L.months.length - 1, prog = monthProgress(L.months[Pm]), bi = start;
+  for (var k = start; k < (prog < 1 ? Pm : Pm + 1); k++) if (L.m[k] > L.m[bi]) bi = k;
   var nd = function (i) { return Object.keys(L.days[i]).length; };
-  var mtxt = MONTHS_FULL[+L.months[bi].slice(5) - 1] + ' was the biggest: <b>' + money(L.m[bi], 0) + '</b> over ' + nd(bi) + ' days out.';
-  if (prog < 1 && bi !== P && nd(P)) mtxt += ' ' + MONTHS_FULL[+L.months[P].slice(5) - 1] + ' so far: <b>' + money(L.m[P], 0) + '</b> over ' + nd(P) + ' days, about <b>' + money(L.m[P] / nd(P), 0) + '</b> a day out against <b>' + money(L.m[bi] / Math.max(1, nd(bi)), 0) + '</b> in ' + MONTHS_FULL[+L.months[bi].slice(5) - 1] + '.';
+  var mtxt = MONTHS_FULL[+L.months[bi].slice(5) - 1] + ' was the biggest: <b>' + money(L.m[bi], 0) + '</b> over ' + nd(bi) + dOut + '.';
+  if (prog < 1 && bi !== Pm && nd(Pm)) mtxt += ' ' + MONTHS_FULL[+L.months[Pm].slice(5) - 1] + ' so far: <b>' + money(L.m[Pm], 0) + '</b> over ' + nd(Pm) + ' days, about <b>' + money(L.m[Pm] / nd(Pm), 0) + '</b>' + aDay + ' against <b>' + money(L.m[bi] / Math.max(1, nd(bi)), 0) + '</b> in ' + MONTHS_FULL[+L.months[bi].slice(5) - 1] + '.';
   h += '<section class="panel ln-month"><h2 class="tr-h">Month by month</h2><p class="tr-insight">' + mtxt + '</p><div class="tr-chart" style="height:180px"><canvas id="lnch" role="img" aria-label="' + esc(L.months.slice(start).map(function (m, i) { return monthLabel(m, true) + ' ' + money(L.m[start + i], 0) + ' over ' + nd(start + i) + ' days'; }).join(', ')) + '"></canvas></div></section>';
   var max = L.catList[0].amt;
   h += '<section class="panel ln-cats"><h2 class="tr-h">What it goes on</h2><div class="ln-bars">' + L.catList.map(function (c, i) {
@@ -4863,7 +5018,7 @@ function renderLens() {
   h += '<section class="panel ln-mom"><h2 class="tr-h">Biggest moments</h2><div class="ln-moments">' + L.top.map(function (t) {
     return '<button class="ln-m" data-edit-tx="' + esc(t.id) + '"><span class="av" aria-hidden="true">' + esc(avatar(t.cat)) + '</span><span class="l"><b>' + esc(t.note || plain(t.cat)) + '</b><span>' + dayLabel(t.d) + (t.split ? ', your share of ' + money(t.amt) : '') + '</span></span><span class="r">' + money(ea(t)) + '</span></button>';
   }).join('') + '</div></section>';
-  h += '<section class="panel ln-between"><h2 class="tr-h">Money between you</h2><div class="kv" style="margin:0">' +
+  if (P) h += '<section class="panel ln-between"><h2 class="tr-h">Money between you</h2><div class="kv" style="margin:0">' +
     '<span>Covered for ' + esc(tag) + ' in split bills</span><span>' + money(L.covered) + '</span>' +
     '<span>Paid back to you</span><span>' + money(L.paybacks) + '</span>' +
     (L.invested ? '<span>' + esc(tag) + '\u2019s money you are investing</span><span>' + money(L.invested) + '</span>' : '') +
@@ -5068,10 +5223,14 @@ function onClick(e) {
   if ((b = t.closest('[data-gapfind]'))) { gapSheet(b.dataset.gapfind, +b.dataset.gapamt); return; }
   if ((b = t.closest('[data-wallet]'))) { walletPage(b.dataset.wallet); return; }
   if ((b = t.closest('[data-insv]'))) { UI.insView = b.dataset.insv; render(); var f = document.querySelector('[data-insv="' + UI.insView + '"]'); if (f) f.focus(); return; }
-  if ((b = t.closest('[data-trcat]'))) { UI.trCat = +b.dataset.trcat; UI.trSub = null; render(); return; }
-  if ((b = t.closest('[data-trsub]'))) { UI.trSub = +b.dataset.trsub < 0 ? null : +b.dataset.trsub; render(); var ti = document.querySelector('.tr-title'); if (ti) ti.scrollIntoView({ block: 'center', behavior: REDUCED ? 'auto' : 'smooth' }); return; }
+  if ((b = t.closest('[data-trmonth]'))) { UI.trMonth = b.dataset.trmonth; render(); return; }
+  if ((b = t.closest('[data-trmore]'))) { UI.trHistN = (UI.trHistN || 30) + 30; render(); return; }
+  if ((b = t.closest('[data-trcat]'))) { UI.trCat = +b.dataset.trcat; UI.trSub = null; UI.trMonth = ''; UI.trHistN = 30; render(); return; }
+  if ((b = t.closest('[data-trsub]'))) { UI.trSub = +b.dataset.trsub < 0 ? null : +b.dataset.trsub; UI.trMonth = ''; UI.trHistN = 30; render(); var ti = document.querySelector('.tr-title'); if (ti) ti.scrollIntoView({ block: 'center', behavior: REDUCED ? 'auto' : 'smooth' }); return; }
   if ((b = t.closest('[data-trtable]'))) { UI.trTable = !UI.trTable; render(); return; }
   if ((b = t.closest('[data-lens]'))) { UI.lensTag = b.dataset.lens; render(); return; }
+  if ((b = t.closest('[data-tagsheet]'))) { tagSheet(b.dataset.tagsheet); return; }
+  if ((b = t.closest('[data-lensgo]'))) { UI.tab = 'insights'; UI.insView = 'lens'; UI.lensTag = b.dataset.lensgo; render(); return; }
   if ((b = t.closest('[data-hm]'))) { UI.homeMode = b.dataset.hm; render(); return; }
   if ((b = t.closest('[data-lump]'))) { lumpSheet(b.dataset.lump); return; }
   if ((b = t.closest('[data-plopen]'))) { payLaterSheet(b.dataset.plopen); return; }
