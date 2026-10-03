@@ -601,6 +601,10 @@ nav.tabs button[aria-current="page"] .ms .pi-line + .pi-fill{display:block}
 .tr-hd{display:block;font-size:12.5px;color:var(--muted);font-weight:500;margin-bottom:1px}
 .tr-chart canvas{cursor:pointer}
 @media (min-width:768px){ .ins-trends > .tr-hist{grid-column:1 / -1} }
+.tr-kind{margin:0 0 12px;max-width:320px}
+.tr-legend.inc b{background:var(--gain)}
+.tr-legend.inc b.partial{background:repeating-linear-gradient(135deg,var(--gain) 0 2px,transparent 2px 5px);outline-color:var(--gain)}
+@media (min-width:768px){ .ins-trends > .tr-kind{grid-column:1 / -1} }
 </style>
 </head>
 <body>
@@ -4820,13 +4824,16 @@ function monthProgress(m) {
   var dim = new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
   return Math.max(1, +today().slice(8, 10)) / dim;
 }
+function trendKind() { return UI.trKind === 'inc' ? 'inc' : 'exp'; }
+function inTrend(t) { return trendKind() === 'inc' ? t.t === 'inc' && incKind(t.cat) !== 'reimb' : t.t === 'exp'; }
+function trendAmt(t) { return t.t === 'exp' ? ea(t) : t.amt; }
 function trendData() {
   var ms = trendMonths(), ix = {}; ms.forEach(function (m, i) { ix[m] = i; });
   var cats = {};
   allTx().forEach(function (t) {
-    if (t.t !== 'exp' || ix[monthOf(t.d)] == null) return;
+    if (!inTrend(t) || ix[monthOf(t.d)] == null) return;
     var c = cats[t.cat] = cats[t.cat] || { name: t.cat, m: ms.map(function () { return 0; }), subs: {}, notes: {} };
-    var v = ea(t), i = ix[monthOf(t.d)], sb = cleanSub(t.sub) || 'No subcategory';
+    var v = trendAmt(t), i = ix[monthOf(t.d)], sb = cleanSub(t.sub) || 'No subcategory';
     c.m[i] += v;
     var s = c.subs[sb] = c.subs[sb] || { name: sb, m: ms.map(function () { return 0; }), notes: {} }; s.m[i] += v;
     var n = (t.note || '').trim().toLowerCase();
@@ -4854,9 +4861,14 @@ function describeSeries(ms, m) {
   var txt = '';
   if (prev3.length && pv > 1) {
     var ch = (l - pv) / pv * 100;
-    txt = 'The last ' + last3.length + ' months averaged <b>' + money(l, 0) + '</b> a month, ' + (Math.abs(ch) < 5 ? 'about the same as' : '<span class="' + (ch > 0 ? 'neg' : 'pos') + '">' + Math.round(Math.abs(ch)) + '% ' + (ch > 0 ? 'more' : 'less') + '</span> than') + ' the ' + prev3.length + ' before.';
+    txt = 'The last ' + last3.length + ' months averaged <b>' + money(l, 0) + '</b> a month, ' + (Math.abs(ch) < 5 ? 'about the same as' : '<span class="' + ((ch > 0) === (trendKind() === 'exp') ? 'neg' : 'pos') + '">' + Math.round(Math.abs(ch)) + '% ' + (ch > 0 ? 'more' : 'less') + '</span> than') + ' the ' + prev3.length + ' before.';
   } else txt = 'Only a little history so far, so the trend is still forming.';
-  if (prog < 1) { var pace = m[P] / prog; txt += ' ' + MONTHS_FULL[+ms[P].slice(5) - 1] + ' is on pace for <b>' + money(pace, 0) + '</b>' + (avg > 1 ? (pace > avg * 1.1 ? ', above your usual.' : pace < avg * 0.9 ? ', below your usual.' : ', close to your usual.') : '.'); }
+  if (prog < 1) {
+    var mName = MONTHS_FULL[+ms[P].slice(5) - 1];
+    // income arrives in lumps and the first week says little, so only project spending, and only after day 7
+    if (trendKind() === 'inc' || prog < 0.23) txt += ' ' + mName + ' so far: <b>' + money(m[P], 0) + '</b>.';
+    else { var pace = m[P] / prog; txt += ' ' + mName + ' is on pace for <b>' + money(pace, 0) + '</b>' + (avg > 1 ? (pace > avg * 1.1 ? ', above your usual.' : pace < avg * 0.9 ? ', below your usual.' : ', close to your usual.') : '.'); }
+  }
   if (full.length > 1) { var best = Math.max.apply(null, full), bi = start + full.indexOf(best); if (best > 1) txt += ' Biggest month: ' + MONTHS_FULL[+ms[bi].slice(5) - 1] + ' at ' + money(best, 0) + '.'; }
   return { avg: avg, text: txt, start: start, partial: prog < 1 ? P : -1 };
 }
@@ -4868,13 +4880,15 @@ function sparkSvg(m) {
 }
 function histDate(t) { return '<span class="tr-hd">' + dayLabel(t.d) + '</span>'; }
 function renderTrends() {
-  var T = trendData(); UI.trend = T;
-  if (!T.cats.length) return '<div class="empty">No spending logged yet.</div>';
+  var T = trendData(), K = trendKind(); UI.trend = T;
+  var sw = '<div class="seg tr-kind" role="group" aria-label="Show spending or income">' + [['exp', 'Spending'], ['inc', 'Income']].map(function (x) {
+    return '<button data-trkind="' + x[0] + '" aria-pressed="' + (K === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>';
+  if (!T.cats.length) return sw + '<div class="empty">No ' + (K === 'inc' ? 'income' : 'spending') + ' logged yet.</div>';
   var ci = Math.min(UI.trCat || 0, T.cats.length - 1); UI.trCat = ci;
   var c = T.cats[ci], si = UI.trSub != null && c.subs[UI.trSub] ? UI.trSub : null;
   var ser = si == null ? { name: plain(c.name), m: c.m } : { name: c.subs[si].name, m: c.subs[si].m };
   var d = describeSeries(T.months, ser.m); UI.trDesc = d; UI.trSer = ser;
-  var h = '<div class="tr-rail" role="group" aria-label="Categories">' + T.cats.map(function (x, i) {
+  var h = sw + '<div class="tr-rail" role="group" aria-label="Categories">' + T.cats.map(function (x, i) {
     return '<button class="chip tr-chip" data-trcat="' + i + '" aria-pressed="' + (i === ci) + '"><span aria-hidden="true">' + esc(avatar(x.name)) + '</span>' + esc(plain(x.name)) + ' <small>' + money(x.total, 0) + '</small></button>';
   }).join('') + '</div>';
   h += '<section class="panel tr-main">' + (si == null ? '' : '<button class="tr-crumb" data-trsub="-1" aria-label="Back to all of ' + esc(plain(c.name)) + '">' + esc(plain(c.name)) + ' \u203a ' + esc(ser.name) + ' <span aria-hidden="true">\u2715</span></button>') +
@@ -4882,13 +4896,13 @@ function renderTrends() {
     '<p class="tr-big"><span class="sr">' + money(d.avg, 0) + ' a month on average</span><span aria-hidden="true" data-countto="' + Math.round(d.avg) + '">' + money(d.avg, 0) + '</span><small aria-hidden="true">a month on average</small></p>' +
     '<p class="tr-insight">' + d.text + '</p>' +
     '<div class="tr-chart"><canvas id="trch" role="img" aria-label="' + esc(ser.name + ' by month: ' + T.months.map(function (m, i) { return monthLabel(m, true) + ' ' + money(ser.m[i], 0); }).join(', ')) + '"></canvas></div>' +
-    '<div class="tr-legend"><span><b></b>Each month</span>' + (d.partial > -1 ? '<span><b class="partial"></b>This month so far</span>' : '') + '<span><i></i>Average</span></div>' +
+    '<div class="tr-legend' + (K === 'inc' ? ' inc' : '') + '"><span><b></b>Each month</span>' + (d.partial > -1 ? '<span><b class="partial"></b>This month so far</span>' : '') + '<span><i></i>Average</span></div>' +
     '<button class="linkbtn" data-trtable aria-expanded="' + !!UI.trTable + '">' + (UI.trTable ? 'Hide table' : 'Show as a table') + '</button>' +
     (UI.trTable ? '<table class="tr-table"><caption class="sr">' + esc(ser.name) + ' by month</caption><thead><tr><th>Month</th><th class="r">Spent</th><th class="r">vs average</th></tr></thead><tbody>' +
       T.months.map(function (m, i) { var dv = ser.m[i] - d.avg; return '<tr><td>' + monthLabel(m, true) + (i === d.partial ? ' (so far)' : '') + '</td><td class="r">' + money(ser.m[i]) + '</td><td class="r">' + (i < d.start ? '' : signed(dv, 0)) + '</td></tr>'; }).join('') + '</tbody></table>' : '') +
     '</section>';
   if (si == null) {
-    h += '<section class="panel tr-subs"><h2 class="tr-h">Where ' + esc(plain(c.name).toLowerCase()) + ' money goes</h2>';
+    h += '<section class="panel tr-subs"><h2 class="tr-h">' + (K === 'inc' ? 'What makes up ' + esc(plain(c.name).toLowerCase()) : 'Where ' + esc(plain(c.name).toLowerCase()) + ' money goes') + '</h2>';
     if (c.subs.length < 2 && (!c.subs[0] || c.subs[0].name === 'No subcategory')) h += '<p class="note">No subcategories here yet. Add one when you log a purchase and it appears here with its own trend.</p>';
     else h += '<div class="tr-list">' + c.subs.map(function (x, i) {
       var t = sum(x.m, function (v) { return v; }), pc = Math.round(t / c.total * 100), cur = x.m[x.m.length - 1];
@@ -4903,10 +4917,10 @@ function renderTrends() {
   // every entry behind the chart: newest first, by month; a tapped bar narrows it to that month
   var inWin = {}; T.months.forEach(function (m) { inWin[m] = 1; });
   var rows = allTx().filter(function (t) {
-    return t.t === 'exp' && t.cat === c.name && inWin[monthOf(t.d)] && (si == null || (cleanSub(t.sub) || 'No subcategory') === ser.name) && (!UI.trMonth || monthOf(t.d) === UI.trMonth);
+    return inTrend(t) && t.cat === c.name && inWin[monthOf(t.d)] && (si == null || (cleanSub(t.sub) || 'No subcategory') === ser.name) && (!UI.trMonth || monthOf(t.d) === UI.trMonth);
   }).sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
   var limit = UI.trMonth ? rows.length : (UI.trHistN || 30), shown = rows.slice(0, limit), byM = {}, order = [];
-  rows.forEach(function (t) { var m = monthOf(t.d); if (!byM[m]) { byM[m] = { n: 0, amt: 0 }; order.push(m); } byM[m].n++; byM[m].amt += ea(t); });
+  rows.forEach(function (t) { var m = monthOf(t.d); if (!byM[m]) { byM[m] = { n: 0, amt: 0 }; order.push(m); } byM[m].n++; byM[m].amt += trendAmt(t); });
   h += '<section class="panel tr-hist"><div class="tr-hist-h"><h2 class="tr-h">History</h2>' +
     (UI.trMonth ? '<button class="chip sm on" data-trmonth="" aria-label="Show all months">' + esc(monthLabel(UI.trMonth)) + ' <span aria-hidden="true">\u2715</span></button>' : '<span class="note" style="margin:0">Tap a bar to see one month</span>') + '</div>';
   if (!rows.length) h += '<p class="note">Nothing here yet.</p>';
@@ -4933,13 +4947,13 @@ function kfmt(v) { return '$' + (Math.abs(v) >= 1000 ? (Math.round(v / 100) / 10
 function drawTrendChart() {
   countUps();
   var el = document.getElementById('trch'); if (!el || !UI.trend) return;
-  var T = UI.trend, ser = UI.trSer, d = UI.trDesc, acc = cssv('--accent'), mut = cssv('--muted');
+  var T = UI.trend, ser = UI.trSer, d = UI.trDesc, inc = trendKind() === 'inc', acc = cssv(inc ? '--gain' : '--accent'), mut = cssv('--muted');
   // start at the first month with spending (showing at least three months)
   var off = Math.max(0, Math.min(d.start, T.months.length - 3));
   var months = T.months.slice(off), vals = ser.m.slice(off), part = d.partial > -1 ? d.partial - off : -1, st = d.start - off;
   var tip = tipStyle();
   tip.callbacks = { title: function (it) { var i = it[0].dataIndex + off; return MONTHS_FULL[+T.months[i].slice(5) - 1] + ' ' + T.months[i].slice(0, 4) + (i === d.partial ? ' (so far)' : ''); },
-    label: function (it) { return it.datasetIndex === 0 ? 'Spent ' + money(it.parsed.y) : 'Average ' + money(it.parsed.y, 0); } };
+    label: function (it) { return it.datasetIndex === 0 ? (inc ? 'Earned ' : 'Spent ') + money(it.parsed.y) : 'Average ' + money(it.parsed.y, 0); } };
   charts.push(new Chart(el, {
     data: { labels: months.map(function (m) { return monthLabel(m, true).slice(0, 3); }), datasets: [
       { type: 'bar', data: vals, backgroundColor: vals.map(function (v, i) { return i === part ? hatch(acc) : acc; }), borderColor: acc, borderWidth: vals.map(function (v, i) { return i === part ? 1.5 : 0; }), borderRadius: 6, maxBarThickness: 30, order: 2 },
@@ -5229,6 +5243,7 @@ function onClick(e) {
   if ((b = t.closest('[data-gapfind]'))) { gapSheet(b.dataset.gapfind, +b.dataset.gapamt); return; }
   if ((b = t.closest('[data-wallet]'))) { walletPage(b.dataset.wallet); return; }
   if ((b = t.closest('[data-insv]'))) { UI.insView = b.dataset.insv; render(); var f = document.querySelector('[data-insv="' + UI.insView + '"]'); if (f) f.focus(); return; }
+  if ((b = t.closest('[data-trkind]'))) { UI.trKind = b.dataset.trkind; UI.trCat = 0; UI.trSub = null; UI.trMonth = ''; UI.trHistN = 30; render(); return; }
   if ((b = t.closest('[data-trmonth]'))) { UI.trMonth = b.dataset.trmonth; render(); return; }
   if ((b = t.closest('[data-trmore]'))) { UI.trHistN = (UI.trHistN || 30) + 30; render(); return; }
   if ((b = t.closest('[data-trcat]'))) { UI.trCat = +b.dataset.trcat; UI.trSub = null; UI.trMonth = ''; UI.trHistN = 30; render(); return; }
