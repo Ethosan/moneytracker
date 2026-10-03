@@ -3928,13 +3928,16 @@ function quietDays(n) {
   return out;
 }
 function checkSheet() {
-  var prev = lastCheck(), vals = {};
+  var prev = lastCheck(), vals = {}, expect = {};
   if (prev && prev.lines) vals = Object.assign({}, prev.lines);
+  // each wallet starts at what your logs say it holds now: last count plus everything since
+  if (prev) { var AB = accountBalances(); Object.keys(AB.bal).forEach(function (n) { if (AB.bal[n] != null) { expect[n] = AB.bal[n]; vals[n] = AB.bal[n]; } }); }
   function accRows() {
     if (!S.meta.accounts.length) return '<div class="note" style="padding:10px 0">Add each place you keep money you can spend: bank accounts, cash, GrabPay wallet. Add GrabPay Later as money you owe. Leave brokerage and prop firm accounts out, they are tracked separately.</div>';
     return S.meta.accounts.map(function (a) {
       var auto = plOwedBy[a.name];
-      return '<div class="row"><div class="l"><b>' + esc(a.name) + '</b><span>' + (auto ? 'From your bills, ' + money(auto) : a.liability ? 'Amount you owe' : 'Balance') + '</span></div>' +
+      var ex = expect[a.name];
+      return '<div class="row"><div class="l"><b>' + esc(a.name) + '</b><span>' + (auto ? 'From your bills, ' + money(auto) : a.liability ? 'Amount you owe' : ex != null ? 'Your logs say ' + money(ex) + '. Change it if the real number differs' : 'Balance') + '</span></div>' +
         '<input class="t" style="width:120px;text-align:right" inputmode="decimal" data-acc="' + esc(a.name) + '" value="' + (vals[a.name] != null ? vals[a.name] : '') + '" placeholder="0.00"></div>';
     }).join('');
   }
@@ -3961,6 +3964,7 @@ function checkSheet() {
     '<div class="actions" id="acts"></div>';
   openSheet('Balance check', body, function (el) {
     function readVals() { el.querySelectorAll('[data-acc]').forEach(function (i) { var v = parseFloat(i.value); vals[i.dataset.acc] = isNaN(v) ? null : v; }); }
+    el.addEventListener('input', function (e) { if (e.target.dataset && e.target.dataset.acc) e.target.dataset.touched = '1'; });
     function total() { return sum(S.meta.accounts, function (a) { var v = vals[a.name] || 0; return a.liability ? -v : v; }); }
     function refresh() {
       readVals();
@@ -3993,6 +3997,8 @@ function checkSheet() {
     });
     $('#acts', el).addEventListener('click', function (e) {
       var b = e.target.closest('[data-mode]'); if (!b) return; readVals();
+      var touched = [].some.call(el.querySelectorAll('[data-acc]'), function (i) { return i.dataset.touched; });
+      if (prev && !touched && Object.keys(expect).length && !confirm('You haven\u2019t changed any of the expected figures. Save them as the real amounts you counted today?')) return;
       var tot = r2(total()), lines = {}; S.meta.accounts.forEach(function (a) { if (vals[a.name] != null) lines[a.name] = vals[a.name]; });
       if (b.dataset.mode === 'log') {
         var diff = +$('#acts', el).dataset.diff, m = monthOf(today());
