@@ -1413,13 +1413,15 @@ function monthStats(m) {
 }
 function tagSpend(m, tag) { return sum((S.tx[m] || []).filter(function (t) { return t.t === 'exp' && (t.tags || []).indexOf(tag) > -1; }), ea); }
 function priorAvg(m) {
-  var acc = {}, n = 0;
+  var acc = {}, n = 0, net = 0;
   for (var k = 1; k <= 3; k++) {
     var pm = addMonth(m, -k); if (!S.tx[pm] || !S.tx[pm].length) continue; n++;
-    var st = monthStats(pm); Object.keys(st.byCat).forEach(function (c) { acc[c] = (acc[c] || 0) + st.byCat[c]; });
+    var st = monthStats(pm); Object.keys(st.byCat).forEach(function (c) { acc[c] = (acc[c] || 0) + st.byCat[c]; }); net += st.net;
   }
   if (!n) return null;
-  Object.keys(acc).forEach(function (c) { acc[c] /= n; }); acc.__n = n; return acc;
+  Object.keys(acc).forEach(function (c) { acc[c] /= n; }); acc.__n = n;
+  // kept off the object's keys, so code that walks categories never sees it
+  Object.defineProperty(acc, '__net', { value: net / n, enumerable: false }); return acc;
 }
 function venuePnl(v) {
   var type = venueType(v);
@@ -1610,10 +1612,10 @@ function paceLine(m, st, avg) {
   if (m !== monthOf(today())) return '';
   var day = +today().slice(8, 10), dim = new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
   if (day < 5 || day >= dim) return '';
-  var proj = st.net / day * dim, usual = avg ? sum(Object.keys(avg).filter(function (k) { return k !== '__n'; }), function (k) { return avg[k]; }) : 0;
+  var proj = st.net / day * dim, usual = avg ? avg.__net : 0; // after paybacks, like proj
   var pct = Math.min(100, day / dim * 100);
   return '<div class="pace"><div class="pbar"><i style="width:' + pct + '%"></i></div><span>Day ' + day + ' of ' + dim + '. On pace for <b>' + money(proj, 0) + '</b>' +
-    (usual ? ', against your usual ' + money(usual, 0) : '') + '</span></div>';
+    (usual > 0 ? ', against your usual ' + money(usual, 0) : '') + '</span></div>';
 }
 function frequentNotes() {
   var since = addDays(today(), -60), g = {};
