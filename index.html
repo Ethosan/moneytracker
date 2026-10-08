@@ -633,6 +633,66 @@ details.more>summary>span:first-child::after{content:"";display:inline-block;wid
 details.more[open]>summary>span:first-child::after{transform:rotate(-135deg);vertical-align:-1px}
 details.more>summary .note{font-weight:400;margin:0}
 .chip.ghost{background:transparent;box-shadow:inset 0 0 0 1px var(--line);color:var(--muted)}
+
+/* ---------- Glass ----------
+   Frosted surfaces for the chrome you move through (nav, header controls, sheets) and the
+   month card. Rows of amounts stay on solid cards so they read in sunlight. The blur needs
+   something to blur, so the page carries a soft wash of the app's own blue and pink. */
+:root{
+  --glass:color-mix(in srgb,var(--surface) 58%,transparent);
+  --glass-sheet:color-mix(in srgb,var(--bg) 82%,transparent);
+  --glass-edge:rgba(255,255,255,.7);
+  --glass-hi:inset 0 1px 0 rgba(255,255,255,.75);
+  --glass-blur:blur(22px) saturate(180%);
+  --hero-glass:97%;
+  --lift:0 1px 2px rgba(22,34,70,.06),0 14px 34px -14px rgba(22,34,70,.22);
+  --wash-a:color-mix(in srgb,var(--accent) 17%,transparent);
+  --wash-b:color-mix(in srgb,var(--rose) 11%,transparent);
+  --wash-c:color-mix(in srgb,var(--accent) 9%,transparent);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --glass:color-mix(in srgb,var(--surface) 55%,transparent);--glass-sheet:color-mix(in srgb,var(--bg) 78%,transparent);
+  --glass-edge:rgba(255,255,255,.09);--glass-hi:inset 0 1px 0 rgba(255,255,255,.07);--hero-glass:84%;
+  --lift:0 1px 2px rgba(0,0,0,.4),0 16px 36px -14px rgba(0,0,0,.7);
+  --wash-a:color-mix(in srgb,var(--accent) 22%,transparent);--wash-b:color-mix(in srgb,var(--rose) 12%,transparent);--wash-c:color-mix(in srgb,var(--accent) 12%,transparent);}}
+:root[data-theme="dark"]{
+  --glass:color-mix(in srgb,var(--surface) 55%,transparent);--glass-sheet:color-mix(in srgb,var(--bg) 78%,transparent);
+  --glass-edge:rgba(255,255,255,.09);--glass-hi:inset 0 1px 0 rgba(255,255,255,.07);--hero-glass:84%;
+  --lift:0 1px 2px rgba(0,0,0,.4),0 16px 36px -14px rgba(0,0,0,.7);
+  --wash-a:color-mix(in srgb,var(--accent) 22%,transparent);--wash-b:color-mix(in srgb,var(--rose) 12%,transparent);--wash-c:color-mix(in srgb,var(--accent) 12%,transparent);}
+
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background:radial-gradient(70% 42% at 88% -6%,var(--wash-a),transparent 70%),
+    radial-gradient(55% 38% at -12% 38%,var(--wash-b),transparent 72%),
+    radial-gradient(65% 45% at 105% 96%,var(--wash-c),transparent 70%)}
+
+nav.tabs,.monthsw,header.top button.icon,.hr button.icon{
+  background:var(--glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
+  border:1px solid var(--glass-edge);box-shadow:var(--glass-hi),var(--lift)}
+nav.tabs{box-shadow:var(--glass-hi),0 18px 40px -16px rgba(15,25,60,.35)}
+
+/* the month card: smoked glass, so the wash glows through its edges */
+.hero{background-color:color-mix(in srgb,var(--hero) var(--hero-glass),transparent);-webkit-backdrop-filter:blur(26px) saturate(150%);backdrop-filter:blur(26px) saturate(150%);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.12),inset 0 0 0 1px rgba(255,255,255,.05),0 22px 44px -22px rgba(13,16,40,.55)}
+
+/* solid cards keep the numbers crisp, with a deeper lift */
+.panel,.strip>div,.banner.quiet{box-shadow:var(--lift)}
+
+/* sheets: frosted, over a lighter scrim so the glass stays clean */
+dialog.sheet{background:var(--glass-sheet);-webkit-backdrop-filter:blur(30px) saturate(170%);backdrop-filter:blur(30px) saturate(170%);
+  box-shadow:var(--glass-hi),0 -12px 40px -12px rgba(8,12,30,.35)}
+dialog.sheet::backdrop{background:rgba(8,12,24,.32);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.sheet .hd,.actions.sticky{background:var(--glass-sheet);-webkit-backdrop-filter:blur(24px) saturate(170%);backdrop-filter:blur(24px) saturate(170%)}
+
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){
+  nav.tabs,.monthsw,header.top button.icon,.hr button.icon{background:var(--surface)}
+  dialog.sheet,.sheet .hd,.actions.sticky{background:var(--bg)}
+  .hero{background-color:var(--hero)}}
+@media (prefers-reduced-transparency:reduce){
+  body::before{display:none}
+  nav.tabs,.monthsw,header.top button.icon,.hr button.icon{background:var(--surface);backdrop-filter:none;-webkit-backdrop-filter:none}
+  dialog.sheet,.sheet .hd,.actions.sticky{background:var(--bg);backdrop-filter:none;-webkit-backdrop-filter:none}
+  .hero{background-color:var(--hero);backdrop-filter:none;-webkit-backdrop-filter:none}}
 </style>
 </head>
 <body>
