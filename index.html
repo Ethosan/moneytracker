@@ -3364,7 +3364,22 @@ function csvDiff(rows) {
       if (t.t === 'xfer') { t.from = get('from'); t.to = get('to'); t.cat = ''; }
       var ins = parseInt(get('instalments'), 10);
       if (t.pm === 'later' && ins > 1) t.inst = { n: ins, start: /next/i.test(get('instalments')) ? 1 : 0 };
-      if (id && findTx(id)) { out.upd.push(t); out.seen[id] = 1; } else out.add.push(t);
+      var old = id && findTx(id);
+      if (old) {
+        // Change only what the sheet holds. Splits, fee links, PayLater details and anything
+        // else the CSV has no column for stay as they were.
+        var u = JSON.parse(JSON.stringify(old));
+        u.d = t.d; u.t = t.t; u.amt = t.amt; u.note = t.note; u.tags = t.tags;
+        if (idx.category > -1) u.cat = t.cat;
+        if (idx.subcategory > -1) u.sub = t.sub;
+        if (idx['paid with'] > -1 && pw) { delete u.pm; delete u.plp; delete u.acct; if (t.pm) { u.pm = t.pm; u.plp = t.plp; } else if (t.acct) u.acct = t.acct; }
+        if (t.t === 'xfer') { if (t.from) u.from = t.from; if (t.to) u.to = t.to; u.cat = ''; }
+        if (idx.instalments > -1 && u.pm === 'later') {
+          if (ins > 1) u.inst = Object.assign({}, u.inst || {}, { n: ins, start: /next/i.test(get('instalments')) ? 1 : 0 });
+          else if (u.inst && u.inst.n > 1) u.inst.n = 1;
+        }
+        out.upd.push(u); out.seen[id] = 1;
+      } else out.add.push(t);
     }
   });
   (isInv ? S.ledger : allTx()).forEach(function (x) { if (!out.seen[x.id]) out.del.push(x); });
@@ -3399,7 +3414,13 @@ function csvImportSheet() {
             });
             mark('ledger'); mark('meta');
           } else {
-            diff.upd.forEach(function (t) { var old = findTx(t.id); if (old) removeTx(old); });
+            // take updated rows out of their month without removeTx, which would also delete
+            // the People balance of a split and the fee rows of an instalment purchase
+            var oldOf = {};
+            diff.upd.forEach(function (t) {
+              var old = findTx(t.id); if (!old) return; oldOf[t.id] = old;
+              var om = monthOf(old.d); S.tx[om] = (S.tx[om] || []).filter(function (y) { return y.id !== t.id; }); if (!S.tx[om].length) delete S.tx[om]; markMonth(om);
+            });
             if (del) diff.del.forEach(function (t) { removeTx(t); });
             diff.upd.concat(diff.add).forEach(function (t) {
               t.sub = cleanSub(t.sub);
@@ -3407,6 +3428,8 @@ function csvImportSheet() {
               (t.tags || []).forEach(function (g) { if (S.meta.tags.indexOf(g) < 0) S.meta.tags.push(g); });
               rememberSub(t.cat, t.sub);
               var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
+              var was = oldOf[t.id];
+              if (t.split && was && (was.amt !== t.amt || was.d !== t.d)) { t.split.mine = Math.min(t.split.mine, t.amt); syncSplitDebt(t); }
             });
             mark('meta');
           }
