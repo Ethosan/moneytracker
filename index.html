@@ -4530,7 +4530,7 @@ function paymentSheet(b, p, after) {
 }
 // ---------- statement import (Grab, bank) ----------
 var MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
-function ymd(y, m, d) { if (y < 100) y += 2000; if (m < 1 || m > 12 || d < 1 || d > 31) return null; return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
+function ymd(y, m, d) { if (y < 100) y += 2000; if (m < 1 || m > 12 || d < 1 || d > new Date(y, m, 0).getDate()) return null; return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
 function parseDateAny(v) {
   if (v == null || v === '') return null;
   if (typeof v === 'number') { if (v > 20000 && v < 80000 && window.XLSX) { var c = XLSX.SSF.parse_date_code(v); return ymd(c.y, c.m, c.d); } return null; }
