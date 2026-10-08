@@ -699,6 +699,16 @@ dialog.sheet::backdrop{background:rgba(8,12,24,.32);-webkit-backdrop-filter:blur
   nav.tabs,.monthsw,header.top button.icon,.hr button.icon{background:var(--surface);backdrop-filter:none;-webkit-backdrop-filter:none}
   dialog.sheet,.sheet .hd,.actions.sticky{background:var(--bg);backdrop-filter:none;-webkit-backdrop-filter:none}
   .hero{background-color:var(--hero);backdrop-filter:none;-webkit-backdrop-filter:none}}
+.toast{max-width:calc(100vw - 32px)}
+.toast .msg{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.toast[popover]{inset:auto;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));margin:0;border:0;overflow:visible;color:var(--bg);background:var(--ink)}
+.fielderr{color:var(--loss);font-size:13.5px;font-weight:600;margin:8px 2px 0}
+label.f.need{color:var(--loss)}
+.need.wrap,.need.amt-in{box-shadow:0 0 0 2px color-mix(in srgb,var(--loss) 55%,transparent);border-radius:18px}
+.need.wrap{padding:6px;margin:0 -6px}
+@keyframes filled{0%{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 60%,transparent)}100%{box-shadow:0 0 0 2px transparent}}
+.filled{animation:filled 1.4s ease-out;border-radius:18px}
+@media (prefers-reduced-motion:reduce){.filled{animation:none}}
 </style>
 </head>
 <body>
@@ -980,12 +990,22 @@ function historySheet() {
     });
   });
 }
+// A sheet is a modal <dialog> in the browser's top layer, so an ordinary fixed element sits
+// under it and its messages were never seen. The bar goes into the top layer too (as a
+// popover, re-raised above the newest sheet), or inside the open sheet where popovers aren't supported.
+function raiseToast(t) {
+  if (t.showPopover) {
+    try { if (t.matches(':popover-open')) t.hidePopover(); t.showPopover(); return; } catch (e) { }
+  }
+  var host = dlg && dlg.open ? dlg : document.body;
+  if (t.parentNode !== host) host.appendChild(t);
+}
 function toastUndo(msg) { HIST.label = msg; HIST.labelT = Date.now();
-  var t = $('#toast'); t.innerHTML = esc(msg) + ' <button id="undo" class="undo">Undo</button>'; t.classList.add('on', 'act');
+  var t = $('#toast'); t.innerHTML = '<span class="msg">' + esc(msg) + '</span><button id="undo" class="undo">Undo</button>'; raiseToast(t); t.classList.add('on', 'act');
   $('#undo').onclick = function () { t.classList.remove('on', 'act'); undoLast(); };
   clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on', 'act'); }, 5000);
 }
-function toast(msg) { if (msg && !/^Undid|^Redone|^Nothing to/.test(msg)) { HIST.label = msg; HIST.labelT = Date.now(); } $('#toast').classList.remove('act'); var t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on'); }, 1800); }
+function toast(msg) { if (msg && !/^Undid|^Redone|^Nothing to/.test(msg)) { HIST.label = msg; HIST.labelT = Date.now(); } $('#toast').classList.remove('act'); var t = $('#toast'); t.innerHTML = '<span class="msg">' + esc(msg) + '</span>'; raiseToast(t); t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on'); }, 1800); }
 
 // ---------- state ----------
 var DEFAULT_CATS = [
@@ -1678,6 +1698,17 @@ function auditData() {
   if (badPay.length) out.push({ sev: 'look', key: 'paydate', title: badPay.length + ' PayLater payment' + (badPay.length > 1 ? 's have' : ' has') + ' an impossible date',
     sub: badPay.slice(0, 3).map(function (x) { return billProv(x.b) + ' ' + money(x.p.amt) + ' on ' + dayYear(x.p.d) + ' ' + payDateProblem(x.p.d, [x.b]); }).join('; ') + '. Usually the wrong year. Open it from Activity and fix the date.',
     open: 'paylater' });
+  var pgroups = {};
+  providers().forEach(function (pv) { var k = provKey(pv.name); (pgroups[k] = pgroups[k] || []).push(pv.name); });
+  Object.keys(pgroups).filter(function (k) { return pgroups[k].length > 1; }).forEach(function (k) {
+    var names = pgroups[k], uses = {};
+    names.forEach(function (n) { uses[n] = allTx().filter(function (t) { return t.pm === 'later' && provOf(t) === n; }).length + S.bills.filter(function (b) { return billProv(b) === n; }).length; });
+    var keep = names.slice().sort(function (a, b) { return uses[b] - uses[a] || (a === GRAB ? -1 : b === GRAB ? 1 : 0); })[0];
+    var drop = names.filter(function (n) { return n !== keep; });
+    out.push({ sev: 'fix', key: 'prov:' + k, title: 'One PayLater provider is spelled ' + names.length + ' ways',
+      sub: names.map(function (n) { return n + ' (' + uses[n] + ')'; }).join(', ') + '. Fix keeps \u201c' + keep + '\u201d and moves its purchases, bills, payments and counts there.',
+      fix: function () { drop.forEach(function (n) { moveProvider(n, keep); }); } });
+  });
   var dup = doubleCounts();
   if (dup.length) out.push({ sev: 'look', key: 'dup', title: dup.length + ' repayment' + (dup.length > 1 ? 's look' : ' looks') + ' recorded twice', sub: 'Once as income and once against a balance.', open: 'dupes' });
   var stale = S.inbox.filter(function (r) { return r.d < addDays(today(), -90); });
@@ -2630,6 +2661,7 @@ function scopeSheetListeners() {
 }
 function openSheet(title, body, onReady) {
   if (sheetScope) sheetScope.abort();
+  var tb = $('#toast'); if (tb && tb.parentNode === dlg) document.body.appendChild(tb); // keep it out of the content being replaced
   dlg.innerHTML = '<div class="hd"><h3>' + esc(title) + '</h3><button data-close>Close</button></div><div class="bd">' + body + '</div>';
   if (!dlg.open) dlg.showModal();
   sheetScope = new AbortController();
@@ -2851,13 +2883,20 @@ function txSheet(existing, asNew) {
           var o = list[+b.dataset.sug];
           noteEl.value = o.note;
           if (!t.cat) { // borrow the rest of the shape from the last time you wrote this
+            var wasPay = t.pm === 'later' ? provOf(t) : t.acct, hadTags = t.tags.slice();
             t.cat = o.tx.cat; t.sub = cleanSub(o.tx.sub);
             $('#cats', el).innerHTML = catChips();
             $('#sub', el).value = t.sub; $('#subchips', el).innerHTML = subChips();
             (o.tx.tags || []).forEach(function (g) { if (t.tags.indexOf(g) < 0) t.tags.push(g); }); $('#tags', el).innerHTML = tagChips();
             if (o.tx.pm === 'later') { t.pm = 'later'; t.plp = provOf(o.tx); delete t.acct; } else if (o.tx.acct) { delete t.pm; t.acct = o.tx.acct; }
             $('#pm', el).innerHTML = payChips(t); $('#instbox', el).hidden = t.pm !== 'later';
-            toast('Filled in from last time');
+            var nowPay = t.pm === 'later' ? provOf(t) : t.acct, added = t.tags.filter(function (g) { return hadTags.indexOf(g) < 0; });
+            var bits = [plain(t.cat)], flash = [$('#cats', el)];
+            if (nowPay && nowPay !== wasPay) { bits.push(nowPay); flash.push($('#pm', el)); }
+            if (added.length || t.sub) { $('#txmore', el).open = true; flash.push($('#tags', el)); }
+            added.forEach(function (g) { bits.push(isPersonTag(g) ? 'with ' + g : g); });
+            flash.forEach(function (x) { x.classList.remove('filled'); void x.offsetWidth; x.classList.add('filled'); });
+            toast('Filled in from last time: ' + bits.join(' \u00b7 '));
           }
           drawSug();
         });
@@ -2874,10 +2913,25 @@ function txSheet(existing, asNew) {
       $('#instbox', el).hidden = t.pm !== 'later'; drawInst();
     });
     var okSig = '';
+    // what's missing is said next to the field, in view, not in a message elsewhere
+    function need(box, label, msg, focusEl) {
+      clearNeed();
+      box.classList.add('need'); if (label) label.classList.add('need');
+      var p = document.createElement('p'); p.className = 'fielderr'; p.setAttribute('role', 'alert'); p.textContent = msg;
+      box.parentNode.insertBefore(p, box.nextSibling);
+      box.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      if (focusEl) focusEl.focus({ preventScroll: true });
+    }
+    function clearNeed() {
+      el.querySelectorAll('.need').forEach(function (x) { x.classList.remove('need'); });
+      el.querySelectorAll('.fielderr').forEach(function (x) { x.remove(); });
+    }
+    el.addEventListener('click', function (e) { if (e.target.closest('[data-cat],[data-spw]')) clearNeed(); });
+    el.addEventListener('input', function (e) { if (e.target.id === 'amt') clearNeed(); });
     $('#save', el).addEventListener('click', function () {
       var a = calcVal($('#amt', el).value);
-      if (!(a > 0)) { toast('Enter an amount'); $('#amt', el).focus(); return; }
-      if (!t.cat) { toast('Pick a category'); return; }
+      if (!(a > 0)) { need($('#amt', el).closest('.amt-in'), null, 'Enter an amount to save this.', $('#amt', el)); return; }
+      if (!t.cat) { need($('#cats', el), $('#catl', el), 'Pick a category to save this.', $('#cats .chip', el)); return; }
       t.amt = r2(a); t.note = $('#note', el).value.trim(); t.d = $('#dt', el).value || today();
       t.sub = cleanSub($('#sub', el).value);
       if (t.pm === 'later') delete t.acct; else { t.acct = t.acct || defWallet(); ensureWallet(t.acct); S.meta.lastAcct = t.acct; }
@@ -2913,7 +2967,7 @@ function txSheet(existing, asNew) {
       if (t.inst && t.inst.n > 1) { var ifee = calcVal($('#instfee', el).value); if (ifee > 0) t.inst.fee = r2(ifee); else delete t.inst.fee; }
       var mineV = parseFloat(($('#mine', el) || {}).value);
       if (!$('#spbox', el).hidden && mineV >= 0 && mineV < t.amt) {
-        if (!spWho) { toast('Say who owes you the rest'); return; }
+        if (!spWho) { $('#txmore', el).open = true; need($('#spwho', el), null, 'Say who owes you the rest.', $('#spwho .chip', el)); return; }
         t.split = { mine: r2(mineV), person: spWho };
       } else t.split = null;
       if (existing) removeTx(existing);
@@ -2922,7 +2976,9 @@ function txSheet(existing, asNew) {
       var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t);
       rememberSub(t.cat, t.sub); mark('meta'); markMonth(m);
       closeSheet(); render();
-      toastUndo((existing ? 'Saved ' : 'Added ') + money(t.amt) + ' \u00b7 ' + plain(t.cat) + (t.note ? ', ' + (t.note.length > 24 ? t.note.slice(0, 23) + '\u2026' : t.note) : ''));
+      var said = [money(t.amt) + (t.note ? ' ' + t.note : ''), plain(t.cat), t.pm === 'later' ? provOf(t) : t.acct]
+        .concat((t.tags || []).map(function (g) { return isPersonTag(g) ? 'with ' + g : g; })).filter(Boolean);
+      toastUndo((existing ? 'Saved ' : 'Added ') + said.join(' \u00b7 '));
     });
     if (existing) $('#del', el).addEventListener('click', function () { snapshot(); removeTx(existing); closeSheet(); render(); toastUndo('Transaction deleted'); });
   });
@@ -4008,6 +4064,34 @@ function walletUsage(n) {
   u.total = u.tx + u.xfer + u.inv + u.pay;
   return u;
 }
+// One PayLater provider spelled two ways ("GrabPay Later", "Grab PayLater") splits its
+// bills and owed balance in two. Point everything at `to`, and fold same-period bills together.
+function provKey(n) { return String(n || '').toLowerCase().replace(/[^a-z0-9]/g, ''); }
+function moveProvider(from, to) {
+  Object.keys(S.tx).forEach(function (m) {
+    var hit = false;
+    S.tx[m].forEach(function (t) { if (t.pm === 'later' && provOf(t) === from) { t.plp = to; hit = true; } });
+    if (hit) markMonth(m);
+  });
+  S.bills.forEach(function (b) { if (billProv(b) === from) b.prov = to; });
+  var byPeriod = {};
+  S.bills = S.bills.filter(function (b) {
+    var k = billProv(b) + '|' + b.from, keep = byPeriod[k];
+    if (!keep) { byPeriod[k] = b; return true; }
+    keep.payments = (keep.payments || []).concat(b.payments || []);
+    keep.fee = r2((keep.fee || 0) + (b.fee || 0)); keep.n = Math.max(keep.n || 1, b.n || 1); keep.first = keep.first || b.first;
+    keep.feeTxs = (keep.feeTxs || []).concat(b.feeTxs || []);
+    return false;
+  });
+  S.checks.forEach(function (c) {
+    if (c.lines && c.lines[from] != null) { c.lines[to] = r2((+c.lines[to] || 0) + +c.lines[from]); delete c.lines[from]; }
+  });
+  S.meta.plProviders = (S.meta.plProviders || []).filter(function (x) { return x.name !== from; });
+  var hasTo = S.meta.accounts.some(function (a) { return a.name === to; });
+  S.meta.accounts = S.meta.accounts.filter(function (a) { return !(a.name === from && hasTo); });
+  S.meta.accounts.forEach(function (a) { if (a.name === from) a.name = to; });
+  mark('bills'); mark('checks'); mark('meta');
+}
 // Point everything that names `from` at `to`. If `to` already exists this is a merge.
 function moveWallet(from, to) {
   var months = {};
@@ -4480,6 +4564,10 @@ function providers() {
   allTx().forEach(function (t) { if (t.pm === 'later') add(provOf(t)); });
   S.bills.forEach(function (b) { add(billProv(b)); });
   S.meta.accounts.forEach(function (a) { if (a.liability && /pay ?later|spaylater|atome|bnpl|instal/i.test(a.name)) add(a.name); });
+  // the built-in default stays out of the way when it is unused and the same provider exists under its own spelling
+  var gk = provKey(GRAB), twin = out.some(function (p) { return p.name !== GRAB && provKey(p.name) === gk; });
+  if (twin && !allTx().some(function (t) { return t.pm === 'later' && provOf(t) === GRAB; }) && !S.bills.some(function (b) { return billProv(b) === GRAB; }))
+    out = out.filter(function (p) { return p.name !== GRAB; });
   return out;
 }
 function provObj(name) { return providers().filter(function (p) { return p.name === name; })[0] || { name: name }; }
@@ -5808,6 +5896,7 @@ function onClick(e) {
 function boot() {
   dlg = $('#sheet');
   dlg.addEventListener('click', function (e) { if (e.target === dlg) closeSheet(); });
+  if ('showPopover' in HTMLElement.prototype) $('#toast').setAttribute('popover', 'manual');
   scopeSheetListeners();
   applyTheme();
   loadLocal();
