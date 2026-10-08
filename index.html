@@ -718,6 +718,8 @@ section.blk>h2 a,section.blk>h2 button{padding:13px 10px;margin:-13px -10px;min-
   main.tab-activity{max-width:860px}
 }
 .searchrow{grid-column:1 / -1}
+/* anything scrolled into view in a sheet stops clear of the sticky header and Add bar */
+dialog.sheet{scroll-padding:72px 0 120px}
 </style>
 </head>
 <body>
@@ -2791,6 +2793,8 @@ function txSheet(existing, asNew) {
       el.querySelectorAll('#tt button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
       $('#cats', el).innerHTML = catChips();
     });
+    // opening More details brings its fields into view instead of leaving them under the Add bar
+    $('#txmore', el).addEventListener('toggle', function () { if (this.open) this.scrollIntoView({ block: 'start', behavior: 'smooth' }); });
     function drawMore() {
       if (!$('#moresum', el) || !$('#dt', el)) return; // sheet already closed or replaced
       var bits = [], d = $('#dt', el).value || today();
