@@ -4552,7 +4552,7 @@ function classify(desc) {
   var d = desc.toLowerCase();
   if (/paylater.*(repay|payment|bill)|repayment|top[- ]?up|payment received|thank you for your payment|opening balance|closing balance|^total|subtotal|amount due|minimum payment|statement/.test(d)) return 'skip';
   if (/refund|cashback|reversal|rebate/.test(d)) return 'refund';
-  if (/grabfood|grabmart|food|mart|restaurant|cafe|kitchen|deliver|mcdonald|kfc|burger|chicken|rice|noodle|bubble tea|pizza|sushi|bakery|kopi|coffee/.test(d)) return 'food';
+  if (/grabfood|grabmart|food|\bmart\b|minimart|supermart|fairprice|cold storage|sheng siong|\bgiant\b|7-eleven|cheers|donki|restaurant|cafe|kitchen|deliver|mcdonald|kfc|burger|chicken|\brice\b|noodle|bubble tea|pizza|sushi|bakery|kopi|coffee/.test(d)) return 'food';
   if (/klook|ticket|cinema|golden village|\bgv\b|shaw|cathay|concert|event|attraction|experience|spa|massage|karaoke|bowling|escape room|museum|zoo|safari|universal|sentosa|gardens|staycation|hotel|agoda|booking\.com|trip\.com/.test(d)) return 'fun';
   if (/shopee|lazada|taobao|amazon|qoo10|uniqlo|zara|h&m|courts|challenger|best denki|apple|decathlon|ikea|watsons|guardian|sephora|store|shop|mall|retail/.test(d)) return 'buy';
   if (/grabcar|justgrab|grabshare|grabtaxi|taxi|ride|car\b|bike|hitch|transport|trip|premium|economy|standard|\bto\b|→|->/.test(d)) return 'ride';
