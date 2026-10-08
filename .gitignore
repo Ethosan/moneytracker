@@ -2,3 +2,4 @@
 *.json
 !manifest.webmanifest
 *.xlsx
+*.csv
