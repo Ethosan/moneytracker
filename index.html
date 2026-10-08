@@ -1059,6 +1059,9 @@ function normalize() {
   m.tags = Array.isArray(m.tags) ? m.tags : ['Alaina'];
   ['budgets', 'subs', 'accounts', 'rules'].forEach(function (k) { if (!Array.isArray(m[k])) m[k] = []; });
   m.venues = m.venues || {}; m.subcats = m.subcats || {};
+  // a budget without a key would crash the Month tab, so drop it
+  m.budgets = m.budgets.filter(function (b) { return b && typeof b.key === 'string'; });
+  m.budgets.forEach(function (b) { b.amt = num(b.amt); });
   S.bills.forEach(function (b) { if (!b.from && b.month) b.from = b.month + '-01'; b.payments = Array.isArray(b.payments) ? b.payments : []; b.payments.forEach(function (p) { p.amt = num(p.amt); if (!p.id) p.id = uid(); }); });
   // transactions: one bucket per month, ids unique, amounts numeric and positive
   var seen = {}, fixed = {}, moved = 0;
@@ -2260,8 +2263,19 @@ function applyTheme() { var t = localTheme(); if (t) document.documentElement.se
 function render() {
   if (!HIST.ready) { histSnap(); HIST.ready = true; }
   if (store.mode === 'auth') { $('#app').innerHTML = renderLogin(); wireLogin(); return; }
-  var v = UI.tab === 'activity' ? renderActivity() : UI.tab === 'pnl' ? renderAccounts() : UI.tab === 'more' ? renderMore() : UI.tab === 'insights' ? renderInsights() : renderHome();
+  var v, failed = null;
+  try {
+    v = UI.tab === 'activity' ? renderActivity() : UI.tab === 'pnl' ? renderAccounts() : UI.tab === 'more' ? renderMore() : UI.tab === 'insights' ? renderInsights() : renderHome();
+  } catch (err) {
+    // one broken screen must not lock you out of the rest of the app or your data
+    failed = err; if (window.console) console.error(err);
+    v = '<section class="blk"><div class="panel" style="padding:16px"><b>This screen couldn\'t load.</b>' +
+      '<p class="note" style="margin:8px 0 12px">Your data is safe. Try another tab, or download a backup first if you want to be careful.</p>' +
+      '<p class="note" style="margin:0 0 12px;word-break:break-word">' + esc(err && err.message || err) + '</p>' +
+      '<div class="actions"><button class="btn ghost" data-act="export">Download backup</button><button class="btn" data-tab="home">Go to Month</button></div></div></section>';
+  }
   $('#app').innerHTML = '<main>' + v + '</main>' + nav();
+  if (failed) { setSync(store.mode === 'cloud' ? 'Synced' : ''); return; }
   setSync(store.mode === 'cloud' ? 'Synced' : store.mode === 'local' ? 'On this device' : store.mode === 'cloud-offline' ? 'Offline, will sync' : store.mode === 'error' ? 'Sync problem' : '');
   document.querySelectorAll('[data-fold]').forEach(function (d) {
     d.addEventListener('toggle', function () { UI.folds[d.dataset.fold] = d.open; });
