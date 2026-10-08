@@ -4133,7 +4133,8 @@ function billSchedule(b) {
   for (var i = 0; i < n; i++) {
     var amt = i === n - 1 ? r2(due - each * (n - 1)) : each;
     var covered = Math.min(amt, Math.max(0, paid - each * i));
-    out.push({ i: i, d: addMonth(monthOf(first), i) + '-' + first.slice(8, 10), amt: amt, part: r2(covered), paid: covered >= amt - 0.01 });
+    var dm = addMonth(monthOf(first), i); // a due date on the 31st falls on the last day of shorter months
+    out.push({ i: i, d: dm + '-' + pad2(Math.min(+first.slice(8, 10), new Date(+dm.slice(0, 4), +dm.slice(5, 7), 0).getDate())), amt: amt, part: r2(covered), paid: covered >= amt - 0.01 });
   }
   return out;
 }
