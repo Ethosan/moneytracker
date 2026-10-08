@@ -2246,7 +2246,7 @@ function renderMore() {
     '</span></div><div class="r">\u203a</div></button>' +
     (isStandalone() ? '' : '<button class="row" data-act="install"><div class="l"><b>Install on your phone</b><span>Home screen icon, full screen, works offline</span></div><div class="r">\u203a</div></button>') +
     '<button class="row" data-act="cleanup"><div class="l"><b>Clean up in a spreadsheet</b><span>Export to CSV, edit in Excel or Sheets, bring it back</span></div><div class="r">\u203a</div></button>' +
-    '<button class="row" data-act="export"><div class="l"><b>Download a backup</b><span>JSON of everything, including bills and loans</span></div><div class="r">›</div></button>' +
+    '<button class="row" data-act="export"><div class="l"><b>Download a backup</b><span>' + esc(backupAge()) + '</span></div><div class="r">›</div></button>' +
     '<button class="row" data-act="restore"><div class="l"><b>Restore a backup</b><span>Replaces everything with a backup file</span></div><div class="r">›</div></button>' +
     (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="signout"><div class="l"><b>Sign out</b><span>' + esc(store.email || '') + '</span></div><div class="r">›</div></button>' : '') +
     '<button class="row" data-act="theme"><div class="l"><b>Appearance</b><span>' + ({ light: 'Light', dark: 'Dark' }[localTheme()] || 'Match device') + '</span></div><div class="r">›</div></button>' +
@@ -3291,7 +3291,15 @@ function copySheet(name, text, soft) {
     });
   });
 }
+// When this device last saved a backup, so Settings can say how old the newest one is.
+function backupAge() {
+  var d = ''; try { d = localStorage.getItem('ledger-last-backup') || ''; } catch (e) { }
+  if (!d) return 'JSON of everything, including bills and loans';
+  var n = Math.round((new Date(today() + 'T00:00:00') - new Date(d + 'T00:00:00')) / 864e5);
+  return 'Last one ' + (n <= 0 ? 'today' : n === 1 ? 'yesterday' : n + ' days ago') + ' on this device';
+}
 function exportData() {
+  try { localStorage.setItem('ledger-last-backup', today()); } catch (e) { }
   var snap = JSON.parse(JSON.stringify(S));
   snap.exported = new Date().toISOString(); snap.app = 'ledger'; snap.v = SCHEMA;
   download('ledger-backup-' + today() + '.json', JSON.stringify(snap), 'application/json');
