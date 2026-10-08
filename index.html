@@ -1944,7 +1944,7 @@ function nav() {
     '<button class="add" data-act="add-tx" aria-label="Add transaction"><span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/></svg></span></button>' + b('insights', 'Insights', 'ins') + b('pnl', 'Accounts', 'pnl') + '</div></nav>';
 }
 function hdRight() {
-  return '<div class="hr"><button class="sync" id="sync" data-act="sync"></button>' + (HIST.list.length ? '<button class="icon sm" data-act="history" aria-label="Change history">' + ICON.history + '</button>' : '') + (UI.tab === 'more' ? '' : '<button class="icon" data-tab="more" aria-label="More">' + ICON.more + '</button>') + '</div>';
+  return '<div class="hr"><button class="sync" id="sync" data-act="sync"></button>' + (HIST.list.length ? '<button class="icon sm" data-act="history" aria-label="Change history">' + ICON.history + '</button>' : '') + (UI.tab === 'more' ? '' : '<button class="icon" data-tab="more" aria-label="Settings" title="Settings">' + ICON.more + '</button>') + '</div>';
 }
 function monthSwitch() {
   return '<div class="monthsw"><button data-act="prev" aria-label="Previous month">‹</button><span>' + monthLabel(UI.month) +
@@ -2025,7 +2025,7 @@ function renderHome() {
   }
   var dup = doubleCounts();
   if (dup.length) h += '<button class="banner" data-act="dupes"><b>' + dup.length + ' repayment' + (dup.length > 1 ? 's look' : ' looks') + ' recorded twice</b><span>Once as income and once against a balance. Tap to keep one.</span></button>';
-  if (store.mode === 'error') h += '<button class="banner err" data-act="sync"><b>Your changes aren\u2019t reaching the cloud</b><span>They are saved on this device. ' + esc(syncHint(store.err || '')) + ' Tap for details.</span></button>';
+  if (store.mode === 'error') h += '<button class="banner err" data-act="sync"><b>Your changes aren\u2019t syncing</b><span>They\u2019re safe on this device. Tap to see what\u2019s wrong and fix it.</span></button>';
   if (S.inbox.length) h += '<button class="banner" data-act="inbox"><b>' + S.inbox.length + ' statement rows to review</b><span>Tag Alaina rides and add them</span></button>';
   var sgN = allDoubts().length;
   if (sgN) h += '<button class="banner" data-act="suggest"><b>' + (sgN === 1 ? '1 entry looks' : sgN + ' entries look') + ' like a slip</b><span>Review the suggestions. Nothing changes until you approve.</span></button>';
@@ -5645,7 +5645,7 @@ function renderOverview() {
   var peakI = st.reduce(function (b, x, i) { return x.net > st[b].net ? i : b; }, 0);
   h += '<div class="kpis"><div><span>Average month</span><b>' + money(avgSpend, 0) + '</b><i>spent after paybacks</i></div>' +
     '<div><span>Savings rate</span><b class="' + tone(kept) + '">' + (inc ? Math.round(kept / inc * 100) : 0) + '%</b><i>' + signed(kept, 0) + ' kept</i></div>' +
-    '<div><span>With Alaina</span><b style="color:var(--rose)">' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</b><i>' + money(alTot, 0) + ' of spending</i></div>' +
+    '<div><span>With Alaina</span><b style="color:var(--rose)">' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</b><i>' + money(alTot, 0) + ' of spending over ' + (ms.length === 1 ? '1 month' : ms.length + ' months') + '</i></div>' +
     '<div><span>Subscriptions</span><b>' + money(subsCat, 0) + '</b><i>per month on average</i></div></div>';
 
   h += chartBlock('c1', 'Spending peaked in ' + monthLabel(ms[peakI]) + ' at ' + money(st[peakI].net, 0), 'By category, before paybacks', 240, '<div class="lg" id="c1l"></div>');
