@@ -406,7 +406,7 @@ label.f{margin:16px 2px 8px}
   main>.quick{order:2;grid-column:1 / -1}
   main>.quick .chips{flex-wrap:nowrap;overflow-x:auto}
 }
-@media (min-width:1024px){ main>.hero{align-self:stretch;display:flex;flex-direction:column;justify-content:center} }
+@media (min-width:1024px){ main>.hero{align-self:start} } /* sized to its content, not stretched to the list beside it */
 
 #plsel{flex-wrap:nowrap}
 #plsel button{white-space:nowrap;flex:0 0 auto;padding:9px 14px}
@@ -710,8 +710,13 @@ label.f.need{color:var(--loss)}
 .filled{animation:filled 1.4s ease-out;border-radius:18px}
 @media (prefers-reduced-motion:reduce){.filled{animation:none}}
 .legend li.catrow{cursor:pointer;border-radius:12px}
-.legend li.catrow .amt::after{content:"a";color:var(--muted);font-weight:500;margin-left:8px}
+.legend li.catrow .amt::after{content:"\203a";color:var(--muted);font-weight:500;margin-left:8px}
 @media (hover:hover) and (pointer:fine){.legend li.catrow{margin:0 -10px;padding-left:10px;padding-right:10px;transition:background .15s}.legend li.catrow:hover{background:var(--sunk)}}
+/* header links: a 44px target without changing how they look */
+section.blk>h2 a,section.blk>h2 button{padding:13px 10px;margin:-13px -10px;min-height:44px}
+@media (min-width:1024px){
+  main.tab-activity{max-width:860px}
+}
 </style>
 </head>
 <body>
@@ -2058,10 +2063,11 @@ function renderHome() {
     });
     if (cats.length > 7) h += '<li><span class="sw">+</span><span class="note" style="margin:0">' + (cats.length - 7) + ' more categories</span><span></span><span class="amt">' + money(sum(cats.slice(7), function (c) { return st.byCat[c]; }), 0) + '</span></li>';
     h += '</ul>';
-    h += '</ul></div>';
-    if (avg) h += '<p class="note" style="margin:-4px 4px 14px">' + (byNow < 1
+    h += '</ul>';
+    if (avg) h += '<p class="note" style="margin:8px 2px 2px">' + (byNow < 1
       ? 'Coloured tags compare with what you usually spend by day ' + dayNow + ', from the previous ' + (avg.__n === 1 ? 'month' : avg.__n + ' months') + '.'
       : 'Coloured tags compare with your average month over the previous ' + (avg.__n === 1 ? 'month' : avg.__n + ' months') + '.') + '</p>';
+    h += '</div>';
   } else h += '</div>';
   }
   h += '<div class="strip"><div data-hm="earn" role="button" tabindex="0"><b>' + money(st.earned, 0) + '</b><span>Earned \u203a</span></div><div><b>' + money(st.other, 0) +
@@ -2089,26 +2095,29 @@ function renderHome() {
   var poker = sum(mEntries.filter(function (e) { return venueType(e.venue) === 'poker'; }), function (e) { return e.f === 'out' ? e.amt : e.f === 'in' ? -e.amt : 0; });
   var brIn = sum(mEntries.filter(function (e) { var t = venueType(e.venue); return (t === 'broker' || t === 'crypto') && e.f === 'in'; }), function (e) { return e.amt; });
   var brOut = sum(mEntries.filter(function (e) { var t = venueType(e.venue); return (t === 'broker' || t === 'crypto') && e.f === 'out'; }), function (e) { return e.amt; });
-  if (mEntries.some(function (e) { var ty = venueType(e.venue); return ty === 'prop' || ty === 'poker' || ty === 'broker' || ty === 'crypto'; })) {
-    h += '<section class="blk"><h2>Trading and poker this month <button data-tab="pnl">All accounts</button></h2><div class="panel">' +
-      '<div class="row"><div class="l"><b>Prop firm fees</b><span>' + plural(mEntries.filter(function (e) { return venueType(e.venue) === 'prop' && e.f === 'in'; }).length, 'purchase') + '</span></div><div class="r ' + tone(-propFees) + '">' + money(-propFees) + '</div></div>' +
-      '<div class="row"><div class="l"><b>Prop firm payouts</b></div><div class="r ' + tone(propPay) + '">' + money(propPay) + '</div></div>' +
-      '<div class="row"><div class="l"><b>Poker</b></div><div class="r ' + tone(poker) + '">' + signed(poker) + '</div></div>' +
-      ((brIn || brOut) ? '<div class="row"><div class="l"><b>Moved to investments</b><span>Not spending. ' + money(brOut) + ' came back</span></div><div class="r">' + money(brIn) + '</div></div>' : '') +
-      '<div class="row"><div class="l"><b>All money out this month</b><span>Spending, plus fees, buy-ins and money moved to investments</span></div><div class="r">' + money(st.net + propFees + Math.max(0, -poker) + brIn - brOut) + '</div></div>' +
-      '</div></section>';
-  }
-
+  var hasTrading = mEntries.some(function (e) { var ty = venueType(e.venue); return ty === 'prop' || ty === 'poker' || ty === 'broker' || ty === 'crypto'; });
   var plTx = (S.tx[m] || []).filter(function (t) { return t.t === 'exp' && t.pm === 'later'; });
   var plOwed = laterOwed(), plNext = nextPayment(), plMonth = r2(sum(plTx, function (t) { return t.amt; }));
-  if (plOwed > 0 || plMonth > 0) {
-    h += '<section class="blk"><h2>PayLater <button data-tab="pnl" data-acct="bills">All providers</button></h2><div class="panel">' +
-      '<div class="row"><div class="l"><b>Charged to PayLater in ' + monthLabel(m, true) + '</b><span>' + plural(plTx.length, 'purchase') + ', already counted as spending</span></div><div class="r">' + money(plMonth) + '</div></div>' +
-      providers().filter(function (p) { return laterOwed(p.name) > 0.005; }).map(function (p) {
-        var nx = nextPayment(p.name);
-        return '<button class="row" data-plopen="' + esc(p.name) + '"><div class="l"><b>' + esc(p.name) + '</b><span>' + (nx ? 'Next ' + money(nx.amt) + ' on ' + dayLabel(nx.d) : 'No plan set yet') + '</span></div><div class="r">' + money(laterOwed(p.name)) + '</div></button>';
-      }).join('') +
-      '<div class="row"><div class="l"><b>Still owed overall</b><span>' + (plNext ? 'Next payment ' + money(plNext.amt) + ' on ' + dayLabel(plNext.d) : 'No plan set yet') + '</span></div><div class="r">' + money(plOwed) + '</div></div></div></section>';
+  var hasLater = plOwed > 0 || plMonth > 0;
+  if (hasTrading || hasLater) {
+    // one line each; the detail lives on Accounts
+    h += '<section class="blk"><h2>' + (hasTrading && hasLater ? 'Trading and PayLater' : hasTrading ? 'Trading and poker' : 'PayLater') + '</h2><div class="panel">';
+    if (hasTrading) {
+      var tradeNet = r2(propPay - propFees + poker), allOut = st.net + propFees + Math.max(0, -poker) + brIn - brOut;
+      var tbits = [];
+      if (propFees || propPay) tbits.push('prop fees ' + money(propFees, 0) + ', payouts ' + money(propPay, 0));
+      if (poker) tbits.push('poker ' + signed(poker, 0));
+      if (brIn || brOut) tbits.push(money(brIn, 0) + ' moved to investments');
+      tbits.push('all money out ' + money(allOut, 0));
+      h += '<button class="row" data-tab="pnl" data-acct="inv"><div class="l"><b>Trading and poker in ' + monthLabel(m, true) + '</b><span>' + tbits.join(', ') + '</span></div><div class="r ' + tone(tradeNet) + '">' + signed(tradeNet) + '</div></button>';
+    }
+    if (hasLater) {
+      var lbits = [];
+      if (plNext) lbits.push('next ' + money(plNext.amt) + ' on ' + dayLabel(plNext.d)); else if (plOwed > 0) lbits.push('no plan set yet');
+      if (plMonth) lbits.push(money(plMonth) + ' charged in ' + monthLabel(m, true));
+      h += '<button class="row" data-tab="pnl" data-acct="bills"><div class="l"><b>PayLater owed</b><span>' + lbits.join(', ') + '</span></div><div class="r">' + money(plOwed) + '</div></button>';
+    }
+    h += '</div></section>';
   }
   var lcx = lastCheck(), due = checkDue();
   if (due) {
@@ -2633,7 +2642,7 @@ function render() {
       '<p class="note" style="margin:0 0 12px;word-break:break-word">' + esc(err && err.message || err) + '</p>' +
       '<div class="actions"><button class="btn ghost" data-act="export">Download backup</button><button class="btn" data-tab="home">Go to Month</button></div></div></section>';
   }
-  $('#app').innerHTML = '<main>' + v + '</main>' + nav();
+  $('#app').innerHTML = '<main class="tab-' + UI.tab + '">' + v + '</main>' + nav();
   if (failed) { setSync(store.mode === 'cloud' ? 'Synced' : ''); return; }
   setSync(store.mode === 'cloud' ? 'Synced' : store.mode === 'local' ? 'On this device' : store.mode === 'cloud-offline' ? 'Offline, will sync' : store.mode === 'error' ? 'Sync problem' : '');
   document.querySelectorAll('[data-fold]').forEach(function (d) {
