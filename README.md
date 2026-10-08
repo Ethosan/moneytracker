@@ -27,3 +27,15 @@ Free GitHub Pages needs a public repository. That only exposes the code, not you
 ## Updating
 
 Edit `index.html`, commit, and Pages redeploys. If the phone keeps showing the old version, close and reopen the app twice (the offline cache refreshes in the background).
+
+## AI assistant (optional)
+
+Off until you turn it on in Settings → AI assistant. Once a week it sends entries added since its last look (date, type, amount, category and note only) to the AI, and anything it flags waits in Suggestions for you to approve. You can also ask it questions; each one sends a summary of the last six months.
+
+The API key never goes in this repo. It lives in a Supabase Edge Function:
+
+1. Deploy the function: `npx supabase login`, then `npx supabase functions deploy ledger-ai --project-ref <your project ref> --use-api`.
+2. Supabase → Edge Functions → Secrets: add `MISTRAL_API_KEY` (or `ANTHROPIC_API_KEY` for Claude).
+3. To switch to Claude later, add `ANTHROPIC_API_KEY` and set `AI_PROVIDER` to `anthropic`. Optional: `MISTRAL_MODEL`, `ANTHROPIC_MODEL`.
+
+Set a monthly spending limit in the AI provider's dashboard as a safety net.
