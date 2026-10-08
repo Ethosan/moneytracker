@@ -709,6 +709,9 @@ label.f.need{color:var(--loss)}
 @keyframes filled{0%{box-shadow:0 0 0 2px color-mix(in srgb,var(--accent) 60%,transparent)}100%{box-shadow:0 0 0 2px transparent}}
 .filled{animation:filled 1.4s ease-out;border-radius:18px}
 @media (prefers-reduced-motion:reduce){.filled{animation:none}}
+.legend li.catrow{cursor:pointer;border-radius:12px}
+.legend li.catrow .amt::after{content:"a";color:var(--muted);font-weight:500;margin-left:8px}
+@media (hover:hover) and (pointer:fine){.legend li.catrow{margin:0 -10px;padding-left:10px;padding-right:10px;transition:background .15s}.legend li.catrow:hover{background:var(--sunk)}}
 </style>
 </head>
 <body>
@@ -2001,7 +2004,7 @@ function earnHero(m, quick) {
     h += '<div class="panel legend-wrap"><ul class="legend">' + cats.map(function (c, k) {
       var d = prev.length ? cur.by[c] - (avgBy[c] || 0) : null; if (d != null && Math.abs(d) < 0.5) d = null;
       var cls = d == null ? 'flat' : d > 5 ? 'down' : d < -5 ? 'up' : 'flat';
-      return '<li><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(plain(c)) + '</span><span class="delta ' + cls + '">' + (d == null ? '' : (d > 0 ? '+' : '\u2212') + '$' + Math.abs(Math.round(d))) + '</span><span class="amt">' + money(cur.by[c], 0) + '</span></li>';
+      return '<li class="catrow" data-catgo="' + esc(c) + '" role="button" tabindex="0"><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(plain(c)) + '</span><span class="delta ' + cls + '">' + (d == null ? '' : (d > 0 ? '+' : '\u2212') + '$' + Math.abs(Math.round(d))) + '</span><span class="amt">' + money(cur.by[c], 0) + '</span></li>';
     }).join('') + '</ul></div>';
     if (prev.length) h += '<p class="note" style="margin:-4px 4px 14px">Tags compare with your average for the previous ' + (prev.length === 1 ? 'month' : prev.length + ' months') + '. Paybacks from friends are left out: they reduce spending instead.</p>';
   } else h += '<div class="panel"><div class="empty" style="padding:14px">No income logged in ' + monthLabel(m) + ' yet.</div></div>';
@@ -2050,7 +2053,7 @@ function renderHome() {
     cats.slice(0, 7).forEach(function (c, k) {
       var d = avg ? st.byCat[c] - (avg[c] || 0) * byNow : null, cls = d == null ? 'flat' : d > 5 ? 'up' : d < -5 ? 'down' : 'flat';
       var dl = d == null || cls === 'flat' ? 'About usual' : money(Math.abs(Math.round(d)), 0) + (d > 0 ? ' more' : ' less') + ' than usual' + (byNow < 1 ? ' by now' : '');
-      h += '<li><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')) + '</span><span class="delta ' + cls + '">' +
+      h += '<li class="catrow" data-catgo="' + esc(c) + '" role="button" tabindex="0"><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')) + '</span><span class="delta ' + cls + '">' +
         (d == null ? '' : '<span aria-hidden="true">' + (Math.round(d) === 0 ? '' : d > 0 ? '+' : '−') + '$' + Math.abs(Math.round(d)) + '</span><span class="sr">' + dl + '</span>') + '</span><span class="amt">' + money(st.byCat[c], 0) + '</span></li>';
     });
     if (cats.length > 7) h += '<li><span class="sw">+</span><span class="note" style="margin:0">' + (cats.length - 7) + ' more categories</span><span></span><span class="amt">' + money(sum(cats.slice(7), function (c) { return st.byCat[c]; }), 0) + '</span></li>';
@@ -5811,6 +5814,9 @@ function onClick(e) {
   if ((b = t.closest('[data-trtable]'))) { UI.trTable = !UI.trTable; render(); return; }
   if ((b = t.closest('[data-lens]'))) { UI.lensTag = b.dataset.lens; render(); return; }
   if ((b = t.closest('[data-tagsheet]'))) { tagSheet(b.dataset.tagsheet); return; }
+  if ((b = t.closest('[data-catgo]'))) { // a category on Month opens its entries for that month
+    UI.tab = 'activity'; UI.fcat = b.dataset.catgo; UI.fsub = ''; UI.filter = 'all'; UI.q = ''; UI.all = false; render(); window.scrollTo(0, 0); return;
+  }
   if ((b = t.closest('[data-lensgo]'))) { UI.tab = 'insights'; UI.insView = 'lens'; UI.lensTag = b.dataset.lensgo; render(); return; }
   if ((b = t.closest('[data-hm]'))) { UI.homeMode = b.dataset.hm; render(); return; }
   if ((b = t.closest('[data-lump]'))) { lumpSheet(b.dataset.lump); return; }
