@@ -613,7 +613,6 @@ nav.tabs button[aria-current="page"] .ms .pi-line + .pi-fill{display:block}
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="config.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 <script>// ---- Money Manager import mapper ----
 var MM = (function () {
@@ -3149,9 +3148,14 @@ function importSheet() {
   var body = '<p style="margin-top:0">In Money Manager, export to Excel, then choose the file here. Anything imported before is replaced; entries you added in this app stay.</p>' +
     '<input type="file" id="file" accept=".xlsx,.xls" class="t"><div id="imp"></div>';
   openSheet('Import from Money Manager', body, function (el) {
+    needXlsx().catch(function () { });
     $('#file', el).addEventListener('change', function () {
-      var f = this.files[0]; if (!f) return;
-      if (!window.XLSX) { $('#imp', el).innerHTML = '<p class="neg">The spreadsheet reader did not load. Check your connection and reopen the page.</p>'; return; }
+      var f = this.files[0], inp = this; if (!f) return;
+      if (!window.XLSX) {
+        $('#imp', el).innerHTML = '<p class="note">Loading the spreadsheet reader…</p>';
+        needXlsx().then(function () { inp.dispatchEvent(new Event('change')); }, function () { $('#imp', el).innerHTML = '<p class="neg">The spreadsheet reader did not load. Check your connection and try again.</p>'; });
+        return;
+      }
       var rd = new FileReader();
       rd.onload = function () {
         var res = null;
@@ -4674,6 +4678,8 @@ function tableToRows(rows) {
   });
   return out;
 }
+// The spreadsheet reader is large and only needed for imports, so it loads when an import screen opens.
+function needXlsx() { return window.XLSX ? Promise.resolve() : (needXlsx.p = needXlsx.p || loadScript('https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js').catch(function (e) { needXlsx.p = null; throw e; })); }
 function loadScript(src) { return new Promise(function (res, rej) { var s = document.createElement('script'); s.src = src; s.onload = res; s.onerror = rej; document.head.appendChild(s); }); }
 function pdfText(buf) {
   var base = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
@@ -4705,12 +4711,23 @@ function stmtSheet() {
       toast(made.length + ' rows ready to review');
     }
     $('#sp', el).addEventListener('click', function () { done(textToRows($('#st', el).value), 'the pasted text'); });
+    needXlsx().catch(function () { });
     $('#sf', el).addEventListener('change', function () {
-      var f = this.files[0]; if (!f) return; $('#sres', el).innerHTML = '<p class="note">Reading ' + esc(f.name) + '…</p>';
+      var f = this.files[0], inp = this; if (!f) return; $('#sres', el).innerHTML = '<p class="note">Reading ' + esc(f.name) + '…</p>';
+      if (!/\.(pdf|csv)$/i.test(f.name) && !window.XLSX) {
+        needXlsx().then(function () { inp.dispatchEvent(new Event('change')); }, function () { $('#sres', el).innerHTML = '<p class="neg">The spreadsheet reader did not load. Check your connection and try again.</p>'; });
+        return;
+      }
       var rd = new FileReader();
       rd.onload = function () {
         if (/\.pdf$/i.test(f.name)) {
           pdfText(new Uint8Array(rd.result)).then(function (t) { done(textToRows(t), 'this PDF'); }, function () { $('#sres', el).innerHTML = '<p class="neg">This PDF could not be read. Copy its text and paste it above.</p>'; });
+          return;
+        }
+        if (/\.csv$/i.test(f.name)) {
+          // read CSVs ourselves: the spreadsheet library takes 01/10/2026 as 10 January, US style
+          try { done(tableToRows(csvParse(new TextDecoder('utf-8').decode(rd.result))), 'this file'); }
+          catch (e) { $('#sres', el).innerHTML = '<p class="neg">This file could not be read. Try exporting it again as .xlsx or .csv.</p>'; }
           return;
         }
         try {
