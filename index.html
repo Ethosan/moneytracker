@@ -16,7 +16,7 @@
 :root{
   --bg:#F2F4F8;--surface:#FFFFFF;--sunk:#EBEEF4;--ink:#0D1017;--muted:#5D6472;--line:#E3E7EE;
   --accent:#2A55F5;--accent-soft:#E6ECFF;--accent-ink:#FFFFFF;--raised:#FFFFFF;
-  --gain:#0E9F6E;--gain-soft:#E1F6EE;--loss:#E0424E;--loss-soft:#FDE8EA;--warn:#C27C0E;--rose:#E3337A;--rose-soft:#FDE6EF;
+  --gain:#08784F;--gain-soft:#E1F6EE;--loss:#C42A37;--loss-soft:#FDE8EA;--warn:#C27C0E;--rose:#E3337A;--rose-soft:#FDE6EF;
   --hero:#0D1017;--hero-ink:#FFFFFF;--hero-muted:#9AA3B5;
   --seg1:#2A55F5;--seg2:#6E8CFF;--seg3:#A9BBFF;--seg4:#CDD5E4;--seg5:#E1E6EF;
   --shadow:0 1px 2px rgba(22,34,70,.05),0 8px 24px rgba(22,34,70,.06);
@@ -107,7 +107,8 @@ section.blk>h2 a,section.blk>h2 button{font:600 13.5px "Geist",sans-serif;color:
 .row+.row,.row+button.row,button.row+.row,button.row+button.row{border-top:1px solid var(--line)}
 .row .l{min-width:0;flex:1}
 .row .l b{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.row .l span{font-size:12.5px;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .l span{font-size:12.5px;color:var(--muted);display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;white-space:normal}
+.row.caution .l b{color:var(--loss)}
 .row .r{text-align:right;white-space:nowrap;font-weight:600}
 .row .r span{display:block;font-size:12px;color:var(--muted);font-weight:400}
 button.row{width:100%;background:none;border:0;text-align:left;padding:12px 0;border-radius:0}
@@ -1953,7 +1954,7 @@ function renderHome() {
       var d = avg ? st.byCat[c] - (avg[c] || 0) * byNow : null, cls = d == null ? 'flat' : d > 5 ? 'up' : d < -5 ? 'down' : 'flat';
       var dl = d == null || cls === 'flat' ? 'About usual' : money(Math.abs(Math.round(d)), 0) + (d > 0 ? ' more' : ' less') + ' than usual' + (byNow < 1 ? ' by now' : '');
       h += '<li><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')) + '</span><span class="delta ' + cls + '">' +
-        (d == null ? '' : '<span aria-hidden="true">' + (d > 0 ? '+' : '−') + '$' + Math.abs(Math.round(d)) + '</span><span class="sr">' + dl + '</span>') + '</span><span class="amt">' + money(st.byCat[c], 0) + '</span></li>';
+        (d == null ? '' : '<span aria-hidden="true">' + (Math.round(d) === 0 ? '' : d > 0 ? '+' : '−') + '$' + Math.abs(Math.round(d)) + '</span><span class="sr">' + dl + '</span>') + '</span><span class="amt">' + money(st.byCat[c], 0) + '</span></li>';
     });
     if (cats.length > 7) h += '<li><span class="sw">+</span><span class="note" style="margin:0">' + (cats.length - 7) + ' more categories</span><span></span><span class="amt">' + money(sum(cats.slice(7), function (c) { return st.byCat[c]; }), 0) + '</span></li>';
     h += '</ul>';
@@ -2472,31 +2473,34 @@ function renderAccounts() {
   return h + pnlBody();
 }
 function renderMore() {
-  var h = '<header class="top"><h1>Settings</h1>' + hdRight() + '</header>' +
-    '<button class="banner quiet" data-tab="pnl"><b>Looking for people, PayLater or subscriptions?</b><span>They live on the Accounts tab now</span></button>';
-  h += '<section class="blk"><h2>Import</h2><div class="panel">' +
+  var h = '<header class="top"><h1>Settings</h1>' + hdRight() + '</header>';
+  h += '<section class="blk"><h2>Import and export</h2><div class="panel">' +
     '<button class="row" data-act="stmt"><div class="l"><b>Grab or bank statement</b><span>Excel, CSV, PDF or pasted text, including PayLater</span></div><div class="r">›</div></button>' +
     (S.inbox.length ? '<button class="row" data-act="inbox"><div class="l"><b>Review imported rows</b><span>' + S.inbox.length + ' waiting</span></div><div class="r">›</div></button>' : '') +
     '<button class="row" data-act="import"><div class="l"><b>Money Manager export</b><span>Replaces anything imported from it before</span></div><div class="r">›</div></button>' +
     (S.meta.rules.length ? '<div class="row"><div class="l"><b>Auto-tag rules</b><span>' + S.meta.rules.map(function (r) { return '"' + esc(r.match) + '" → ' + esc(r.tag); }).join(', ') + '</span></div><button class="btn sm ghost" data-act="clear-rules">Clear</button></div>' : '') +
+    '<button class="row" data-act="cleanup"><div class="l"><b>Clean up in a spreadsheet</b><span>Export to CSV, edit in Excel or Sheets, bring it back</span></div><div class="r">\u203a</div></button>' +
     '</div></section>';
-  // setup
-  h += '<section class="blk"><h2>App settings</h2><div class="panel">' +
-    '<button class="row" data-act="budgets"><div class="l"><b>Budgets</b><span>' + S.meta.budgets.length + ' set</span></div><div class="r">›</div></button>' +
-    '<button class="row" data-act="basis"><div class="l"><b>Investment accounting</b><span>' + (cashBasis() ? 'Cash basis, balances not counted' : 'Balances count as your money') + '</span></div><div class="r">\u203a</div></button>' +
-    '<button class="row" data-act="cats"><div class="l"><b>Categories and tags</b><span>' + S.meta.cats.length + ' categories, ' + S.meta.tags.length + ' tags</span></div><div class="r">›</div></button>' +
-    '<button class="row" data-act="ai"><div class="l"><b>AI assistant</b><span>' + (aiOn() ? 'On' + (S.meta.ai.lastRun ? ', last review ' + dayLabel(S.meta.ai.lastRun) : '') : 'Off. Weekly check for mistakes, and questions about your money') + '</span></div><div class="r">\u203a</div></button>' +
+  h += '<section class="blk"><h2>Checks</h2><div class="panel">' +
     '<button class="row" data-act="suggest"><div class="l"><b>Suggestions</b><span>' + (function () { var n = allDoubts().length; return n ? n + ' entr' + (n > 1 ? 'ies look' : 'y looks') + ' like a slip' : 'Nothing looks off'; })() + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="health"><div class="l"><b>Data health</b><span>' + (function () { var n = auditData().length; return n ? n + ' thing' + (n > 1 ? 's' : '') + ' to check' : 'Everything is consistent'; })() + '</span></div><div class="r">\u203a</div></button>' +
+    '<button class="row" data-act="ai"><div class="l"><b>AI assistant</b><span>' + (aiOn() ? 'On' + (S.meta.ai.lastRun ? ', last review ' + dayLabel(S.meta.ai.lastRun) : '') : 'Off. Weekly check for mistakes, and questions about your money') + '</span></div><div class="r">\u203a</div></button>' +
+    '</div></section>';
+  h += '<section class="blk"><h2>Preferences</h2><div class="panel">' +
+    '<button class="row" data-act="budgets"><div class="l"><b>Budgets</b><span>' + S.meta.budgets.length + ' set</span></div><div class="r">›</div></button>' +
+    '<button class="row" data-act="cats"><div class="l"><b>Categories and tags</b><span>' + S.meta.cats.length + ' categories, ' + S.meta.tags.length + ' tags</span></div><div class="r">›</div></button>' +
+    '<button class="row" data-act="basis"><div class="l"><b>Investment accounting</b><span>' + (cashBasis() ? 'Cash basis, balances not counted' : 'Balances count as your money') + '</span></div><div class="r">\u203a</div></button>' +
+    '<button class="row" data-act="theme"><div class="l"><b>Appearance</b><span>' + ({ light: 'Light', dark: 'Dark' }[localTheme()] || 'Match device') + '</span></div><div class="r">›</div></button>' +
+    (isStandalone() ? '' : '<button class="row" data-act="install"><div class="l"><b>Install on your phone</b><span>Home screen icon, full screen, works offline</span></div><div class="r">\u203a</div></button>') +
+    '</div></section>';
+  // the one place that can replace everything sits last, and says so
+  h += '<section class="blk"><h2>Your data</h2><div class="panel">' +
     '<button class="row" data-act="sync"><div class="l"><b>Sync status</b><span>' +
     (store.mode === 'cloud' ? 'Synced with Supabase' : store.mode === 'error' ? 'Not syncing: ' + esc(store.err || 'unknown problem') : store.mode === 'cloud-offline' ? 'Offline, changes are waiting' : 'Saved in this browser only') +
     '</span></div><div class="r">\u203a</div></button>' +
-    (isStandalone() ? '' : '<button class="row" data-act="install"><div class="l"><b>Install on your phone</b><span>Home screen icon, full screen, works offline</span></div><div class="r">\u203a</div></button>') +
-    '<button class="row" data-act="cleanup"><div class="l"><b>Clean up in a spreadsheet</b><span>Export to CSV, edit in Excel or Sheets, bring it back</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="export"><div class="l"><b>Download a backup</b><span>' + esc(backupAge()) + '</span></div><div class="r">›</div></button>' +
-    '<button class="row" data-act="restore"><div class="l"><b>Restore a backup</b><span>Replaces everything with a backup file</span></div><div class="r">›</div></button>' +
+    '<button class="row caution" data-act="restore"><div class="l"><b>Restore a backup</b><span>Replaces everything you have now. What you have now is kept as a restore point first.</span></div><div class="r">\u203a</div></button>' +
     (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="signout"><div class="l"><b>Sign out</b><span>' + esc(store.email || '') + '</span></div><div class="r">›</div></button>' : '') +
-    '<button class="row" data-act="theme"><div class="l"><b>Appearance</b><span>' + ({ light: 'Light', dark: 'Dark' }[localTheme()] || 'Match device') + '</span></div><div class="r">›</div></button>' +
     '</div></section>';
   h += '<p class="note">' + (store.mode === 'cloud' ? 'Synced to your Supabase database. A copy is kept on this phone so it works offline.' : 'Saved in this browser only. Add your Supabase keys in config.js to sync.') + '</p>';
   return h;
