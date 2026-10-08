@@ -607,6 +607,8 @@ nav.tabs button[aria-current="page"] .ms .pi-line + .pi-fill{display:block}
 @media (min-width:768px){ .ins-trends > .tr-kind{grid-column:1 / -1} }
 .panel.sug{padding:4px 16px 14px;margin-bottom:12px}.sugmsg{margin:2px 0 10px;font-size:14px;line-height:1.45}
 .savewarn{background:var(--accent-soft);color:var(--ink);border-radius:14px;padding:12px 14px;margin:12px 0 0;font-size:14px}.savewarn p{margin:0 0 6px}.savewarn p:last-of-type{margin-bottom:8px}
+.aitag{font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:1px 6px;margin-right:2px}
+.aichat{padding:8px 12px;max-height:46vh;overflow:auto;display:grid;gap:8px}.aimsg{padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;white-space:pre-wrap;max-width:88%}.aimsg.user{justify-self:end;background:var(--accent);color:#fff}.aimsg.assistant{justify-self:start;background:var(--sunk)}
 </style>
 </head>
 <body>
@@ -1207,7 +1209,7 @@ function mergeBy(a, b, key) {
 var META_LISTS = {
   cats: function (c) { return c.name; }, tags: function (t) { return t; }, subs: function (x) { return x.id; },
   accounts: function (x) { return x.name; }, budgets: function (x) { return x.key; }, rules: function (x) { return x.match + '>' + x.tag; },
-  plProviders: function (x) { return x.name; }, dismissed: function (x) { return x; },
+  plProviders: function (x) { return x.name; }, dismissed: function (x) { return x; }, aiNotes: function (x) { return x.key; },
   tagRules: function (x) { return x.tag + '|' + (x.cat || '') + '|' + (x.sub || ''); }
 };
 function metaKeys(m) {
@@ -1228,7 +1230,9 @@ function merge3(local, remote, base, key) {
 function mergeMeta(local, remote) {
   if (!remote) return local;
   var base = store.base.meta || null;
-  var m = JSON.parse(JSON.stringify(local));
+  // settings only the other device has (say, a new device's first sync) are kept; where both
+  // have one, this device's wins. Lists, venues and subcategories are merged below.
+  var m = Object.assign(JSON.parse(JSON.stringify(remote)), JSON.parse(JSON.stringify(local)));
   Object.keys(META_LISTS).forEach(function (k) {
     m[k] = base ? merge3(local[k], remote[k], base[k], META_LISTS[k]) : mergeBy(local[k], remote[k], META_LISTS[k]);
   });
@@ -1336,7 +1340,7 @@ function connect() {
         res.data.forEach(function (d) { absorb(d.id, d.body); }); histSnap();
         normalize(); saveLocal(); markAll();
       } else if (allTx().length || S.ledger.length) markAll();
-      store.mode = 'cloud'; setSync('Synced'); render(); flush();
+      store.mode = 'cloud'; setSync('Synced'); render(); flush(); aiMaybe();
     });
   }).catch(function (e) {
     store.err = errText(e);
@@ -1654,6 +1658,12 @@ function allDoubts() {
       add(t, { kind: 'dup', msg: 'Logged twice? Another ' + (t.note || plain(t.cat || '')) + ' for ' + money(t.amt) + ' is on the same day.', fix: { label: 'Delete this copy', remove: true } });
     });
   });
+  (S.meta.aiNotes || []).forEach(function (n) {
+    var t = findTx(n.id); if (!t || gone[n.key] || t.amt + '|' + t.d + '|' + (t.cat || '') !== n.sig) return;
+    var fix = n.cat && n.cat !== t.cat && catObj(n.cat) ? { label: 'Move to ' + plain(n.cat), apply: function (x) { x.cat = n.cat; } }
+      : n.amt > 0 && Math.abs(n.amt - t.amt) > 0.005 ? { label: 'Change to ' + money(n.amt), amt: n.amt, apply: function (x) { x.amt = n.amt; } } : null;
+    out.push({ kind: 'ai', ai: true, msg: n.issue, fix: fix, t: t, key: n.key });
+  });
   return out.sort(function (a, b) { return a.t.d < b.t.d ? 1 : -1; });
 }
 function applyDoubt(d) {
@@ -1676,7 +1686,7 @@ function suggestSheet() {
     : '<p style="margin-top:0">' + (list.length === 1 ? 'One entry looks' : list.length + ' entries look') + ' like a slip. Nothing changes unless you approve it.</p>' +
       list.map(function (d, i) {
         return '<div class="panel sug"><div class="row"><span class="av">' + esc(avatar(d.t.cat)) + '</span><div class="l"><b>' + esc(d.t.note || plain(d.t.cat || '')) + '</b><span>' + sugDay(d.t.d) + (d.t.cat ? ', ' + esc(plain(d.t.cat)) : '') + '</span></div><div class="r">' + money(d.t.amt) + '</div></div>' +
-          '<p class="sugmsg">' + esc(d.msg) + '</p><div class="wrap">' +
+          '<p class="sugmsg">' + (d.ai ? '<b class="aitag">AI</b> ' : '') + esc(d.msg) + '</p><div class="wrap">' +
           (d.fix ? '<button class="chip" data-sgfix="' + i + '" aria-pressed="true">' + esc(d.fix.label) + '</button>' : '') +
           '<button class="chip" data-sgedit="' + i + '">Edit</button><button class="chip" data-sgok="' + i + '">It\u2019s right</button></div></div>';
       }).join('');
@@ -1684,6 +1694,100 @@ function suggestSheet() {
     el.querySelectorAll('[data-sgfix]').forEach(function (b) { b.addEventListener('click', function () { var d = list[+b.dataset.sgfix]; applyDoubt(d); render(); suggestSheet(); toastUndo(d.fix.remove ? 'Deleted the copy' : 'Changed'); }); });
     el.querySelectorAll('[data-sgedit]').forEach(function (b) { b.addEventListener('click', function () { var t = findTx(list[+b.dataset.sgedit].t.id); if (t) txSheet(t); }); });
     el.querySelectorAll('[data-sgok]').forEach(function (b) { b.addEventListener('click', function () { dismissDoubt(list[+b.dataset.sgok]); render(); suggestSheet(); }); });
+  });
+}
+// ---------- AI assistant (optional): a weekly look at new entries, and questions about your money ----------
+// Runs through the ledger-ai Supabase function, which holds the API key. Off until you turn it on.
+function aiOn() { return !!(S.meta.ai && S.meta.ai.on); }
+function aiReady() { return aiOn() && store.mode === 'cloud' && !!store.sb; }
+function aiCall(body) {
+  return store.sb.functions.invoke('ledger-ai', { body: body }).then(function (r) {
+    if (!r.error) { if (r.data && r.data.error) throw new Error(r.data.error); return r.data || {}; }
+    var res = r.error.context;
+    return (res && res.json ? res.json().catch(function () { return {}; }) : Promise.resolve({})).then(function (j) {
+      throw new Error((j && j.error) || (/not found|404/i.test(r.error.message || '') ? 'The ledger-ai function is not deployed yet.' : r.error.message) || 'The AI request failed');
+    });
+  });
+}
+// Entries since the last look (the last 30 days the first time), at most 200, sent with
+// only date, type, amount, category and note.
+function aiReview() {
+  if (!aiReady()) return Promise.resolve(null);
+  var ai = S.meta.ai, since = ai.reviewedTo || addDays(today(), -30);
+  var pick = allTx().filter(function (t) { return (t.t === 'exp' || t.t === 'inc') && !t.feeOf && !t.propOf && t.d > since && t.d <= today(); })
+    .sort(function (a, b) { return a.d < b.d ? -1 : 1; }).slice(-200);
+  var done = function (notes, model) { ai.lastRun = today(); ai.reviewedTo = addDays(today(), -1); if (model) ai.model = model; delete ai.err; mark('meta'); render(); return notes; };
+  if (!pick.length) return Promise.resolve(done(0));
+  var items = pick.map(function (t, i) { return { i: i, d: t.d, t: t.t, amt: t.amt, cat: t.cat || '', note: t.note || '' }; });
+  return aiCall({ action: 'review', items: items, cats: S.meta.cats.map(function (c) { return c.name; }) }).then(function (res) {
+    var have = {}; (S.meta.aiNotes || []).forEach(function (n) { have[n.key] = 1; });
+    var notes = (res.findings || []).map(function (f) {
+      var t = pick[f.i]; if (!t) return null;
+      return { key: 'ai:' + t.id + ':' + t.amt + ':' + t.d + ':' + (t.cat || ''), id: t.id, sig: t.amt + '|' + t.d + '|' + (t.cat || ''), issue: String(f.issue || '').slice(0, 300), cat: f.cat, amt: f.amt };
+    }).filter(function (n) { return n && n.issue && !have[n.key]; });
+    S.meta.aiNotes = (S.meta.aiNotes || []).concat(notes).slice(-100);
+    return done(notes.length, res.model);
+  }, function (e) { ai.err = String(e.message || e); mark('meta'); throw e; });
+}
+// The passive part: at most once a week, a few seconds after the app opens and syncs.
+function aiMaybe() {
+  if (!aiReady() || (S.meta.ai.lastRun && S.meta.ai.lastRun > addDays(today(), -7))) return;
+  clearTimeout(aiMaybe.t); aiMaybe.t = setTimeout(function () { aiReview().catch(function () { }); }, 4000);
+}
+// What a question gets to see: monthly totals, top notes, budgets, subscriptions, people. No ids, no wallets.
+function aiContext() {
+  var m0 = monthOf(today()), L = ['Today is ' + today() + '. Amounts in SGD.'];
+  for (var k = 5; k >= 0; k--) {
+    var m = addMonth(m0, -k); if (!S.tx[m]) continue;
+    var st = monthStats(m), inc = incomeBy(m);
+    var cats = Object.keys(st.byCat).sort(function (a, b) { return st.byCat[b] - st.byCat[a]; }).map(function (c) { return plain(c) + ' ' + r2(st.byCat[c]); }).join(', ');
+    L.push(monthLabel(m) + (m === m0 ? ' (so far)' : '') + ': spent ' + r2(st.spend) + ', paid back by friends ' + r2(st.reimb) + ', earned from work ' + inc.work + ', other income ' + inc.other + '. By category: ' + (cats || 'none'));
+  }
+  var since = addDays(today(), -90), g = {};
+  allTx().forEach(function (t) { if (t.t !== 'exp' || t.d < since || !t.note) return; var k = t.note.trim(); g[k] = g[k] || { n: 0, s: 0, cat: plain(t.cat || '') }; g[k].n++; g[k].s += ea(t); });
+  var top = Object.keys(g).sort(function (a, b) { return g[b].s - g[a].s; }).slice(0, 20);
+  if (top.length) L.push('Biggest notes in the last 90 days: ' + top.map(function (k) { return k + ' (' + g[k].cat + ') ' + g[k].n + 'x, ' + r2(g[k].s); }).join('; '));
+  if (S.meta.budgets.length) L.push('Monthly budgets: ' + S.meta.budgets.map(function (b) { return b.key.slice(4) + ' ' + b.amt; }).join(', '));
+  var subs = S.meta.subs.filter(function (x) { return x.active !== false; });
+  if (subs.length) L.push('Subscriptions: ' + subs.map(function (x) { return x.name + ' ' + x.amt + ' ' + cycleLabel(x.cycle); }).join(', '));
+  var ppl = {}; S.debts.forEach(function (d) { ppl[d.person] = r2((ppl[d.person] || 0) + d.amt); });
+  var owed = Object.keys(ppl).filter(function (n) { return Math.abs(ppl[n]) > 0.005; });
+  if (owed.length) L.push('People balances (positive means they owe me): ' + owed.map(function (n) { return n + ' ' + ppl[n]; }).join(', '));
+  return L.join('\n');
+}
+function aiSheet() {
+  var ai = S.meta.ai || {}, on = aiOn(), cloud = store.mode === 'cloud', chat = UI.aiChat = UI.aiChat || [];
+  var who = ai.model ? esc(ai.model) : 'the AI';
+  var body = '<p style="margin-top:0">Once a week, new entries are sent to ' + who + ' to spot likely mistakes; anything it finds waits in Suggestions for you to approve. You can also ask it about your spending. Only dates, amounts, categories and notes are sent.</p>' +
+    (!cloud ? '<p class="neg">This needs sync: sign in with your Supabase account first.</p>' : '') +
+    '<div class="seg" id="aion"><button data-on="1" aria-pressed="' + on + '">On</button><button data-on="0" aria-pressed="' + !on + '">Off</button></div>' +
+    (on ? '<div class="kv" style="margin-top:12px"><span>Last review</span><span>' + (ai.lastRun ? dayYear(ai.lastRun) : 'Not yet') + '</span>' +
+      (ai.err ? '<span>Problem</span><span class="neg" style="white-space:normal">' + esc(ai.err) + '</span>' : '') + '</div>' +
+      '<div class="actions"><button class="btn ghost" id="airun"' + (cloud ? '' : ' disabled') + '>Review new entries now</button></div>' +
+      '<label class="f">Ask about your money</label><div class="panel aichat">' +
+      (chat.length ? chat.map(function (m) { return '<div class="aimsg ' + m.role + '">' + esc(m.content) + '</div>'; }).join('') : '<div class="note" style="padding:10px 0">For example: why was last month expensive? Where can I cut $100? How much do I spend with Alaina?</div>') +
+      '</div><textarea class="t" id="aiq" rows="2" placeholder="Ask a question"></textarea>' +
+      '<div class="actions">' + (chat.length ? '<button class="btn ghost" id="aiclr">Clear</button>' : '') + '<button class="btn" id="aiask"' + (cloud ? '' : ' disabled') + '>Ask</button></div>' +
+      '<p class="note">Each question sends a summary of the last 6 months. Nothing in your data changes from here.</p>' : '');
+  openSheet('AI assistant', body, function (el) {
+    $('#aion', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-on]'); if (!b) return;
+      S.meta.ai = Object.assign({}, S.meta.ai || {}, { on: b.dataset.on === '1' }); mark('meta'); aiSheet(); render();
+    });
+    var run = $('#airun', el); if (run) run.addEventListener('click', function () {
+      run.disabled = true; run.textContent = 'Reviewing\u2026';
+      aiReview().then(function (n) { aiSheet(); toast(n ? n + ' new suggestion' + (n > 1 ? 's' : '') + ', see Suggestions' : 'Nothing new looks wrong'); }, function (e) { aiSheet(); toast(String(e.message || e)); });
+    });
+    var clr = $('#aiclr', el); if (clr) clr.addEventListener('click', function () { UI.aiChat = []; aiSheet(); });
+    var ask = $('#aiask', el); if (ask) ask.addEventListener('click', function () {
+      var q = $('#aiq', el).value.trim(); if (!q) return;
+      var hist = chat.slice(-6); chat.push({ role: 'user', content: q }); ask.disabled = true; ask.textContent = 'Thinking\u2026';
+      aiCall({ action: 'ask', question: q, context: aiContext(), history: hist }).then(function (r) {
+        chat.push({ role: 'assistant', content: r.answer || '(no answer)' }); if (r.model) { S.meta.ai.model = r.model; }
+        aiSheet();
+      }, function (e) { chat.pop(); aiSheet(); toast(String(e.message || e)); });
+    });
+    var box = el.querySelector('.aichat'); if (box) box.scrollTop = box.scrollHeight;
   });
 }
 // ---------- rendering ----------
@@ -2337,6 +2441,7 @@ function renderMore() {
     '<button class="row" data-act="budgets"><div class="l"><b>Budgets</b><span>' + S.meta.budgets.length + ' set</span></div><div class="r">›</div></button>' +
     '<button class="row" data-act="basis"><div class="l"><b>Investment accounting</b><span>' + (cashBasis() ? 'Cash basis, balances not counted' : 'Balances count as your money') + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="cats"><div class="l"><b>Categories and tags</b><span>' + S.meta.cats.length + ' categories, ' + S.meta.tags.length + ' tags</span></div><div class="r">›</div></button>' +
+    '<button class="row" data-act="ai"><div class="l"><b>AI assistant</b><span>' + (aiOn() ? 'On' + (S.meta.ai.lastRun ? ', last review ' + dayLabel(S.meta.ai.lastRun) : '') : 'Off. Weekly check for mistakes, and questions about your money') + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="suggest"><div class="l"><b>Suggestions</b><span>' + (function () { var n = allDoubts().length; return n ? n + ' entr' + (n > 1 ? 'ies look' : 'y looks') + ' like a slip' : 'Nothing looks off'; })() + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="health"><div class="l"><b>Data health</b><span>' + (function () { var n = auditData().length; return n ? n + ' thing' + (n > 1 ? 's' : '') + ' to check' : 'Everything is consistent'; })() + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="sync"><div class="l"><b>Sync status</b><span>' +
@@ -5506,6 +5611,7 @@ function onClick(e) {
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
     else if (a === 'suggest') suggestSheet();
+    else if (a === 'ai') aiSheet();
     else if (a === 'next') { UI.month = addMonth(UI.month, 1); render(); }
     else if (a === 'add-tx') txSheet();
     else if (a === 'add-ledger') ledgerSheet();
