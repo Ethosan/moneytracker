@@ -5396,7 +5396,14 @@ function onClick(e) {
     else if (a === 'csvinv') exportCsv('inv');
     else if (a === 'cleanup') csvImportSheet();
     else if (a === 'restore') restoreSheet();
-    else if (a === 'signout') { store.sb.auth.signOut().then(function () { try { localStorage.removeItem(LS_KEY); localStorage.removeItem('ledger-dirty'); } catch (e) { } S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [] }; store.mode = 'auth'; render(); }); }
+    else if (a === 'signout') {
+      var unsynced = Object.keys(store.dirty).length;
+      if (unsynced && !confirm(unsynced + ' change' + (unsynced > 1 ? 's haven’t' : ' hasn’t') + ' reached the cloud yet and will be lost. Sign out anyway?')) return;
+      store.sb.auth.signOut().then(function () {
+        // undo history, sync bookkeeping and restore points all hold copies of this account's data
+        try { [LS_KEY, 'ledger-dirty', BASE_KEY, HIST.KEY, RP_KEY].forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { }
+        store.dirty = {}; store.base = {}; HIST.list = []; HIST.shadow = {}; HIST.ready = false;
+        S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [] }; store.mode = 'auth'; render(); }); }
     else if (a === 'stmt') stmtSheet();
     else if (a === 'inbox') inboxSheet();
     else if (a === 'clear-rules') { if (confirm('Remove all auto-tag rules?')) { S.meta.rules = []; mark('meta'); render(); } }
