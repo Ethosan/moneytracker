@@ -3370,7 +3370,10 @@ function csvDiff(rows) {
         // Change only what the sheet holds. Splits, fee links, PayLater details and anything
         // else the CSV has no column for stay as they were.
         var u = JSON.parse(JSON.stringify(old));
-        u.d = t.d; u.t = t.t; u.amt = t.amt; u.note = t.note; u.tags = t.tags;
+        u.d = t.d; u.amt = t.amt;
+        if (idx.type > -1) u.t = t.t;
+        if (idx.note > -1) u.note = t.note;
+        if (idx.tags > -1) u.tags = t.tags;
         if (idx.category > -1) u.cat = t.cat;
         if (idx.subcategory > -1) u.sub = t.sub;
         if (idx['paid with'] > -1 && pw) { delete u.pm; delete u.plp; delete u.acct; if (t.pm) { u.pm = t.pm; u.plp = t.plp; } else if (t.acct) u.acct = t.acct; }
@@ -4648,7 +4651,7 @@ function tableToRows(rows) {
     r.forEach(function (h, j) {
       // a date column is never the amount, even when called "Value date"
       if (/date|time/.test(h)) { if (d < 0) d = j; return; }
-      if (a < 0 && /amount|total|fare|price|paid|debit|withdraw|sgd|value/.test(h) && !/credit|deposit/.test(h)) a = j;
+      if (a < 0 && /amount|total|fare|price|paid|debit|withdraw|sgd|value/.test(h) && !(/credit|deposit/.test(h) && !/debit|withdraw/.test(h))) a = j;
       else if (/desc|detail|merchant|service|pick|drop|destination|from|to\b|item|name|remark|type|booking|category|particular|ref/.test(h)) ds.push(j);
     });
     if (d > -1 && a > -1) { hi = i; cd = d; ca = a; cdesc = ds; }
