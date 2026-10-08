@@ -5926,7 +5926,20 @@ function boot() {
   render();
   if (q.get('add')) txSheet();
   connect();
-  if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(function () { });
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    // Check for a new version on every open, and when one takes over, reload once so the
+    // page you see is the version just installed rather than the copy kept for offline use.
+    var hadController = !!navigator.serviceWorker.controller, reloaded = false;
+    navigator.serviceWorker.addEventListener('controllerchange', function () {
+      if (!hadController || reloaded) return; reloaded = true;
+      try { sessionStorage.setItem('ledger-updated', '1'); } catch (e) { }
+      location.reload();
+    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function (reg) {
+      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') reg.update().catch(function () { }); });
+    }).catch(function () { });
+    try { if (sessionStorage.getItem('ledger-updated')) { sessionStorage.removeItem('ledger-updated'); setTimeout(function () { toast('Updated to the latest version'); }, 600); } } catch (e) { }
+  }
 }
 window.__ledger = { S: function () { return S; }, applyImport: applyImport, render: render, UI: UI };
 if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
