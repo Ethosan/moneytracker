@@ -1543,6 +1543,12 @@ function auditData() {
   if (xf.length) out.push({ sev: 'look', key: 'xfer', title: xf.length + ' transfer' + (xf.length > 1 ? 's are' : ' is') + ' missing an account', sub: 'Open it in Activity and pick both ends.' });
   var future = allTx().filter(function (t) { return t.d > addDays(today(), 1); });
   if (future.length) out.push({ sev: 'look', key: 'future', title: future.length + ' transaction' + (future.length > 1 ? 's are' : ' is') + ' dated in the future', sub: future.slice(0, 3).map(function (t) { return (t.note || plain(t.cat)) + ', ' + dayLabel(t.d); }).join('; ') });
+  // e.g. 31 Feb from an older statement import; the day is moved back to the month's last day
+  function lastDay(d) { return new Date(+d.slice(0, 4), +d.slice(5, 7), 0).getDate(); }
+  var badDay = allTx().filter(function (t) { return +t.d.slice(8, 10) < 1 || +t.d.slice(8, 10) > lastDay(t.d) || +t.d.slice(5, 7) < 1 || +t.d.slice(5, 7) > 12; });
+  if (badDay.length) out.push({ sev: 'fix', key: 'badday', title: badDay.length + ' transaction' + (badDay.length > 1 ? 's have' : ' has') + ' a date that doesn’t exist',
+    sub: badDay.slice(0, 3).map(function (t) { return (t.note || plain(t.cat)) + ', ' + t.d; }).join('; ') + '. Fix moves each to the last real day of its month.',
+    fix: function () { var touched = {}; badDay.forEach(function (t) { touched[monthOf(t.d)] = 1; var mo = Math.min(12, Math.max(1, +t.d.slice(5, 7))), m = t.d.slice(0, 5) + pad2(mo); t.d = m + '-' + pad2(Math.min(Math.max(1, +t.d.slice(8, 10)), lastDay(m + '-01'))); touched[monthOf(t.d)] = 1; }); normalize(); Object.keys(touched).forEach(markMonth); } });
   var over = S.bills.filter(function (b) { return billPaid(b) - billDue(b) > 0.01; });
   if (over.length) out.push({ sev: 'fix', key: 'over', title: over.length + ' PayLater bill' + (over.length > 1 ? 's show' : ' shows') + ' more paid than owed',
     sub: over.map(function (b) { return billProv(b) + ', ' + periodLabel(b.from) + ': ' + money(r2(billPaid(b) - billDue(b))) + ' extra'; }).join('; ') + '. Usually interest or a fee. Fix records each difference as a charge on that bill.',
