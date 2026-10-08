@@ -16,7 +16,7 @@
 :root{
   --bg:#F2F4F8;--surface:#FFFFFF;--sunk:#EBEEF4;--ink:#0D1017;--muted:#5D6472;--line:#E3E7EE;
   --accent:#2E5BFF;--accent-soft:#E6ECFF;--accent-ink:#FFFFFF;
-  --gain:#0E9F6E;--gain-soft:#E1F6EE;--loss:#E0424E;--loss-soft:#FDE8EA;--rose:#E3337A;--rose-soft:#FDE6EF;
+  --gain:#0E9F6E;--gain-soft:#E1F6EE;--loss:#E0424E;--loss-soft:#FDE8EA;--warn:#C27C0E;--rose:#E3337A;--rose-soft:#FDE6EF;
   --hero:#0D1017;--hero-ink:#FFFFFF;--hero-muted:#9AA3B5;
   --seg1:#2E5BFF;--seg2:#6E8CFF;--seg3:#A9BBFF;--seg4:#CDD5E4;--seg5:#E1E6EF;
   --shadow:0 1px 2px rgba(22,34,70,.05),0 8px 24px rgba(22,34,70,.06);
@@ -25,14 +25,14 @@
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0A0C11;--surface:#141821;--sunk:#1C212C;--ink:#EEF1F7;--muted:#98A1B3;--line:#252B37;
   --accent:#6C8CFF;--accent-soft:#1B2447;--accent-ink:#0A0C11;
-  --gain:#34D399;--gain-soft:#10281F;--loss:#FF6B75;--loss-soft:#33161A;--rose:#FF6FA8;--rose-soft:#351725;
+  --gain:#34D399;--gain-soft:#10281F;--loss:#FF6B75;--loss-soft:#33161A;--warn:#F5B547;--rose:#FF6FA8;--rose-soft:#351725;
   --hero:#1A2033;--hero-ink:#FFFFFF;--hero-muted:#A3ACC0;
   --seg1:#6C8CFF;--seg2:#4F6AD0;--seg3:#3A4D94;--seg4:#2B3346;--seg5:#222836;
   --shadow:0 1px 2px rgba(0,0,0,.3);color-scheme:dark;}}
 :root[data-theme="dark"]{
   --bg:#0A0C11;--surface:#141821;--sunk:#1C212C;--ink:#EEF1F7;--muted:#98A1B3;--line:#252B37;
   --accent:#6C8CFF;--accent-soft:#1B2447;--accent-ink:#0A0C11;
-  --gain:#34D399;--gain-soft:#10281F;--loss:#FF6B75;--loss-soft:#33161A;--rose:#FF6FA8;--rose-soft:#351725;
+  --gain:#34D399;--gain-soft:#10281F;--loss:#FF6B75;--loss-soft:#33161A;--warn:#F5B547;--rose:#FF6FA8;--rose-soft:#351725;
   --hero:#1A2033;--hero-ink:#FFFFFF;--hero-muted:#A3ACC0;
   --seg1:#6C8CFF;--seg2:#4F6AD0;--seg3:#3A4D94;--seg4:#2B3346;--seg5:#222836;
   --shadow:0 1px 2px rgba(0,0,0,.3);color-scheme:dark;}
@@ -53,8 +53,20 @@ header.top h1{font:700 26px/1.15 "Geist",sans-serif;letter-spacing:-.03em;margin
 .monthsw button{background:none;border:0;width:34px;height:34px;border-radius:999px;font-size:20px;color:var(--muted)}
 .monthsw button:hover{background:var(--sunk)}
 .monthsw span{min-width:0;white-space:nowrap;padding:0 4px;text-align:center;font-weight:600;font-size:14.5px}
-.sync{font-size:11.5px;color:var(--muted);white-space:nowrap}
+.sync{font-size:11.5px;color:var(--muted);white-space:nowrap;border:0;background:none;padding:6px 2px;margin:0;font:inherit;font-size:11.5px;cursor:pointer;border-radius:8px}
 .sync:not(:empty)::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--gain);margin-right:5px;vertical-align:1px}
+/* the dot is the whole status on a phone, so every state gets its own colour */
+.sync[data-state=local]::before{background:var(--muted)}
+.sync[data-state=busy]::before{background:var(--warn);animation:syncpulse 1.2s ease-in-out infinite}
+.sync[data-state=off]::before{background:var(--warn)}
+.sync[data-state=err]::before{background:var(--loss)}
+.sync[data-state=err]{color:var(--loss);font-weight:600}
+@keyframes syncpulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.sync[data-state=busy]::before{animation:none}}
+.banner.err{background:var(--loss-soft)}
+.banner.err b{color:var(--ink)}
+.banner.err b::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--loss);margin-right:8px;vertical-align:1px}
+.banner.err span{color:var(--ink);opacity:.8}
 .hr{display:flex;align-items:center;gap:6px}
 button.icon{background:var(--surface);border:0;width:38px;height:38px;border-radius:999px;color:var(--ink);display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow)}
 button.icon .ms{font-size:22px}
@@ -302,6 +314,8 @@ input[type="checkbox"]{width:22px;height:22px}
 header.top{gap:6px}
 .monthsw{min-width:0}
 @media (min-width:480px){ .sync{max-width:none;color:var(--muted)} .sync:not(:empty)::before{margin-right:5px} }
+.sync[data-state=err]{max-width:none;color:var(--loss)}
+.sync[data-state=err]::before{margin-right:5px}
 .av.mv{background:var(--accent-soft);color:var(--accent);font-size:17px}
 .row .r.mut{color:var(--muted);font-weight:500}
 
@@ -1301,7 +1315,19 @@ function syncHint(t) {
   if (/quota|payload|too large|413/i.test(t)) return 'The data is too large for one write. Export a backup and tell Claude.';
   return 'Open the Supabase dashboard and check the project is running.';
 }
-function setSync(t) { var el = $('#sync'); if (el) el.textContent = t; }
+// The state, not just the words: on a phone the dot is all you see.
+function syncState(t) {
+  if (!t) return '';
+  if (/problem/i.test(t)) return 'err';
+  if (/offline/i.test(t)) return 'off';
+  if (/saving|checking/i.test(t)) return 'busy';
+  return store.mode === 'local' ? 'local' : 'ok';
+}
+function setSync(t) {
+  var el = $('#sync'); if (!el) return;
+  el.textContent = t; el.dataset.state = syncState(t);
+  el.title = t ? t + '. Tap for details.' : ''; el.setAttribute('aria-label', t ? 'Sync: ' + t + '. Open sync details' : 'Sync details');
+}
 function markAll() { mark('meta'); mark('ledger'); mark('debts'); mark('inbox'); mark('checks'); mark('bills'); Object.keys(S.tx).forEach(markMonth); }
 
 function docsToState(rows) {
@@ -1365,6 +1391,8 @@ function pull() {
   });
 }
 document.addEventListener('keydown', function (e) {
+  var rb = e.target && e.target.closest && e.target.closest('[role="button"]');
+  if (rb && rb.tagName !== 'BUTTON' && (e.key === 'Enter' || e.key === ' ') && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); rb.click(); return; }
   var tb = e.target && e.target.closest && e.target.closest('.ins-tabs [role="tab"]');
   if (tb && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) {
     var all = [].slice.call(document.querySelectorAll('.ins-tabs [role="tab"]')), i = all.indexOf(tb);
@@ -1804,7 +1832,7 @@ function nav() {
     '<button class="add" data-act="add-tx" aria-label="Add transaction"><span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/></svg></span></button>' + b('insights', 'Insights', 'ins') + b('pnl', 'Accounts', 'pnl') + '</div></nav>';
 }
 function hdRight() {
-  return '<div class="hr"><span class="sync" id="sync"></span>' + (HIST.list.length ? '<button class="icon sm" data-act="history" aria-label="Change history">' + ICON.history + '</button>' : '') + (UI.tab === 'more' ? '' : '<button class="icon" data-tab="more" aria-label="More">' + ICON.more + '</button>') + '</div>';
+  return '<div class="hr"><button class="sync" id="sync" data-act="sync"></button>' + (HIST.list.length ? '<button class="icon sm" data-act="history" aria-label="Change history">' + ICON.history + '</button>' : '') + (UI.tab === 'more' ? '' : '<button class="icon" data-tab="more" aria-label="More">' + ICON.more + '</button>') + '</div>';
 }
 function monthSwitch() {
   return '<div class="monthsw"><button data-act="prev" aria-label="Previous month">‹</button><span>' + monthLabel(UI.month) +
@@ -1885,6 +1913,7 @@ function renderHome() {
   }
   var dup = doubleCounts();
   if (dup.length) h += '<button class="banner" data-act="dupes"><b>' + dup.length + ' repayment' + (dup.length > 1 ? 's look' : ' looks') + ' recorded twice</b><span>Once as income and once against a balance. Tap to keep one.</span></button>';
+  if (store.mode === 'error') h += '<button class="banner err" data-act="sync"><b>Your changes aren\u2019t reaching the cloud</b><span>They are saved on this device. ' + esc(syncHint(store.err || '')) + ' Tap for details.</span></button>';
   if (S.inbox.length) h += '<button class="banner" data-act="inbox"><b>' + S.inbox.length + ' statement rows to review</b><span>Tag Alaina rides and add them</span></button>';
   var sgN = allDoubts().length;
   if (sgN) h += '<button class="banner" data-act="suggest"><b>' + (sgN === 1 ? '1 entry looks' : sgN + ' entries look') + ' like a slip</b><span>Review the suggestions. Nothing changes until you approve.</span></button>';
