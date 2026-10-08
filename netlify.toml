@@ -1,0 +1,16 @@
+# Publish only the app. Without this Netlify serves the whole repo, so README.md,
+# PRODUCT.md and the supabase/ folder would be readable at your site's address.
+[build]
+  command = "rm -rf dist && mkdir dist && cp -r index.html sw.js config.js manifest.webmanifest fonts icons dist/"
+  publish = "dist"
+
+# Always check for a new service worker and page, so an update reaches the phone on the next open.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
