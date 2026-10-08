@@ -3466,7 +3466,10 @@ function restoreSheet() {
       var o = JSON.parse(text); if (!o || !o.meta || !o.tx) throw 0;
       saveRestorePoint(label || 'Before restoring a backup');
       delete o.exported; delete o.app;
-      S = o; normalize(); markAll(); closeSheet(); UI.month = monthOf(today()); render();
+      var before = Object.keys(S.tx);
+      S = o; normalize(); markAll();
+      // months the backup doesn't have must be removed from the cloud too, or a fresh sign-in brings them back
+      before.forEach(function (m) { if (!S.tx[m]) markMonth(m); }); closeSheet(); UI.month = monthOf(today()); render();
       toastUndo('Backup restored, ' + allTx().length + ' transactions');
     } catch (e) { $('#rerr', el).textContent = 'That is not a ledger backup.'; }
   }
