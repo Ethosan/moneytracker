@@ -605,6 +605,8 @@ nav.tabs button[aria-current="page"] .ms .pi-line + .pi-fill{display:block}
 .tr-legend.inc b{background:var(--gain)}
 .tr-legend.inc b.partial{background:repeating-linear-gradient(135deg,var(--gain) 0 2px,transparent 2px 5px);outline-color:var(--gain)}
 @media (min-width:768px){ .ins-trends > .tr-kind{grid-column:1 / -1} }
+.panel.sug{padding:4px 16px 14px;margin-bottom:12px}.sugmsg{margin:2px 0 10px;font-size:14px;line-height:1.45}
+.savewarn{background:var(--accent-soft);color:var(--ink);border-radius:14px;padding:12px 14px;margin:12px 0 0;font-size:14px}.savewarn p{margin:0 0 6px}.savewarn p:last-of-type{margin-bottom:8px}
 </style>
 </head>
 <body>
@@ -1205,7 +1207,7 @@ function mergeBy(a, b, key) {
 var META_LISTS = {
   cats: function (c) { return c.name; }, tags: function (t) { return t; }, subs: function (x) { return x.id; },
   accounts: function (x) { return x.name; }, budgets: function (x) { return x.key; }, rules: function (x) { return x.match + '>' + x.tag; },
-  plProviders: function (x) { return x.name; },
+  plProviders: function (x) { return x.name; }, dismissed: function (x) { return x; },
   tagRules: function (x) { return x.tag + '|' + (x.cat || '') + '|' + (x.sub || ''); }
 };
 function metaKeys(m) {
@@ -1590,6 +1592,100 @@ function healthSheet() {
     var all = $('#hall', el); if (all) all.addEventListener('click', function () { fixable.forEach(function (x) { x.fix(); }); normalize(); render(); healthSheet(); toast('Fixed ' + fixable.length); });
   });
 }
+// ---------- suggestions: entries that look like slips, changed only when you approve ----------
+function median(a) { var x = a.slice().sort(function (p, q) { return p - q; }), n = x.length; return n ? (n % 2 ? x[(n - 1) / 2] : (x[n / 2 - 1] + x[n / 2]) / 2) : 0; }
+function noteKey(n) { return String(n || '').trim().toLowerCase(); }
+function sugDay(d) { return d.slice(0, 4) === today().slice(0, 4) ? dayLabel(d) : dayYear(d); } // the year only when it isn't this one
+function lastDayOf(m) { return new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate(); }
+// For each note you have logged, what you usually pay and which category you usually pick.
+function noteHabits() {
+  var g = {};
+  allTx().forEach(function (t) {
+    if (t.t !== 'exp' || t.feeOf || t.propOf || !t.note) return;
+    var o = g[noteKey(t.note)] || (g[noteKey(t.note)] = { amts: [], cats: {}, n: 0 });
+    o.amts.push(t.amt); o.cats[t.cat] = (o.cats[t.cat] || 0) + 1; o.n++;
+  });
+  Object.keys(g).forEach(function (k) {
+    var o = g[k]; o.med = r2(median(o.amts));
+    o.top = Object.keys(o.cats).sort(function (a, b) { return o.cats[b] - o.cats[a]; })[0];
+  });
+  return g;
+}
+// What looks wrong with one transaction and, where the correction is obvious, the fix.
+// Nothing is changed here. onSave leaves out the category check: you just picked it.
+function txDoubts(t, habits, onSave) {
+  var out = [], h = t.t === 'exp' && t.note ? habits[noteKey(t.note)] : null, nm = t.note || plain(t.cat || '');
+  if (h && h.n >= 4 && h.med > 0) {
+    var hi = t.amt >= h.med * 5 && t.amt - h.med >= 20, lo = t.amt <= h.med / 5 && h.med - t.amt >= 5;
+    if (hi || lo) {
+      var guess = r2(hi ? t.amt / 10 : t.amt * 10), close = Math.abs(guess - h.med) <= h.med * 0.5;
+      out.push({ kind: 'amt', msg: money(t.amt) + ' for ' + nm + ' is far ' + (hi ? 'more' : 'less') + ' than usual. You normally pay about ' + money(h.med) + '.' + (close ? ' A misplaced decimal point?' : ''),
+        fix: close ? { label: 'Change to ' + money(guess), amt: guess, apply: function (x) { x.amt = guess; } } : null });
+    }
+  }
+  if (!onSave && h && h.n >= 4 && h.top && h.top !== t.cat && h.cats[h.top] / h.n >= 0.8 && catObj(h.top)) {
+    out.push({ kind: 'cat', msg: nm + ' is filed under ' + plain(t.cat || 'no category') + ', but ' + h.cats[h.top] + ' of your ' + h.n + ' entries for it are ' + plain(h.top) + '.',
+      fix: { label: 'Move to ' + plain(h.top), apply: function (x) { x.cat = h.top; } } });
+  }
+  var last = lastDayOf(t.d.slice(0, 7));
+  if (+t.d.slice(8, 10) > last) {
+    var fixed = t.d.slice(0, 8) + pad2(last);
+    out.push({ kind: 'day', msg: t.d + ' is not a real date.', fix: { label: 'Move to ' + sugDay(fixed), apply: function (x) { x.d = fixed; } } });
+  } else if (t.d > addDays(today(), 1)) {
+    var py = (+t.d.slice(0, 4) - 1) + t.d.slice(4), ok = +py.slice(8, 10) <= lastDayOf(py.slice(0, 7)) && py <= today();
+    out.push({ kind: 'future', msg: dayYear(t.d) + ' is in the future. The wrong year?',
+      fix: ok ? { label: 'Change to ' + sugDay(py), apply: function (x) { x.d = py; } } : null });
+  }
+  return out;
+}
+// Everything worth a look: the last 90 days, plus impossible dates from any time.
+function allDoubts() {
+  var habits = noteHabits(), since = addDays(today(), -90), gone = {}, out = [], groups = {};
+  (S.meta.dismissed || []).forEach(function (k) { gone[k] = 1; });
+  function add(t, d) { d.t = t; d.key = d.kind + ':' + t.id + ':' + t.amt + ':' + t.d + ':' + (t.cat || ''); if (!gone[d.key]) out.push(d); }
+  allTx().forEach(function (t) {
+    if (t.feeOf || t.propOf) return;
+    var recent = t.d >= since;
+    txDoubts(t, habits).forEach(function (d) { if (recent || d.kind === 'day') add(t, d); });
+    if (recent && (t.t === 'exp' || t.t === 'inc')) { var g = t.t + '|' + t.d + '|' + t.amt + '|' + noteKey(t.note || t.cat); (groups[g] = groups[g] || []).push(t); }
+  });
+  Object.keys(groups).forEach(function (g) {
+    groups[g].slice(1).forEach(function (t) {
+      add(t, { kind: 'dup', msg: 'Logged twice? Another ' + (t.note || plain(t.cat || '')) + ' for ' + money(t.amt) + ' is on the same day.', fix: { label: 'Delete this copy', remove: true } });
+    });
+  });
+  return out.sort(function (a, b) { return a.t.d < b.t.d ? 1 : -1; });
+}
+function applyDoubt(d) {
+  var t = findTx(d.t.id); if (!t) return;
+  if (d.fix.remove) { removeTx(t); return; }
+  var om = monthOf(t.d);
+  d.fix.apply(t);
+  if (monthOf(t.d) !== om) {
+    S.tx[om] = (S.tx[om] || []).filter(function (y) { return y.id !== t.id; }); if (!S.tx[om].length) delete S.tx[om];
+    (S.tx[monthOf(t.d)] = S.tx[monthOf(t.d)] || []).push(t); markMonth(om);
+  }
+  if (t.split) { t.split.mine = Math.min(t.split.mine, t.amt); syncSplitDebt(t); }
+  markMonth(monthOf(t.d));
+}
+function dismissDoubt(d) { S.meta.dismissed = (S.meta.dismissed || []).concat(d.key).slice(-500); mark('meta'); }
+function suggestSheet() {
+  var list = allDoubts().slice(0, 60);
+  var body = !list.length
+    ? '<div class="healthy"><div class="tick" aria-hidden="true"></div><b>Nothing looks off</b><span>Your last 90 days were checked for unusual amounts, entries logged twice, odd categories and dates.</span></div>'
+    : '<p style="margin-top:0">' + (list.length === 1 ? 'One entry looks' : list.length + ' entries look') + ' like a slip. Nothing changes unless you approve it.</p>' +
+      list.map(function (d, i) {
+        return '<div class="panel sug"><div class="row"><span class="av">' + esc(avatar(d.t.cat)) + '</span><div class="l"><b>' + esc(d.t.note || plain(d.t.cat || '')) + '</b><span>' + sugDay(d.t.d) + (d.t.cat ? ', ' + esc(plain(d.t.cat)) : '') + '</span></div><div class="r">' + money(d.t.amt) + '</div></div>' +
+          '<p class="sugmsg">' + esc(d.msg) + '</p><div class="wrap">' +
+          (d.fix ? '<button class="chip" data-sgfix="' + i + '" aria-pressed="true">' + esc(d.fix.label) + '</button>' : '') +
+          '<button class="chip" data-sgedit="' + i + '">Edit</button><button class="chip" data-sgok="' + i + '">It\u2019s right</button></div></div>';
+      }).join('');
+  openSheet('Suggestions', body, function (el) {
+    el.querySelectorAll('[data-sgfix]').forEach(function (b) { b.addEventListener('click', function () { var d = list[+b.dataset.sgfix]; applyDoubt(d); render(); suggestSheet(); toastUndo(d.fix.remove ? 'Deleted the copy' : 'Changed'); }); });
+    el.querySelectorAll('[data-sgedit]').forEach(function (b) { b.addEventListener('click', function () { var t = findTx(list[+b.dataset.sgedit].t.id); if (t) txSheet(t); }); });
+    el.querySelectorAll('[data-sgok]').forEach(function (b) { b.addEventListener('click', function () { dismissDoubt(list[+b.dataset.sgok]); render(); suggestSheet(); }); });
+  });
+}
 // ---------- rendering ----------
 var ICON = {
   home: '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M128,24a8,8,0,0,0-8,8V88a8,8,0,0,0,8,8,32,32,0,1,1-27.72,16,8,8,0,0,0-2.93-10.93l-48.5-28A8,8,0,0,0,37.92,76,104,104,0,1,0,128,24ZM48.09,91.1,83,111.26A48.09,48.09,0,0,0,80,128c0,1.53.08,3,.22,4.52L41.28,143A88.16,88.16,0,0,1,48.09,91.1Zm-2.67,67.31,39-10.44A48.1,48.1,0,0,0,120,175.32v40.31A88.2,88.2,0,0,1,45.42,158.41ZM136,215.63V175.32a48,48,0,0,0,0-94.65V40.36a88,88,0,0,1,0,175.27Z"/></svg><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M120,161.94v65.34a4,4,0,0,1-4.46,4,104.28,104.28,0,0,1-84-64.5,4,4,0,0,1,2.69-5.34L97.32,144.5a4,4,0,0,1,4.35,1.66,32.25,32.25,0,0,0,15.59,12A4,4,0,0,1,120,161.94ZM128.06,24A8,8,0,0,0,120,32V88a7.94,7.94,0,0,0,7.87,8,32,32,0,0,1,10.86,62.15,4,4,0,0,0-2.73,3.79v65.34a4,4,0,0,0,4.45,4A104,104,0,0,0,128.06,24Zm-32,101.49a32,32,0,0,1,4.15-13.42l0-.07a8,8,0,0,0-.57-8.87A8.36,8.36,0,0,0,97.18,101L48.85,73.06A8,8,0,0,0,37.92,76,104.12,104.12,0,0,0,25,142.68,4,4,0,0,0,30,146L93.22,129A3.94,3.94,0,0,0,96.1,125.49Z"/></svg></span>', list: '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M72,104a8,8,0,0,1,8-8h96a8,8,0,0,1,0,16H80A8,8,0,0,1,72,104Zm8,40h96a8,8,0,0,0,0-16H80a8,8,0,0,0,0,16ZM232,56V208a8,8,0,0,1-11.58,7.15L192,200.94l-28.42,14.21a8,8,0,0,1-7.16,0L128,200.94,99.58,215.15a8,8,0,0,1-7.16,0L64,200.94,35.58,215.15A8,8,0,0,1,24,208V56A16,16,0,0,1,40,40H216A16,16,0,0,1,232,56Zm-16,0H40V195.06l20.42-10.22a8,8,0,0,1,7.16,0L96,199.06l28.42-14.22a8,8,0,0,1,7.16,0L160,199.06l28.42-14.22a8,8,0,0,1,7.16,0L216,195.06Z"/></svg><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M216,40H40A16,16,0,0,0,24,56V208a8,8,0,0,0,11.58,7.15L64,200.94l28.42,14.21a8,8,0,0,0,7.16,0L128,200.94l28.42,14.21a8,8,0,0,0,7.16,0L192,200.94l28.42,14.21A8,8,0,0,0,232,208V56A16,16,0,0,0,216,40ZM176,144H80a8,8,0,0,1,0-16h96a8,8,0,0,1,0,16Zm0-32H80a8,8,0,0,1,0-16h96a8,8,0,0,1,0,16Z"/></svg></span>',
@@ -1686,6 +1782,8 @@ function renderHome() {
   var dup = doubleCounts();
   if (dup.length) h += '<button class="banner" data-act="dupes"><b>' + dup.length + ' repayment' + (dup.length > 1 ? 's look' : ' looks') + ' recorded twice</b><span>Once as income and once against a balance. Tap to keep one.</span></button>';
   if (S.inbox.length) h += '<button class="banner" data-act="inbox"><b>' + S.inbox.length + ' statement rows to review</b><span>Tag Alaina rides and add them</span></button>';
+  var sgN = allDoubts().length;
+  if (sgN) h += '<button class="banner" data-act="suggest"><b>' + (sgN === 1 ? '1 entry looks' : sgN + ' entries look') + ' like a slip</b><span>Review the suggestions. Nothing changes until you approve.</span></button>';
   if (UI.homeMode === 'earn') h += earnHero(m, quick);
   else {
   h += '<div class="hero">' + heroToggle() + '<div class="lbl">Spent in ' + monthLabel(m, true) + ', after paybacks</div>' +
@@ -2239,6 +2337,7 @@ function renderMore() {
     '<button class="row" data-act="budgets"><div class="l"><b>Budgets</b><span>' + S.meta.budgets.length + ' set</span></div><div class="r">›</div></button>' +
     '<button class="row" data-act="basis"><div class="l"><b>Investment accounting</b><span>' + (cashBasis() ? 'Cash basis, balances not counted' : 'Balances count as your money') + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="cats"><div class="l"><b>Categories and tags</b><span>' + S.meta.cats.length + ' categories, ' + S.meta.tags.length + ' tags</span></div><div class="r">›</div></button>' +
+    '<button class="row" data-act="suggest"><div class="l"><b>Suggestions</b><span>' + (function () { var n = allDoubts().length; return n ? n + ' entr' + (n > 1 ? 'ies look' : 'y looks') + ' like a slip' : 'Nothing looks off'; })() + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="health"><div class="l"><b>Data health</b><span>' + (function () { var n = auditData().length; return n ? n + ' thing' + (n > 1 ? 's' : '') + ' to check' : 'Everything is consistent'; })() + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="sync"><div class="l"><b>Sync status</b><span>' +
     (store.mode === 'cloud' ? 'Synced with Supabase' : store.mode === 'error' ? 'Not syncing: ' + esc(store.err || 'unknown problem') : store.mode === 'cloud-offline' ? 'Offline, changes are waiting' : 'Saved in this browser only') +
@@ -2511,6 +2610,7 @@ function txSheet(existing, asNew) {
       $('#pm', el).innerHTML = payChips(t);
       $('#instbox', el).hidden = t.pm !== 'later'; drawInst();
     });
+    var okSig = '';
     $('#save', el).addEventListener('click', function () {
       var a = calcVal($('#amt', el).value);
       if (!(a > 0)) { toast('Enter an amount'); $('#amt', el).focus(); return; }
@@ -2519,6 +2619,24 @@ function txSheet(existing, asNew) {
       t.sub = cleanSub($('#sub', el).value);
       if (t.pm === 'later') delete t.acct; else { t.acct = t.acct || defWallet(); ensureWallet(t.acct); S.meta.lastAcct = t.acct; }
       var ex = exprOf($('#amt', el)); if (ex) t.calc = ex.replace(/\s+/g, ''); else delete t.calc;
+      // looks like a slip? say so once before saving; tapping again saves it as it is
+      var doubts = txDoubts(t, noteHabits(), true);
+      if (allTx().some(function (x) { return x.id !== t.id && (!existing || x.id !== existing.id) && x.t === t.t && x.d === t.d && Math.abs(x.amt - t.amt) < 0.005 && noteKey(x.note || x.cat) === noteKey(t.note || t.cat); }))
+        doubts.push({ kind: 'dup', msg: 'You already logged ' + money(t.amt) + (t.note ? ' for ' + t.note : '') + ' on this day.' });
+      var sig = doubts.map(function (d) { return d.msg; }).join('|');
+      if (doubts.length && okSig !== sig) {
+        okSig = sig;
+        var w = $('#savewarn', el), acts = $('#save', el).parentNode;
+        if (!w) { w = document.createElement('div'); w.id = 'savewarn'; w.className = 'savewarn'; w.setAttribute('role', 'alert'); acts.parentNode.insertBefore(w, acts); }
+        w.innerHTML = doubts.map(function (d) { return '<p>' + esc(d.msg) + '</p>'; }).join('') +
+          doubts.filter(function (d) { return d.fix && d.fix.amt; }).map(function (d) { return '<button class="chip sm" data-useamt="' + d.fix.amt + '">Use ' + money(d.fix.amt) + '</button>'; }).join('');
+        w.querySelectorAll('[data-useamt]').forEach(function (b) {
+          b.addEventListener('click', function () { var inp = $('#amt', el); inp.value = b.dataset.useamt; inp.dispatchEvent(new Event('input', { bubbles: true })); okSig = ''; w.remove(); $('#save', el).textContent = existing ? 'Save changes' : 'Add'; });
+        });
+        $('#save', el).textContent = existing ? 'Save anyway' : 'Add anyway';
+        if (w.scrollIntoView) w.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+        return;
+      }
       (function () {
         var rt = ruleTags(t), had = existing ? (existing.tags || []) : [];
         t.untag = (t.untag || []).filter(function (g) { return t.tags.indexOf(g) < 0; });
@@ -4580,17 +4698,22 @@ function paymentSheet(b, p, after) {
 // ---------- statement import (Grab, bank) ----------
 var MON = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
 function ymd(y, m, d) { if (y < 100) y += 2000; if (m < 1 || m > 12 || d < 1 || d > new Date(y, m, 0).getDate()) return null; return y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'); }
-function parseDateAny(v) {
+function parseDateAny(v, lenient) {
+  function mk(y, m, d) {
+    var r = ymd(y, m, d);
+    if (!r && lenient && m >= 1 && m <= 12 && d >= 29 && d <= 31) { var yy = y < 100 ? y + 2000 : y; r = ymd(yy, m, new Date(yy, m, 0).getDate()); parseDateAny.fixed = d + ' ' + MN[m - 1] + ' ' + yy; }
+    return r;
+  }
   if (v == null || v === '') return null;
   if (typeof v === 'number') { if (v > 20000 && v < 80000 && window.XLSX) { var c = XLSX.SSF.parse_date_code(v); return ymd(c.y, c.m, c.d); } return null; }
   if (v instanceof Date) return ymd(v.getFullYear(), v.getMonth() + 1, v.getDate());
   var s = String(v), m;
-  if ((m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/))) return ymd(+m[1], +m[2], +m[3]);
-  if ((m = s.match(/\b(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})\b/))) return ymd(+m[3], +m[2], +m[1]);
-  if ((m = s.match(/\b(\d{1,2})[\s-]+(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?[\s,-]+(\d{4})\b/i))) return ymd(+m[3], MON[m[2].toLowerCase()], +m[1]);
-  if ((m = s.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})\b/i))) return ymd(+m[3], MON[m[1].toLowerCase()], +m[2]);
+  if ((m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/))) return mk(+m[1], +m[2], +m[3]);
+  if ((m = s.match(/\b(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})\b/))) return mk(+m[3], +m[2], +m[1]);
+  if ((m = s.match(/\b(\d{1,2})[\s-]+(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?[\s,-]+(\d{4})\b/i))) return mk(+m[3], MON[m[2].toLowerCase()], +m[1]);
+  if ((m = s.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+(\d{1,2}),?\s+(\d{4})\b/i))) return mk(+m[3], MON[m[1].toLowerCase()], +m[2]);
   if ((m = s.match(/\b(\d{1,2})\s+(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\b/i))) {
-    var y = new Date().getFullYear(), d = ymd(y, MON[m[2].toLowerCase()], +m[1]); if (d > today()) d = ymd(y - 1, MON[m[2].toLowerCase()], +m[1]); return d;
+    var y = new Date().getFullYear(), d = mk(y, MON[m[2].toLowerCase()], +m[1]); if (d > today()) { parseDateAny.fixed = null; d = mk(y - 1, MON[m[2].toLowerCase()], +m[1]); } return d;
   }
   return null;
 }
@@ -4642,16 +4765,17 @@ function textToRows(text) {
   var rows = [], carry = { d: null, parts: [] };
   text.split(/\r?\n/).forEach(function (line) {
     line = line.replace(/\s+/g, ' ').trim(); if (!line) return;
-    var d = parseDateAny(line), m = lastMoney(line);
+    parseDateAny.fixed = null;
+    var d = parseDateAny(line, true), fx = parseDateAny.fixed, m = lastMoney(line);
     if (m) {
       var amt = Math.abs(parseFloat(m[1].replace(/,/g, '')));
       var desc = line.replace(m[0], ' ');
       desc = desc.replace(/\b\d{1,2}[\s-]+(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?([\s,-]+\d{4})?\b/ig, ' ').replace(/\d{4}-\d{1,2}-\d{1,2}|\b\d{1,2}[\/.]\d{1,2}[\/.]\d{2,4}\b/g, ' ').replace(/\b\d{1,2}:\d{2}\s?(am|pm)?\b/ig, ' ');
       var full = (carry.parts.join(' ') + ' ' + desc).trim();
       var dd = d || carry.d;
-      if (dd && amt > 0) rows.push([dd, full, amt]);
-      carry.parts = []; if (d) carry.d = d;
-    } else if (d) { carry.d = d; carry.parts = [line.replace(/\d{1,2}[\s-]+[a-z]{3,4}\.?[\s,-]*\d{0,4}/i, '').trim()].filter(Boolean); }
+      if (dd && amt > 0) rows.push([dd, full, amt, d ? fx : carry.fx]);
+      carry.parts = []; if (d) { carry.d = d; carry.fx = fx; }
+    } else if (d) { carry.d = d; carry.fx = fx; carry.parts = [line.replace(/\d{1,2}[\s-]+[a-z]{3,4}\.?[\s,-]*\d{0,4}/i, '').trim()].filter(Boolean); }
     else { carry.parts.push(line); if (carry.parts.length > 3) carry.parts.shift(); }
   });
   return rows;
@@ -4671,10 +4795,11 @@ function tableToRows(rows) {
   if (hi < 0) return textToRows(rows.map(function (r) { return r.join('  '); }).join('\n'));
   var out = [];
   rows.slice(hi + 1).forEach(function (r) {
-    var d = parseDateAny(r[cd]), a = parseAmt(r[ca]);
+    parseDateAny.fixed = null;
+    var d = parseDateAny(r[cd], true), fx = parseDateAny.fixed, a = parseAmt(r[ca]);
     if (!d || !(a > 0)) return;
     var desc = cdesc.map(function (j) { return String(r[j] == null ? '' : r[j]).trim(); }).filter(Boolean).join(' → ');
-    out.push([d, desc, a]);
+    out.push([d, desc, a, fx]);
   });
   return out;
 }
@@ -4706,7 +4831,11 @@ function stmtSheet() {
   openSheet('Import Grab or bank statement', body, function (el) {
     function done(rows, label) {
       if (!rows.length) { $('#sres', el).innerHTML = '<p class="neg">No rows with both a date and an amount were found in ' + label + '. Try pasting the text instead, or send the file to Claude to tune the reader.</p>'; return; }
-      var made = rows.map(function (r) { return makeRow(r[0], r[1], r[2]); });
+      var made = rows.map(function (r) {
+        var row = makeRow(r[0], r[1], r[2]);
+        if (r[3]) { row.warn = 'The statement says ' + r[3] + ', which doesn\u2019t exist, so it is set to ' + dayLabel(row.d) + '. Check it before adding.'; row.include = false; }
+        return row;
+      });
       S.inbox = S.inbox.concat(made); rematch(); mark('inbox'); inboxSheet(); render();
       toast(made.length + ' rows ready to review');
     }
@@ -4764,7 +4893,7 @@ function inboxSheet() {
     rs.slice(0, 300).forEach(function (r) {
       h += '<div class="row irow' + (r.include ? '' : ' off') + '"><button class="ck" data-inc="' + r.id + '" aria-pressed="' + r.include + '" aria-label="Include">' + (r.include ? '✓' : '') + '</button>' +
         '<div class="l" style="flex:1"><b>' + esc(r.desc) + '</b><span>' + dayLabel(r.d) + ', ' + KL[r.kind] + (r.instal ? ', instalment ' + (r.instal === 'yes' ? '' : r.instal) : '') + '</span>' +
-        (r.dup ? '<span class="match">Matches: ' + esc(r.match) + '</span>' : '') +
+        (r.dup ? '<span class="match">Matches: ' + esc(r.match) + '</span>' : '') + (r.warn ? '<span class="neg" style="white-space:normal">' + esc(r.warn) + '</span>' : '') +
         '<select class="csel" data-cs="' + r.id + '" aria-label="Category">' + catOpts(r) + '</select></div>' +
         '<div class="r">' + money(r.amt) + '<button class="chip rose sm" data-al="' + r.id + '" aria-pressed="' + (r.tags.indexOf('Alaina') > -1) + '">Alaina</button></div></div>';
     });
@@ -5376,6 +5505,7 @@ function onClick(e) {
     else if (a === 'unlinked') unlinkedSheet();
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
+    else if (a === 'suggest') suggestSheet();
     else if (a === 'next') { UI.month = addMonth(UI.month, 1); render(); }
     else if (a === 'add-tx') txSheet();
     else if (a === 'add-ledger') ledgerSheet();
