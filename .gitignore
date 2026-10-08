@@ -3,3 +3,4 @@
 !manifest.webmanifest
 *.xlsx
 *.csv
+supabase/.temp/
