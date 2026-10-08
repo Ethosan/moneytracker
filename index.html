@@ -717,6 +717,7 @@ section.blk>h2 a,section.blk>h2 button{padding:13px 10px;margin:-13px -10px;min-
 @media (min-width:1024px){
   main.tab-activity{max-width:860px}
 }
+.searchrow{grid-column:1 / -1}
 </style>
 </head>
 <body>
@@ -2353,7 +2354,7 @@ function renderActivity() {
   S.meta.tags.forEach(function (t) { chips.push(['tag:' + t, t]); });
 
   h += '<div class="chips">' + chips.map(function (c) { return '<button class="chip' + (c[0] === 'tag:Alaina' ? ' rose' : '') + '" data-filter="' + esc(c[0]) + '" aria-pressed="' + (UI.filter === c[0]) + '">' + esc(c[1]) + '</button>'; }).join('') + catPill() + '</div>';
-  h += '<div style="display:flex;gap:8px;align-items:center"><input class="search" type="search" placeholder="Search words, 12 sep, or $29.40" value="' + esc(UI.q) + '" id="q" style="flex:1">' +
+  h += '<div class="searchrow" style="display:flex;gap:8px;align-items:center"><input class="search" type="search" placeholder="Search words, dates or amounts" aria-label="Search words, a date like 12 sep, or an amount like $29.40" value="' + esc(UI.q) + '" id="q" style="flex:1">' +
     '<button class="chip" data-act="allmonths" aria-pressed="' + UI.all + '" style="margin-bottom:12px">All time</button></div>';
   var f = UI.filter, q = UI.q.toLowerCase();
   tx = f === 'mov' ? [] : tx.filter(function (t) {
@@ -5814,7 +5815,7 @@ function onClick(e) {
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-gapfind]'))) { gapSheet(b.dataset.gapfind, +b.dataset.gapamt); return; }
   if ((b = t.closest('[data-wallet]'))) { walletPage(b.dataset.wallet); return; }
-  if ((b = t.closest('[data-insv]'))) { UI.insView = b.dataset.insv; render(); var f = document.querySelector('[data-insv="' + UI.insView + '"]'); if (f) f.focus(); return; }
+  if ((b = t.closest('[data-insv]'))) { UI.insView = b.dataset.insv; render(); var f = document.querySelector('[data-insv="' + UI.insView + '"]'); if (f) f.focus({ focusVisible: false }); return; }
   if ((b = t.closest('[data-trkind]'))) { UI.trKind = b.dataset.trkind; UI.trCat = 0; UI.trSub = null; UI.trMonth = ''; UI.trHistN = 30; render(); return; }
   if ((b = t.closest('[data-trmonth]'))) { UI.trMonth = b.dataset.trmonth; render(); return; }
   if ((b = t.closest('[data-trmore]'))) { UI.trHistN = (UI.trHistN || 30) + 30; render(); return; }
