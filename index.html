@@ -15,23 +15,23 @@
 <style>@font-face{font-family:'Geist';src:url('fonts/Geist-Regular.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}@font-face{font-family:'Geist';src:url('fonts/Geist-Medium.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}@font-face{font-family:'Geist';src:url('fonts/Geist-SemiBold.woff2') format('woff2');font-weight:600;font-style:normal;font-display:swap}@font-face{font-family:'Geist';src:url('fonts/Geist-Bold.woff2') format('woff2');font-weight:700;font-style:normal;font-display:swap}/* Radius rule: cards 22px, controls 14px, chips/buttons full pill. */
 :root{
   --bg:#F2F4F8;--surface:#FFFFFF;--sunk:#EBEEF4;--ink:#0D1017;--muted:#5D6472;--line:#E3E7EE;
-  --accent:#2E5BFF;--accent-soft:#E6ECFF;--accent-ink:#FFFFFF;
+  --accent:#2A55F5;--accent-soft:#E6ECFF;--accent-ink:#FFFFFF;--raised:#FFFFFF;
   --gain:#0E9F6E;--gain-soft:#E1F6EE;--loss:#E0424E;--loss-soft:#FDE8EA;--warn:#C27C0E;--rose:#E3337A;--rose-soft:#FDE6EF;
   --hero:#0D1017;--hero-ink:#FFFFFF;--hero-muted:#9AA3B5;
-  --seg1:#2E5BFF;--seg2:#6E8CFF;--seg3:#A9BBFF;--seg4:#CDD5E4;--seg5:#E1E6EF;
+  --seg1:#2A55F5;--seg2:#6E8CFF;--seg3:#A9BBFF;--seg4:#CDD5E4;--seg5:#E1E6EF;
   --shadow:0 1px 2px rgba(22,34,70,.05),0 8px 24px rgba(22,34,70,.06);
   box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --bg:#0A0C11;--surface:#141821;--sunk:#1C212C;--ink:#EEF1F7;--muted:#98A1B3;--line:#252B37;
-  --accent:#6C8CFF;--accent-soft:#1B2447;--accent-ink:#0A0C11;
+  --accent:#6C8CFF;--accent-soft:#1B2447;--accent-ink:#0A0C11;--raised:#2C3446;
   --gain:#34D399;--gain-soft:#10281F;--loss:#FF6B75;--loss-soft:#33161A;--warn:#F5B547;--rose:#FF6FA8;--rose-soft:#351725;
   --hero:#1A2033;--hero-ink:#FFFFFF;--hero-muted:#A3ACC0;
   --seg1:#6C8CFF;--seg2:#4F6AD0;--seg3:#3A4D94;--seg4:#2B3346;--seg5:#222836;
   --shadow:0 1px 2px rgba(0,0,0,.3);color-scheme:dark;}}
 :root[data-theme="dark"]{
   --bg:#0A0C11;--surface:#141821;--sunk:#1C212C;--ink:#EEF1F7;--muted:#98A1B3;--line:#252B37;
-  --accent:#6C8CFF;--accent-soft:#1B2447;--accent-ink:#0A0C11;
+  --accent:#6C8CFF;--accent-soft:#1B2447;--accent-ink:#0A0C11;--raised:#2C3446;
   --gain:#34D399;--gain-soft:#10281F;--loss:#FF6B75;--loss-soft:#33161A;--warn:#F5B547;--rose:#FF6FA8;--rose-soft:#351725;
   --hero:#1A2033;--hero-ink:#FFFFFF;--hero-muted:#A3ACC0;
   --seg1:#6C8CFF;--seg2:#4F6AD0;--seg3:#3A4D94;--seg4:#2B3346;--seg5:#222836;
@@ -161,7 +161,7 @@ dialog.sheet::backdrop{background:rgba(8,12,24,.5);backdrop-filter:blur(2px)}
 .sheet .bd{padding:6px 18px calc(24px + env(safe-area-inset-bottom,0px))}
 .seg{display:flex;background:var(--sunk);border-radius:999px;padding:4px;margin-bottom:14px}
 .seg button{flex:1;border:0;background:none;padding:9px 6px;border-radius:999px;font-size:14px;font-weight:500;color:var(--muted)}
-.seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);font-weight:700;box-shadow:var(--shadow)}
+.seg button[aria-pressed="true"]{background:var(--raised);color:var(--ink);font-weight:700;box-shadow:var(--shadow)}
 .amt-in{display:flex;align-items:baseline;gap:6px;background:var(--surface);border-radius:22px;padding:16px 18px;margin:4px 0 14px;box-shadow:var(--shadow)}
 .amt-in span{font:600 28px "Geist",sans-serif;color:var(--muted)}
 .amt-in input{border:0;background:none;outline:none;font:700 44px/1.05 "Geist",sans-serif;letter-spacing:-.04em;width:100%}
@@ -791,10 +791,11 @@ function uid() { return 'a' + Date.now().toString(36) + Math.random().toString(3
 function r2(n) { return Math.round(n * 100) / 100; }
 function money(n, dp) {
   if (n == null || isNaN(n)) return '–';
-  var d = dp == null ? (Math.abs(n) >= 1000 ? 0 : 2) : dp;
+  var d = dp == null ? 2 : dp; // cents everywhere; summaries pass 0 for whole dollars
   var s = Math.abs(n).toLocaleString('en-SG', { minimumFractionDigits: d, maximumFractionDigits: d });
   return (n < 0 ? '−' : '') + '$' + s;
 }
+function tone(n) { return n > 0.005 ? 'pos' : n < -0.005 ? 'neg' : ''; }
 function signed(n, dp) { return n == null ? '–' : (n > 0 ? '+' : '') + money(n, dp); }
 function today() { var d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 function monthOf(d) { return d.slice(0, 7); }
@@ -1963,7 +1964,7 @@ function renderHome() {
   } else h += '</div>';
   }
   h += '<div class="strip"><div data-hm="earn" role="button" tabindex="0"><b>' + money(st.earned, 0) + '</b><span>Earned \u203a</span></div><div><b>' + money(st.other, 0) +
-    '</b><span>Gifts &amp; bonuses</span></div><div><b class="' + (st.saved >= 0 ? 'pos' : 'neg') + '">' + signed(st.saved, 0) + '</b><span>' + (st.saved >= 0 ? 'Kept' : 'Overspent') + ': earned and gifts, minus spending</span></div></div>';
+    '</b><span>Gifts &amp; bonuses</span></div><div><b class="' + tone(st.saved) + '">' + signed(st.saved, 0) + '</b><span>' + (st.saved >= 0 ? 'Kept' : 'Overspent') + ': earned and gifts, minus spending</span></div></div>';
 
   // budgets
   if (S.meta.budgets.length) {
@@ -1989,9 +1990,9 @@ function renderHome() {
   var brOut = sum(mEntries.filter(function (e) { var t = venueType(e.venue); return (t === 'broker' || t === 'crypto') && e.f === 'out'; }), function (e) { return e.amt; });
   if (mEntries.some(function (e) { var ty = venueType(e.venue); return ty === 'prop' || ty === 'poker' || ty === 'broker' || ty === 'crypto'; })) {
     h += '<section class="blk"><h2>Trading and poker this month <button data-tab="pnl">All accounts</button></h2><div class="panel">' +
-      '<div class="row"><div class="l"><b>Prop firm fees</b><span>' + plural(mEntries.filter(function (e) { return venueType(e.venue) === 'prop' && e.f === 'in'; }).length, 'purchase') + '</span></div><div class="r neg">' + money(-propFees) + '</div></div>' +
-      '<div class="row"><div class="l"><b>Prop firm payouts</b></div><div class="r pos">' + money(propPay) + '</div></div>' +
-      '<div class="row"><div class="l"><b>Poker</b></div><div class="r ' + (poker >= 0 ? 'pos' : 'neg') + '">' + signed(poker) + '</div></div>' +
+      '<div class="row"><div class="l"><b>Prop firm fees</b><span>' + plural(mEntries.filter(function (e) { return venueType(e.venue) === 'prop' && e.f === 'in'; }).length, 'purchase') + '</span></div><div class="r ' + tone(-propFees) + '">' + money(-propFees) + '</div></div>' +
+      '<div class="row"><div class="l"><b>Prop firm payouts</b></div><div class="r ' + tone(propPay) + '">' + money(propPay) + '</div></div>' +
+      '<div class="row"><div class="l"><b>Poker</b></div><div class="r ' + tone(poker) + '">' + signed(poker) + '</div></div>' +
       ((brIn || brOut) ? '<div class="row"><div class="l"><b>Moved to investments</b><span>Not spending. ' + money(brOut) + ' came back</span></div><div class="r">' + money(brIn) + '</div></div>' : '') +
       '<div class="row"><div class="l"><b>All money out this month</b><span>Spending, plus fees, buy-ins and money moved to investments</span></div><div class="r">' + money(st.net + propFees + Math.max(0, -poker) + brIn - brOut) + '</div></div>' +
       '</div></section>';
@@ -2292,7 +2293,7 @@ function pnlBody() {
   var grand = sum(all, function (v) { return v.p.pnl; });
   var outThere = sum([].concat(g.broker, g.crypto), function (v) { return v.p.outThere || 0; });
   if (all.length) {
-    h += '<div class="hero"><div class="lbl">' + (cashBasis() ? 'Realised so far, money back minus money in' : 'Net across everything with a known result') + '</div><div class="big ' + (grand >= 0 ? 'pos' : 'neg') + '" style="font-size:44px">' + signed(grand, 0) + '</div>' +
+    h += '<div class="hero"><div class="lbl">' + (cashBasis() ? 'Realised so far, money back minus money in' : 'Net across everything with a known result') + '</div><div class="big ' + tone(grand) + '" style="font-size:44px">' + signed(grand, 0) + '</div>' +
       '<div class="sub">' + [['broker', 'Brokers'], ['prop', 'Prop firms'], ['poker', 'Poker'], ['crypto', 'Crypto']].filter(function (k) { return g[k[0]].length; }).map(function (k) {
         var t = sum(g[k[0]].filter(function (v) { return v.p.pnl != null && !v.p.open; }), function (v) { return v.p.pnl; }); return k[1] + ' ' + signed(t, 0);
       }).join(', ') + (outThere > 0 ? '. ' + money(outThere, 0) + ' still invested, not counted either way' : '') + '</div></div>';
@@ -2303,7 +2304,7 @@ function pnlBody() {
     var stillOut = sum(list, function (v) { return v.p.outThere || 0; });
     var closedN = list.filter(function (v) { return isClosed(v.name); }).length;
     var s = '<section class="blk"><h2>' + title + '<span class="note" style="margin:0">' + (list.length - closedN) + ' in use' + (closedN ? ', ' + closedN + ' closed' : '') + '</span></h2><div class="panel" style="padding-top:10px">';
-    s += '<div class="pl-big ' + (tot >= 0 ? 'pos' : 'neg') + '">' + signed(tot, 0) + '</div>' +
+    s += '<div class="pl-big ' + tone(tot) + '">' + signed(tot, 0) + '</div>' +
       '<div class="note" style="margin:0 0 4px">' + (kind === 'prop' ? 'Fees against payouts' : kind === 'poker' ? 'Across all sessions' : 'Realised: money returned minus money put in') +
       (stillOut > 0 ? ', plus ' + money(stillOut, 0) + ' still invested' : '') + '</div>';
     if (kind === 'prop') {
@@ -2339,7 +2340,7 @@ function pnlBody() {
       if (pk.length) sub += '. Plus ' + pk.map(function (n) { return money(p.partners[n], 0) + ' of ' + esc(n) + "\u2019s"; }).join(', ');
       if (cl) sub = 'Closed' + (p.last ? ', last used ' + monthLabel(monthOf(p.last), true) + ' ' + p.last.slice(0, 4) : '') + '. ' + sub;
       var row = '<button class="row' + (cl ? ' closed' : '') + '" data-venue="' + esc(v.name) + '"><div class="l"><b>' + esc(v.name) + '</b><span>' + sub + '</span></div><div class="r ' +
-        (p.pnl == null || p.open ? '' : p.pnl >= 0 ? 'pos' : 'neg') + '">' + (p.open ? money(p.outThere, 0) + '<span>invested</span>' : p.pnl == null ? '–' : signed(p.pnl, 0)) + '</div></button>';
+        (p.pnl == null || p.open ? '' : tone(p.pnl)) + '">' + (p.open ? money(p.outThere, 0) + '<span>invested</span>' : p.pnl == null ? '–' : signed(p.pnl, 0)) + '</div></button>';
       if (cl) { closedRows += row; closedTot += (p.pnl || 0); } else openRows += row;
     });
     s += openRows;
@@ -2372,7 +2373,7 @@ function peopleSection() {
   if (!open.length) h += '<div class="note" style="padding:0 0 10px">Everyone is square.</div>';
   open.forEach(function (n) {
     var held = S.debts.some(function (d) { return d.person === n && (d.k === 'held' || d.k === 'returned'); });
-    h += '<button class="row" data-person="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>' + (ppl[n] > 0 ? 'Owes you' : held ? 'Their money you are holding' : 'You owe') + '</span></div><div class="r ' + (ppl[n] > 0 ? 'pos' : 'neg') + '">' + money(Math.abs(ppl[n])) + '</div></button>';
+    h += '<button class="row" data-person="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>' + (ppl[n] > 0 ? 'Owes you' : held ? 'Their money you are holding' : 'You owe') + '</span></div><div class="r ' + tone(ppl[n]) + '">' + money(Math.abs(ppl[n])) + '</div></button>';
   });
   var square = names.filter(function (n) { return Math.abs(ppl[n]) <= 0.005; });
   if (square.length) {
@@ -3145,7 +3146,7 @@ function venueSheet(v) {
   var p = venuePnl(v), ty = p.type;
   var es = S.ledger.filter(function (e) { return e.venue === v; }).sort(function (a, b) { return a.d < b.d ? 1 : -1; });
   var lab = {}; FLOW_LABELS[ty].forEach(function (x) { lab[x[0]] = x[1]; });
-  var body = '<div class="pl-big ' + (p.pnl == null ? '' : p.pnl >= 0 ? 'pos' : 'neg') + '">' + (p.pnl == null ? 'Needs a balance' : signed(p.pnl)) + '</div>' +
+  var body = '<div class="pl-big ' + (p.pnl == null ? '' : tone(p.pnl)) + '">' + (p.pnl == null ? 'Needs a balance' : signed(p.pnl)) + '</div>' +
     '<div class="actions" style="margin:12px 0 8px"><button class="btn sm" id="addv">Log an entry</button>' + ((ty === 'broker' || ty === 'crypto') ? '<button class="btn sm ghost" id="balv">Update balance</button>' : '') + '</div><div class="panel">';
   es.forEach(function (e) {
     body += '<button class="row" data-le="' + esc(e.id) + '"><div class="l"><b>' + (lab[e.f] || e.f) + (e.who && e.who !== 'me' ? ' \u00b7 ' + esc(e.who) + "\u2019s money" : '') + '</b><span>' + dayLabel(e.d) + (e.note ? ', ' + esc(e.note) : '') + '</span></div><div class="r">' + money(e.amt) + '</div></button>';
@@ -5482,7 +5483,7 @@ function renderOverview() {
   var subsCat = sum(exps.filter(function (t) { return t.cat === '🗓 Subscriptions'; }), ea) / ms.length;
   var peakI = st.reduce(function (b, x, i) { return x.net > st[b].net ? i : b; }, 0);
   h += '<div class="kpis"><div><span>Average month</span><b>' + money(avgSpend, 0) + '</b><i>spent after paybacks</i></div>' +
-    '<div><span>Savings rate</span><b class="' + (kept >= 0 ? 'pos' : 'neg') + '">' + (inc ? Math.round(kept / inc * 100) : 0) + '%</b><i>' + signed(kept, 0) + ' kept</i></div>' +
+    '<div><span>Savings rate</span><b class="' + tone(kept) + '">' + (inc ? Math.round(kept / inc * 100) : 0) + '%</b><i>' + signed(kept, 0) + ' kept</i></div>' +
     '<div><span>With Alaina</span><b style="color:var(--rose)">' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</b><i>' + money(alTot, 0) + ' of spending</i></div>' +
     '<div><span>Subscriptions</span><b>' + money(subsCat, 0) + '</b><i>per month on average</i></div></div>';
 
