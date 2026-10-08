@@ -2983,7 +2983,8 @@ function subSheet(existing, prefill) {
   openSheet(existing ? 'Edit subscription' : 'Track a subscription', body, function (el) {
     $('#cy', el).addEventListener('click', function (e) { var b = e.target.closest('[data-c]'); if (!b) return; s.cycle = +b.dataset.c; el.querySelectorAll('#cy button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); });
     $('#save', el).addEventListener('click', function () {
-      s.name = $('#sn', el).value.trim(); s.amt = r2(calcVal($('#amt', el).value)); s.next = $('#nx', el).value;
+      var nx = $('#nx', el).value; if (nx !== s.next) delete s.day; // a date picked by hand sets the renewal day afresh
+      s.name = $('#sn', el).value.trim(); s.amt = r2(calcVal($('#amt', el).value)); s.next = nx;
       if (!s.name || !(s.amt > 0)) { toast('Add a name and amount'); return; }
       S.meta.subs = S.meta.subs.filter(function (x) { return x.id !== s.id; }); S.meta.subs.push(s); mark('meta'); closeSheet(); render();
     });
@@ -5321,7 +5322,9 @@ function onClick(e) {
       var c = '🗓 Subscriptions'; if (!catObj(c)) S.meta.cats.push({ name: c, type: 'exp' });
       var d = sb.next || today(), mm = monthOf(d);
       (S.tx[mm] = S.tx[mm] || []).push({ id: uid(), d: d, t: 'exp', amt: sb.amt, cat: c, sub: '', note: sb.name, tags: [], src: 'app' });
-      sb.next = addMonth(monthOf(d), sb.cycle || 1) + '-' + d.slice(8, 10);
+      // renew on the same day of the month, or the month's last day when it is shorter (31 Jan, 28 Feb, 31 Mar)
+      var nm = addMonth(monthOf(d), sb.cycle || 1), dom = sb.day || +d.slice(8, 10); sb.day = dom;
+      sb.next = nm + '-' + pad2(Math.min(dom, new Date(+nm.slice(0, 4), +nm.slice(5, 7), 0).getDate()));
       markMonth(mm); mark('meta'); render(); toast('Logged ' + sb.name);
     }
     return;
