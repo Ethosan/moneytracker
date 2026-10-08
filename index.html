@@ -624,6 +624,14 @@ nav.tabs button[aria-current="page"] .ms .pi-line + .pi-fill{display:block}
 .aitag{font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--accent);background:var(--accent-soft);border-radius:6px;padding:1px 6px;margin-right:2px}
 .aichat{padding:8px 12px;max-height:46vh;overflow:auto;display:grid;gap:8px}.aimsg{padding:9px 12px;border-radius:14px;font-size:14px;line-height:1.45;white-space:pre-wrap;max-width:88%}.aimsg.user{justify-self:end;background:var(--accent);color:#fff}.aimsg.assistant{justify-self:start;background:var(--sunk)}
 .sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+.actions.sticky{position:sticky;bottom:0;z-index:2;margin:18px -20px calc(-28px - env(safe-area-inset-bottom,0px));padding:14px 20px calc(14px + env(safe-area-inset-bottom,0px));background:var(--bg);box-shadow:0 -1px 0 var(--line)}
+details.more{margin-top:18px;border-top:1px solid var(--line)}
+details.more>summary{list-style:none;cursor:pointer;display:flex;flex-direction:column;gap:2px;padding:14px 2px 4px;font-weight:600;font-size:14.5px}
+details.more>summary::-webkit-details-marker{display:none}
+details.more>summary>span:first-child::after{content:"";display:inline-block;width:7px;height:7px;border-right:2px solid var(--muted);border-bottom:2px solid var(--muted);transform:rotate(45deg);margin-left:9px;vertical-align:3px;transition:transform .2s}
+details.more[open]>summary>span:first-child::after{transform:rotate(-135deg);vertical-align:-1px}
+details.more>summary .note{font-weight:400;margin:0}
+.chip.ghost{background:transparent;box-shadow:inset 0 0 0 1px var(--line);color:var(--muted)}
 </style>
 </head>
 <body>
@@ -2537,9 +2545,23 @@ function render() {
 
 // ---------- sheets ----------
 var dlg;
+// Every sheet shares one <dialog>. Listeners a sheet adds to it while it is being set up
+// belong to that sheet only: they end when the next sheet opens or this one closes,
+// instead of piling up and acting on old data (or saving twice).
+var sheetScope = null;
+function scopeSheetListeners() {
+  var add = dlg.addEventListener;
+  dlg.addEventListener = function (type, fn, opts) {
+    if (sheetScope) opts = Object.assign({}, typeof opts === 'object' ? opts : { capture: !!opts }, { signal: sheetScope.signal });
+    return add.call(dlg, type, fn, opts);
+  };
+  add.call(dlg, 'close', function () { if (sheetScope) { sheetScope.abort(); sheetScope = null; } });
+}
 function openSheet(title, body, onReady) {
+  if (sheetScope) sheetScope.abort();
   dlg.innerHTML = '<div class="hd"><h3>' + esc(title) + '</h3><button data-close>Close</button></div><div class="bd">' + body + '</div>';
   if (!dlg.open) dlg.showModal();
+  sheetScope = new AbortController();
   if (onReady) onReady(dlg);
 }
 function closeSheet() { if (dlg.open) dlg.close(); }
@@ -2590,14 +2612,25 @@ function txSheet(existing, asNew) {
   var t = existing ? JSON.parse(JSON.stringify(existing)) : asNew ? seed : { id: uid(), d: today(), t: 'exp', amt: 0, cat: '', sub: '', note: '', tags: [], src: 'app' };
   t.sub = cleanSub(t.sub);
   if (!existing && t.pm !== 'later' && !t.acct) t.acct = defWallet();
+  var moreOpen = !!((existing || asNew) && (t.sub || (t.tags || []).length || t.split || (existing && t.d !== today())));
   function subChips() {
     if (!t.cat) return '<p class="note" style="margin:0">Pick a category first.</p>';
     var ss = subsFor(t.cat);
     if (!ss.length) return '<p class="note" style="margin:0">No subcategories saved for this category yet.</p>';
     return ss.map(function (x) { return '<button class="chip" data-subpick="' + esc(x) + '" aria-pressed="' + (t.sub === x) + '">' + esc(x) + '</button>'; }).join('');
   }
+  var showAllCats = false;
   function catChips() {
-    return S.meta.cats.filter(function (c) { return c.type === t.t; }).map(function (c) { return '<button class="chip" data-cat="' + esc(c.name) + '" aria-pressed="' + (t.cat === c.name) + '">' + esc(c.name) + '</button>'; }).join('');
+    var all = S.meta.cats.filter(function (c) { return c.type === t.t; }).map(function (c) { return c.name; }), list = all;
+    if (!showAllCats && all.length > 8) {
+      // the six you have used most in the last four months, plus whatever is already picked
+      var since = addDays(today(), -120), n = {};
+      allTx().forEach(function (x) { if (x.t === t.t && x.d >= since && x.cat) n[x.cat] = (n[x.cat] || 0) + 1; });
+      list = all.slice().sort(function (a, b) { return (n[b] || 0) - (n[a] || 0) || all.indexOf(a) - all.indexOf(b); }).slice(0, 6);
+      if (t.cat && list.indexOf(t.cat) < 0) list.push(t.cat);
+    }
+    return list.map(function (c) { return '<button class="chip" data-cat="' + esc(c) + '" aria-pressed="' + (t.cat === c) + '">' + esc(c) + '</button>'; }).join('') +
+      (list.length < all.length ? '<button class="chip ghost" data-catmore>More (' + (all.length - list.length) + ')</button>' : '');
   }
   function tagChips() {
     return S.meta.tags.map(function (g) { var pp = isPersonTag(g); return '<button class="chip' + (pp ? ' rose' : '') + '" data-tag="' + esc(g) + '" aria-pressed="' + (t.tags.indexOf(g) > -1) + '">' + (pp ? 'With ' : '') + esc(g) + '</button>'; }).join('');
@@ -2606,16 +2639,10 @@ function txSheet(existing, asNew) {
     (existing ? '' : '<button data-t="move" aria-pressed="false">Move money</button>') +
     (t.t === 'adj' ? '<button data-t="adj" aria-pressed="true">Adjustment</button>' : '') + '</div>' +
     calcField('amt', t.calc || (t.amt ? t.amt : '')) +
-    '<label class="f">Category</label><div class="wrap" id="cats">' + catChips() + '</div>' +
-    '<label class="f" for="sub">Subcategory</label><input class="t" id="sub" value="' + esc(t.sub || '') + '" placeholder="e.g. Grab, drinks, with friends" autocomplete="off">' +
-    '<div class="wrap" id="subchips" style="margin-top:7px">' + subChips() + '</div>' +
-    '<label class="f">Tags</label><div class="wrap" id="tags">' + tagChips() + '</div>' +
-    '<label class="f">Did you pay for other people?</label><div class="seg" id="sp"><button data-sp="0" aria-pressed="' + !t.split + '">Just me</button><button data-sp="1" aria-pressed="' + !!t.split + '">I paid for others</button></div>' +
-    '<div id="spbox"' + (t.split ? '' : ' hidden') + '><label class="f" for="mine">My share</label><input class="t" id="mine" inputmode="decimal" value="' + (t.split ? t.split.mine : '') + '" placeholder="e.g. 30">' +
-    '<div class="wrap" style="margin-top:7px"><button class="chip" id="mine0">None of it is mine</button><button class="chip" id="minehalf">Half</button></div>' +
-    '<label class="f">Who owes you the rest</label><div class="wrap" id="spwho"></div>' +
-    '<p class="note" id="spmsg"></p></div>' +
-    '<label class="f" id="pml">' + (t.t === 'inc' ? 'Received into' : 'Paid with') + '</label><div class="wrap" id="pm">' + payChips(t) + '</div>' +
+    '<label class="f" for="note">What was it?</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="e.g. Chicken rice, Grab home" autocomplete="off" enterkeyhint="done">' +
+    '<div class="wrap" id="nsug" style="margin-top:7px"></div>' +
+    '<label class="f" id="catl">Category</label><div class="wrap" id="cats" role="group" aria-labelledby="catl">' + catChips() + '</div>' +
+    '<label class="f" id="pml">' + (t.t === 'inc' ? 'Received into' : 'Paid with') + '</label><div class="wrap" id="pm" role="group" aria-labelledby="pml">' + payChips(t) + '</div>' +
     '<div id="instbox"' + (t.pm === 'later' ? '' : ' hidden') + '><label class="f">How it gets paid</label><div class="seg" id="instn">' +
       [1, 3, 4, 6, 12].map(function (n) { return '<button data-in="' + n + '" aria-pressed="' + (((t.inst && t.inst.n) || 1) === n) + '">' + (n === 1 ? 'Next month' : n + ' months') + '</button>'; }).join('') +
       '<button data-in="custom" aria-pressed="' + (t.inst && [1, 3, 4, 6, 12].indexOf(t.inst.n) < 0) + '">Custom</button></div>' +
@@ -2624,10 +2651,18 @@ function txSheet(existing, asNew) {
       '<div id="instfeebox"' + (t.inst && t.inst.n > 1 ? '' : ' hidden') + '><label class="f" for="instfee">Interest or fee on this plan, in total</label>' +
       '<input class="t" id="instfee" inputmode="decimal" value="' + (t.inst && t.inst.fee ? t.inst.fee : '') + '" placeholder="0.00 if it is interest-free"></div>' +
       '<p class="note" id="instmsg" style="margin-top:0"></p></div>' +
-    '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="What was it?" autocomplete="off">' +
-    '<div class="wrap" id="nsug" style="margin-top:7px"></div>' +
+    '<details class="more" id="txmore"' + (moreOpen ? ' open' : '') + '><summary><span>More details</span><span class="note" id="moresum"></span></summary>' +
+    '<label class="f" for="sub">Subcategory</label><input class="t" id="sub" value="' + esc(t.sub || '') + '" placeholder="e.g. Grab, drinks, with friends" autocomplete="off">' +
+    '<div class="wrap" id="subchips" style="margin-top:7px">' + subChips() + '</div>' +
+    '<label class="f" id="tagl">Tags</label><div class="wrap" id="tags" role="group" aria-labelledby="tagl">' + tagChips() + '</div>' +
+    '<label class="f">Did you pay for other people?</label><div class="seg" id="sp"><button data-sp="0" aria-pressed="' + !t.split + '">Just me</button><button data-sp="1" aria-pressed="' + !!t.split + '">I paid for others</button></div>' +
+    '<div id="spbox"' + (t.split ? '' : ' hidden') + '><label class="f" for="mine">My share</label><input class="t" id="mine" inputmode="decimal" value="' + (t.split ? t.split.mine : '') + '" placeholder="e.g. 30">' +
+    '<div class="wrap" style="margin-top:7px"><button class="chip" id="mine0">None of it is mine</button><button class="chip" id="minehalf">Half</button></div>' +
+    '<label class="f">Who owes you the rest</label><div class="wrap" id="spwho"></div>' +
+    '<p class="note" id="spmsg"></p></div>' +
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + t.d + '">' +
-    '<div class="actions">' + (existing ? '<button class="btn danger" id="del">Delete</button>' : '') + '<button class="btn" id="save">' + (existing ? 'Save changes' : 'Add') + '</button></div>';
+    '</details>' +
+    '<div class="actions sticky">' + (existing ? '<button class="btn danger" id="del">Delete</button>' : '') + '<button class="btn" id="save">' + (existing ? 'Save changes' : 'Add') + '</button></div>';
   openSheet(existing ? 'Edit transaction' : 'New transaction', body, function (el) {
     if (!existing) setTimeout(function () { $('#amt', el).focus(); }, 50);
     wireCalc(el, 'amt', function () { if (typeof drawInst === 'function') { try { drawInst(); drawWho(); } catch (x) { } } });
@@ -2640,7 +2675,23 @@ function txSheet(existing, asNew) {
       el.querySelectorAll('#tt button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
       $('#cats', el).innerHTML = catChips();
     });
+    function drawMore() {
+      if (!$('#moresum', el) || !$('#dt', el)) return; // sheet already closed or replaced
+      var bits = [], d = $('#dt', el).value || today();
+      if (d !== today()) bits.push(dayLabel(d));
+      if (t.sub) bits.push(t.sub);
+      (t.tags || []).forEach(function (g) { bits.push(isPersonTag(g) ? 'with ' + g : g); });
+      if (!$('#spbox', el).hidden) bits.push('split' + (spWho ? ' with ' + spWho : ''));
+      $('#moresum', el).textContent = bits.length ? bits.join(' \u00b7 ') : 'Today. Subcategory, tags, split';
+    }
+    el.addEventListener('click', function () { setTimeout(drawMore, 0); });
+    el.addEventListener('input', function () { setTimeout(drawMore, 0); });
+    el.addEventListener('change', function () { setTimeout(drawMore, 0); });
+    el.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.isComposing && e.target && (e.target.id === 'amt' || e.target.id === 'note')) { e.preventDefault(); $('#save', el).click(); }
+    });
     $('#cats', el).addEventListener('click', function (e) {
+      if (e.target.closest('[data-catmore]')) { showAllCats = true; $('#cats', el).innerHTML = catChips(); return; }
       var b = e.target.closest('[data-cat]'); if (!b) return; t.cat = b.dataset.cat;
       el.querySelectorAll('#cats .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
       if (t.cat === '💝 Dates' && t.tags.indexOf('Alaina') < 0) { t.tags.push('Alaina'); $('#tags', el).innerHTML = tagChips(); }
@@ -2717,6 +2768,7 @@ function txSheet(existing, asNew) {
       drawWho();
     });
     drawWho();
+    setTimeout(drawMore, 0);
     var noteEl = $('#note', el), sug = $('#nsug', el);
     function drawSug() {
       var list = noteSuggest(noteEl.value, t.cat, t.t);
@@ -2798,7 +2850,8 @@ function txSheet(existing, asNew) {
       syncInstFee(t);
       var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t);
       rememberSub(t.cat, t.sub); mark('meta'); markMonth(m);
-      closeSheet(); render(); toast(existing ? 'Saved' : 'Added');
+      closeSheet(); render();
+      toastUndo((existing ? 'Saved ' : 'Added ') + money(t.amt) + ' \u00b7 ' + plain(t.cat) + (t.note ? ', ' + (t.note.length > 24 ? t.note.slice(0, 23) + '\u2026' : t.note) : ''));
     });
     if (existing) $('#del', el).addEventListener('click', function () { snapshot(); removeTx(existing); closeSheet(); render(); toastUndo('Transaction deleted'); });
   });
@@ -5683,10 +5736,11 @@ function onClick(e) {
 
 function boot() {
   dlg = $('#sheet');
+  dlg.addEventListener('click', function (e) { if (e.target === dlg) closeSheet(); });
+  scopeSheetListeners();
   applyTheme();
   loadLocal();
   document.addEventListener('click', onClick);
-  dlg.addEventListener('click', function (e) { if (e.target === dlg) closeSheet(); });
   var q = new URLSearchParams(location.search);
   if (q.get('tab')) UI.tab = q.get('tab');
   render();
