@@ -4612,9 +4612,10 @@ function tableToRows(rows) {
   for (var i = 0; i < Math.min(rows.length, 15) && hi < 0; i++) {
     var r = rows[i].map(function (x) { return String(x).toLowerCase(); }), d = -1, a = -1, ds = [];
     r.forEach(function (h, j) {
-      if (d < 0 && /date|time/.test(h)) d = j;
-      else if (a < 0 && /amount|total|fare|price|paid|debit|sgd|value/.test(h)) a = j;
-      else if (/desc|detail|merchant|service|pick|drop|destination|from|to\b|item|name|remark|type|booking|category|particular/.test(h)) ds.push(j);
+      // a date column is never the amount, even when called "Value date"
+      if (/date|time/.test(h)) { if (d < 0) d = j; return; }
+      if (a < 0 && /amount|total|fare|price|paid|debit|withdraw|sgd|value/.test(h) && !/credit|deposit/.test(h)) a = j;
+      else if (/desc|detail|merchant|service|pick|drop|destination|from|to\b|item|name|remark|type|booking|category|particular|ref/.test(h)) ds.push(j);
     });
     if (d > -1 && a > -1) { hi = i; cd = d; ca = a; cdesc = ds; }
   }
