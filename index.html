@@ -797,6 +797,15 @@ details.morepat>summary span{flex-basis:100%;font-size:13px;font-weight:400;colo
   .ask-main{min-height:calc(100vh - 200px)}
   .ask-main .ask-compose{margin-top:auto}
 }
+small.cur{font-size:11px;font-weight:700;color:var(--muted);margin-left:4px;letter-spacing:.02em}
+.coins .row{gap:8px}
+.coins .t{min-height:42px;padding:8px 10px}
+.coins .sym{width:84px;flex:none;text-transform:uppercase}
+.coins .cval{flex:none;min-width:72px;text-align:right;font-weight:600;font-size:13.5px}
+.fromusd{display:flex;align-items:center;gap:8px;margin:6px 2px 0;flex-wrap:wrap}
+.fromusd .t{width:120px;min-height:40px;padding:8px 10px}
+.fromusd .note{margin:0}
+.conv-out{padding:6px 16px;margin-top:14px}
 </style>
 </head>
 <body>
@@ -1535,7 +1544,7 @@ function docsToState(rows) {
 function connect() {
   var cfg = window.LEDGER_CONFIG || {};
   if (!window.supabase || !cfg.supabaseUrl || /YOUR-/.test(cfg.supabaseUrl + cfg.supabaseAnonKey)) {
-    store.mode = 'local'; setSync('On this device'); render(); return;
+    store.mode = 'local'; setSync('On this device'); render(); ratesMaybe(); return;
   }
   store.sb = store.sb || window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } });
   store.sb.auth.getSession().then(function (r) {
@@ -1554,7 +1563,7 @@ function connect() {
         res.data.forEach(function (d) { absorb(d.id, d.body); }); histSnap();
         normalize(); saveLocal(); markAll();
       } else if (allTx().length || S.ledger.length) markAll();
-      store.mode = 'cloud'; setSync('Synced'); render(); flush(); aiMaybe();
+      store.mode = 'cloud'; setSync('Synced'); render(); flush(); aiMaybe(); ratesMaybe();
     });
   }).catch(function (e) {
     store.err = errText(e);
@@ -2921,6 +2930,7 @@ function txSheet(existing, asNew) {
     (existing ? '' : '<button data-t="move" aria-pressed="false">Move money</button>') +
     (t.t === 'adj' ? '<button data-t="adj" aria-pressed="true">Adjustment</button>' : '') + '</div>' +
     calcField('amt', t.calc || (t.amt ? t.amt : '')) +
+    '<div class="fromusd" id="fromusd"><button type="button" class="linkbtn" id="fromusdgo">Convert from US$</button></div>' +
     '<label class="f" for="note">What was it?</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="e.g. Chicken rice, Grab home" autocomplete="off" enterkeyhint="done">' +
     '<div class="wrap" id="nsug" style="margin-top:7px"></div>' +
     '<label class="f" id="catl">Category</label><div class="wrap" id="cats" role="group" aria-labelledby="catl">' + catChips() + '</div>' +
@@ -2959,6 +2969,18 @@ function txSheet(existing, asNew) {
     });
     // opening More details brings its fields into view instead of leaving them under the Add bar
     $('#txmore', el).addEventListener('toggle', function () { if (this.open) this.scrollIntoView({ block: 'start', behavior: 'smooth' }); });
+    $('#fromusdgo', el).addEventListener('click', function () {
+      var box = $('#fromusd', el);
+      box.innerHTML = '<span>US$</span><input class="t" id="usdin" inputmode="decimal" placeholder="0.00" aria-label="Amount in US$"><span id="usdout" class="note"></span>';
+      var inp = $('#usdin', el); inp.focus();
+      function go() {
+        var u = calcVal(inp.value), r = usdRate();
+        if (!r) { $('#usdout', el).textContent = 'Loading today\u2019s rate\u2026'; refreshRates(true).then(function () { if (usdRate()) go(); else $('#usdout', el).textContent = 'Rate unavailable offline'; }); return; }
+        $('#usdout', el).textContent = u > 0 ? '= ' + money(u * r) + ' at ' + (+r).toFixed(4) : 'US$1 = S$' + (+r).toFixed(4);
+        if (u > 0) { var a = $('#amt', el); a.value = r2(u * r); a.dispatchEvent(new Event('input', { bubbles: true })); }
+      }
+      inp.addEventListener('input', go); go();
+    });
     function drawMore() {
       if (!$('#moresum', el) || !$('#dt', el)) return; // sheet already closed or replaced
       var bits = [], d = $('#dt', el).value || today();
@@ -4226,11 +4248,21 @@ function accountBalances() {
   }).filter(function (l) { return l.now > 0.005 || l.counted != null; });
   // balances you counted in wallets that have since been removed
   var gone = r2(sum(Object.keys(lines).filter(function (n) { return accs.indexOf(n) < 0 && !liabNames[n] && !S.meta.accounts.some(function (a) { return a.name === n; }); }), function (n) { return +lines[n] || 0; }));
-  var total = since ? flowsBetween(since, today()) : 0, expected = lc ? r2(lc.total + total) : null;
+  // US$ and crypto wallets: what they're worth now, at live rates; the change since the count is market moves
+  var reval = 0, native = (lc && lc.native) || {};
+  accs.forEach(function (n) {
+    var a = acctOf(n); if (!a || !a.cur || a.cur === 'SGD') return;
+    var book = bal[n] || 0, live = null;
+    if (a.cur === 'USD' && usdRate() && native[n] && native[n].amt != null) live = r2(native[n].amt * usdRate() + (book - (+lines[n] || 0)));
+    if (a.cur === 'CRYPTO') { var cv = coinsValue(a); if (!cv.missing.length) live = cv.value; }
+    if (live != null) { if (lc) reval += live - book; bal[n] = live; }
+  });
+  reval = r2(reval);
+  var total = since ? flowsBetween(since, today()) : 0, expected = lc ? r2(lc.total + total + reval) : null;
   var named = r2(sum(accs, function (n) { return bal[n] || 0; })), owed = r2(sum(liabs, function (l) { return l.math; }));
   var unassigned = lc ? r2(expected - (named + gone - owed)) : 0;
   return { since: since, lc: lc, bal: bal, touched: touched, unassigned: unassigned, expected: expected, owed: owed, accs: accs, liabs: liabs, gone: gone,
-    noWallet: r2(noWallet), noWalletN: noWalletN, people: r2(people) };
+    noWallet: r2(noWallet), noWalletN: noWalletN, people: r2(people), reval: reval };
 }
 // ---------- wallet management ----------
 // Every place a wallet's name is stored: purchases and income (acct), transfers (from/to),
@@ -4448,6 +4480,8 @@ function walletSheet(n) {
   var body = '<div class="kv" style="margin-top:0"><span>Used by</span><span>' + (used.length ? used.join(', ') : 'nothing yet') + '</span></div>' +
     '<label class="f" for="wn">Name</label><div style="display:flex;gap:8px"><input class="t" id="wn" value="' + esc(n) + '"><button class="btn sm" id="wren">Rename</button></div>' +
     '<p class="note">Renaming updates everything above in one go. Rename it to another wallet\u2019s name to merge the two.</p>' +
+    '<label class="f">Currency</label><div class="seg" id="wcur">' + [['SGD', 'S$'], ['USD', 'US$'], ['CRYPTO', 'Crypto']].map(function (c) { return '<button data-wc="' + c[0] + '" aria-pressed="' + (walletCur(n) === c[0]) + '">' + c[1] + '</button>'; }).join('') + '</div>' +
+    '<div id="wcoins"></div><p class="note" id="wcurmsg"></p>' +
     '<label class="f" style="margin-top:22px">Delete this wallet</label>' +
     (others.length ? '<label class="f" for="winto" style="margin-top:4px">Move its ' + (u.total ? u.total + ' entries' : 'history') + ' to</label><select class="t" id="winto">' +
       others.map(function (w) { return '<option' + (w === defWallet() && w !== n ? ' selected' : '') + '>' + esc(w) + '</option>'; }).join('') +
@@ -4455,6 +4489,36 @@ function walletSheet(n) {
     '<p class="note" id="wdmsg"></p>' +
     '<div class="actions"><button class="btn danger" id="wdel" style="flex:1">Delete ' + esc(n) + '</button></div>';
   openSheet(n, body, function (el) {
+    var acc = acctOf(n), coins = JSON.parse(JSON.stringify((acc && acc.coins) || []));
+    function drawCur() {
+      var cur = walletCur(n);
+      el.querySelectorAll('#wcur button').forEach(function (x) { x.setAttribute('aria-pressed', x.dataset.wc === cur); });
+      $('#wcurmsg', el).textContent = cur === 'SGD' ? 'Counted and shown in S$, like everything you log.'
+        : cur === 'USD' ? 'Counted in US$ at your balance checks and shown in S$ at today\u2019s rate. ' + ratesNote() + '.'
+        : 'Add each coin and how much you hold; stablecoins like USDT count as US$1. Valued live in S$. ' + ratesNote() + '.';
+      $('#wcoins', el).innerHTML = cur !== 'CRYPTO' ? '' : '<div class="panel coins">' + coins.map(function (c, i) {
+        var pr = coinPrice(c.sym);
+        return '<div class="row"><input class="t sym" data-ci="' + i + '" data-k="sym" value="' + esc(c.sym) + '" placeholder="BTC" aria-label="Coin">' +
+          '<input class="t" data-ci="' + i + '" data-k="qty" inputmode="decimal" value="' + esc(c.qty) + '" placeholder="0.00" aria-label="Amount held">' +
+          '<span class="cval">' + (pr != null && +c.qty ? money(c.qty * pr) : '') + '</span><button class="chip x" data-crm="' + i + '" aria-label="Remove">\u2715</button></div>';
+      }).join('') + '</div><div class="actions"><button class="btn sm ghost" id="cadd">+ Add a coin</button><button class="btn sm" id="csave">Save coins</button></div>';
+    }
+    $('#wcur', el).addEventListener('click', function (e) {
+      var b = e.target.closest('[data-wc]'); if (!b || !acc) return;
+      acc.cur = b.dataset.wc; if (acc.cur === 'SGD') delete acc.cur; mark('meta'); drawCur(); render();
+      refreshRates().then(function (ch) { if (ch) { drawCur(); render(); } });
+    });
+    el.addEventListener('input', function (e) { var i = e.target.dataset && e.target.dataset.ci; if (i == null) return; coins[+i][e.target.dataset.k] = e.target.dataset.k === 'sym' ? e.target.value.trim().toUpperCase() : e.target.value; });
+    el.addEventListener('click', function (e) {
+      if (e.target.closest('#cadd')) { coins.push({ sym: '', qty: '' }); drawCur(); var ins = el.querySelectorAll('.coins .sym'); if (ins.length) ins[ins.length - 1].focus(); return; }
+      var rm = e.target.closest('[data-crm]'); if (rm) { coins.splice(+rm.dataset.crm, 1); drawCur(); return; }
+      if (e.target.closest('#csave')) {
+        acc.coins = coins.filter(function (c) { return c.sym && +c.qty > 0; }).map(function (c) { return { sym: c.sym.toUpperCase(), qty: +c.qty }; });
+        coins = JSON.parse(JSON.stringify(acc.coins)); mark('meta');
+        refreshRates(true).then(function () { drawCur(); render(); toast('Coins saved'); });
+      }
+    });
+    drawCur();
     function msg() {
       var into = $('#winto', el) ? $('#winto', el).value : '';
       $('#wdmsg', el).textContent = !u.total ? 'Nothing uses it, so it simply goes.'
@@ -4474,6 +4538,73 @@ function walletSheet(n) {
       var into = $('#winto', el) ? $('#winto', el).value : '';
       snapshot(); deleteWallet(n, into || null); closeSheet(); render(); toastUndo(n + ' deleted');
     });
+  });
+}
+
+// ---------- currencies: wallets in US$ or crypto, valued live in S$ ----------
+// Everything you log stays in S$ (you convert before logging). A wallet can instead be in
+// US$ (counted in US$) or hold coins; those are valued at live rates, and the difference
+// since your last count shows as market moves, so totals still reconcile.
+var COIN_IDS = { BTC: 'bitcoin', ETH: 'ethereum', SOL: 'solana', BNB: 'binancecoin', XRP: 'ripple', ADA: 'cardano', DOGE: 'dogecoin', TRX: 'tron', TON: 'the-open-network',
+  AVAX: 'avalanche-2', DOT: 'polkadot', LINK: 'chainlink', LTC: 'litecoin', SUI: 'sui', ARB: 'arbitrum', OP: 'optimism', NEAR: 'near', ATOM: 'cosmos', HYPE: 'hyperliquid' };
+var STABLES = { USDT: 1, USDC: 1, FDUSD: 1, DAI: 1, TUSD: 1, PYUSD: 1, USDE: 1, USDS: 1 }; // counted as US$1
+var RATES = (function () { try { return JSON.parse(localStorage.getItem('ledger-rates') || 'null') || {}; } catch (e) { return {}; } })();
+function usdRate() { return RATES.usd || null; } // S$ per US$
+function coinPrice(sym) { sym = String(sym || '').toUpperCase(); if (STABLES[sym]) return usdRate(); return (RATES.coins && RATES.coins[sym]) || null; }
+function acctOf(n) { return S.meta.accounts.filter(function (a) { return a.name === n; })[0] || null; }
+function walletCur(n) { var a = acctOf(n); return (a && a.cur) || 'SGD'; }
+function hasForeign() { return S.meta.accounts.some(function (a) { return a.cur && a.cur !== 'SGD'; }); }
+function usd(n, dp) { return money(n, dp).replace('$', 'US$'); }
+function qtyLabel(q) { return (+q).toLocaleString('en-SG', { maximumFractionDigits: 8 }); }
+function coinsValue(a) {
+  var v = 0, missing = [];
+  (a.coins || []).forEach(function (c) { var pr = coinPrice(c.sym); if (pr == null) missing.push(c.sym); else v += (+c.qty || 0) * pr; });
+  return { value: r2(v), missing: missing };
+}
+function coinsLabel(a) { return (a.coins || []).map(function (c) { return qtyLabel(c.qty) + ' ' + esc(String(c.sym).toUpperCase()); }).join(' \u00b7 ') || 'No coins added'; }
+function ratesNote() { return RATES.usd ? 'US$1 = S$' + (+RATES.usd).toFixed(4) + ', updated ' + chatWhen(RATES.at) : 'Live rates aren\u2019t loaded yet'; }
+// US$ from open.er-api.com, coins from CoinGecko; both free and keyless. Cached, so offline uses the last rates.
+function refreshRates(force) {
+  if (!force && RATES.at && Date.now() - Date.parse(RATES.at) < 30 * 60e3) return Promise.resolve(false);
+  var syms = { BTC: 1, ETH: 1, SOL: 1 };
+  S.meta.accounts.forEach(function (a) { (a.coins || []).forEach(function (c) { syms[String(c.sym).toUpperCase()] = 1; }); });
+  var ids = Object.keys(syms).map(function (x) { return COIN_IDS[x]; }).filter(Boolean);
+  var fx = fetch('https://open.er-api.com/v6/latest/USD').then(function (r) { return r.json(); }).then(function (j) { return j && j.rates && j.rates.SGD; });
+  var cg = fetch('https://api.coingecko.com/api/v3/simple/price?ids=' + ids.join(',') + '&vs_currencies=sgd').then(function (r) { return r.json(); });
+  return Promise.all([fx.catch(function () { return null; }), cg.catch(function () { return null; })]).then(function (res) {
+    if (!res[0] && !res[1]) return false;
+    var coins = Object.assign({}, RATES.coins || {});
+    if (res[1]) Object.keys(COIN_IDS).forEach(function (x) { var q = res[1][COIN_IDS[x]]; if (q && q.sgd) coins[x] = q.sgd; });
+    RATES = { usd: res[0] || RATES.usd, coins: coins, at: new Date().toISOString() };
+    try { localStorage.setItem('ledger-rates', JSON.stringify(RATES)); } catch (e) { }
+    return true;
+  });
+}
+function ratesMaybe() {
+  if (!hasForeign()) return;
+  refreshRates().then(function (changed) { if (changed && (UI.tab === 'pnl' || UI.tab === 'home') && !(dlg && dlg.open)) render(); }).catch(function () { });
+}
+// Convert anything: S$, US$ or a coin you hold, into S$ and US$.
+function convertSheet() {
+  var opts = ['SGD', 'USD'].concat(Object.keys(RATES.coins || {})).concat(Object.keys(STABLES));
+  S.meta.accounts.forEach(function (a) { (a.coins || []).forEach(function (c) { var x = String(c.sym).toUpperCase(); if (opts.indexOf(x) < 0) opts.push(x); }); });
+  opts = opts.filter(function (x, i) { return opts.indexOf(x) === i; });
+  var body = '<div class="conv"><div class="amt-in"><span id="cvsym">S$</span><input id="cva" inputmode="decimal" placeholder="0.00" aria-label="Amount"></div>' +
+    '<label class="f" for="cvf">From</label><select class="t" id="cvf">' + opts.map(function (x) { return '<option value="' + x + '">' + (x === 'SGD' ? 'S$ Singapore dollar' : x === 'USD' ? 'US$ US dollar' : x) + '</option>'; }).join('') + '</select>' +
+    '<div class="panel conv-out" id="cvo"></div><p class="note" id="cvn"></p><div class="actions"><button class="btn ghost" id="cvr">Refresh rates</button></div></div>';
+  openSheet('Convert', body, function (el) {
+    function sgdOf(a, from) { return from === 'SGD' ? a : from === 'USD' ? (usdRate() ? a * usdRate() : null) : (coinPrice(from) != null ? a * coinPrice(from) : null); }
+    function draw() {
+      var a = calcVal($('#cva', el).value), from = $('#cvf', el).value, sg = a > 0 ? sgdOf(a, from) : null;
+      $('#cvsym', el).textContent = from === 'SGD' ? 'S$' : from === 'USD' ? 'US$' : from;
+      $('#cvo', el).innerHTML = '<div class="kv"><span>In S$</span><span><b>' + (sg == null ? '\u2013' : money(sg)) + '</b></span><span>In US$</span><span><b>' + (sg == null || !usdRate() ? '\u2013' : usd(sg / usdRate())) + '</b></span>' +
+        (from !== 'SGD' && from !== 'USD' && coinPrice(from) != null ? '<span>1 ' + from + '</span><span>' + money(coinPrice(from)) + '</span>' : '') + '</div>';
+      $('#cvn', el).textContent = (coinPrice(from) == null && from !== 'SGD' && from !== 'USD') ? 'No live price for ' + from + ' yet. Try Refresh rates.' : ratesNote() + '.';
+    }
+    $('#cva', el).addEventListener('input', draw); $('#cvf', el).addEventListener('change', draw);
+    $('#cvr', el).addEventListener('click', function () { var b = this; b.disabled = true; b.textContent = 'Refreshing\u2026'; refreshRates(true).then(function (ok) { b.disabled = false; b.textContent = 'Refresh rates'; if (!ok) toast('Couldn\u2019t reach the rate services. Check your connection.'); draw(); }); });
+    draw(); setTimeout(function () { $('#cva', el).focus(); }, 50);
+    if (!RATES.at) refreshRates(true).then(draw);
   });
 }
 // ---------- gap finder ----------
@@ -4600,6 +4731,11 @@ function unlinkedSheet() {
     var all = $('#ulall', el); if (all) all.addEventListener('click', function () { items.forEach(function (it) { assignWallet(it, dw); }); render(); unlinkedSheet(); toast('All linked to ' + dw); });
   });
 }
+function walletSub(n, b) {
+  var a = acctOf(n); if (!a || !a.cur || a.cur === 'SGD') return '';
+  if (a.cur === 'USD') return '<span>' + (b != null && usdRate() ? usd(b / usdRate()) : 'US$ wallet') + '</span>';
+  return '<span>' + coinsLabel(a) + '</span>';
+}
 function balancesSection() {
   var A = accountBalances(), h = '<section class="blk"><h2>Balances <button data-act="check">Count now</button></h2>';
   if (!A.lc) {
@@ -4612,8 +4748,10 @@ function balancesSection() {
   A.accs.forEach(function (n) {
     var b = A.bal[n], counted = A.lc.lines && A.lc.lines[n] != null ? +A.lc.lines[n] : null;
     h += '<button class="row" data-wallet="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>' + (counted == null ? 'Not counted yet' : 'Counted ' + money(counted) + ' on ' + dayLabel(A.since) + (A.touched[n] ? ', updated since' : '')) + '</span></div>' +
-      '<div class="r">' + (b == null ? '\u2013' : money(b)) + '</div></button>';
+      '<div class="r">' + (b == null ? '\u2013' : money(b)) + walletSub(n, b) + '</div></button>';
   });
+  if (Math.abs(A.reval) > 0.005)
+    h += '<div class="row"><div class="l"><b>Market moves</b><span>Change in your US$ and crypto wallets\u2019 value since ' + dayLabel(A.since) + ', at today\u2019s rates</span></div><div class="r ' + tone(A.reval) + '">' + signed(A.reval) + '</div></div>';
   if (Math.abs(A.gone) > 0.005)
     h += '<div class="row"><div class="l"><b>Wallets removed since your count</b><span>What you counted in them on ' + dayLabel(A.since) + '. Gone at your next count</span></div><div class="r">' + money(A.gone) + '</div></div>';
   if (Math.abs(A.unassigned) > 0.005) {
@@ -4629,7 +4767,8 @@ function balancesSection() {
     if (diff) h += '<button class="row gaprow" data-gapfind="' + esc(l.name) + '" data-gapamt="' + gp + '"><span class="av warn">!</span><div class="l"><b>' + money(Math.abs(gp)) + ' unexplained on ' + esc(l.name) + '</b><span>' + (gp > 0 ? l.name + ' says you owe more than your ledger shows. Tap to find it' : 'Your ledger shows more owed than ' + l.name + ' does. Tap to look') + '</span></div><div class="r">Find \u203a</div></button>';
   });
   h += '<div class="row"><div class="l"><b>Expected total now</b><span>What a count today should come to</span></div><div class="r">' + money(A.expected) + '</div></div></div>' +
-    '<div class="actions wrap-btns" style="margin:10px 0 0"><button class="btn sm ghost" data-act="addwallet">+ Add a wallet</button><button class="btn sm ghost" data-act="checkplan">Reminder: ' + checkPlanLabel() + '</button></div>' +
+    '<div class="actions wrap-btns" style="margin:10px 0 0"><button class="btn sm ghost" data-act="addwallet">+ Add a wallet</button><button class="btn sm ghost" data-act="convert">Convert</button><button class="btn sm ghost" data-act="checkplan">Reminder: ' + checkPlanLabel() + '</button></div>' +
+    (hasForeign() ? '<p class="note">' + ratesNote() + '.</p>' : '') +
     '<p class="note">Tap a wallet to see its balance over time and every entry. Each one starts from your last count and moves with anything since that uses it. Choosing a wallet under "Paid with" keeps it exact.</p></section>';
   return h;
 }
@@ -4649,7 +4788,17 @@ function checkSheet() {
     if (!S.meta.accounts.length) return '<div class="note" style="padding:10px 0">Add each place you keep money you can spend: bank accounts, cash, GrabPay wallet. Add GrabPay Later as money you owe. Leave brokerage and prop firm accounts out, they are tracked separately.</div>';
     return S.meta.accounts.map(function (a) {
       var auto = plOwedBy[a.name];
-      var ex = expect[a.name];
+      var ex = expect[a.name], cur = a.cur || 'SGD';
+      if (!a.liability && cur === 'CRYPTO') {
+        var cv = coinsValue(a);
+        return '<div class="row"><div class="l"><b>' + esc(a.name) + '</b><span>' + coinsLabel(a) + (cv.missing.length ? '. No live price for ' + esc(cv.missing.join(', ')) : ', at live prices') + '. Change the coins on the wallet itself</span></div>' +
+          '<input class="t" style="width:120px;text-align:right" data-acc="' + esc(a.name) + '" data-cur="CRYPTO" value="' + (cv.missing.length ? '' : cv.value) + '" readonly aria-label="' + esc(a.name) + ' value in S$"></div>';
+      }
+      if (!a.liability && cur === 'USD' && usdRate()) {
+        var uv = vals[a.name] != null ? r2(vals[a.name] / usdRate()) : '';
+        return '<div class="row"><div class="l"><b>' + esc(a.name) + ' <small class="cur">US$</small></b><span>' + (ex != null ? 'Your logs say ' + usd(ex / usdRate()) + '. Enter what it shows in US$' : 'Enter what it shows in US$') + '</span></div>' +
+          '<input class="t" style="width:120px;text-align:right" inputmode="decimal" data-acc="' + esc(a.name) + '" data-cur="USD" value="' + uv + '" placeholder="US$ 0.00"></div>';
+      }
       return '<div class="row"><div class="l"><b>' + esc(a.name) + '</b><span>' + (auto ? 'From your bills, ' + money(auto) : a.liability ? 'Amount you owe' : ex != null ? 'Your logs say ' + money(ex) + '. Change it if the real number differs' : 'Balance') + '</span></div>' +
         '<input class="t" style="width:120px;text-align:right" inputmode="decimal" data-acc="' + esc(a.name) + '" value="' + (vals[a.name] != null ? vals[a.name] : '') + '" placeholder="0.00"></div>';
     }).join('');
@@ -4676,7 +4825,14 @@ function checkSheet() {
     (qd.length ? '<p class="note">Days in the last month with no spending logged: ' + qd.slice(0, 12).map(function (d) { return dayLabel(d); }).join(', ') + (qd.length > 12 ? ' and ' + (qd.length - 12) + ' more' : '') + '. A gap usually hides here.</p>' : '') +
     '<div class="actions" id="acts"></div>';
   openSheet('Balance check', body, function (el) {
-    function readVals() { el.querySelectorAll('[data-acc]').forEach(function (i) { var v = parseFloat(i.value); vals[i.dataset.acc] = isNaN(v) ? null : v; }); }
+    var nat = {};
+    function readVals() {
+      el.querySelectorAll('[data-acc]').forEach(function (i) {
+        var v = parseFloat(i.value), n = i.dataset.acc;
+        if (i.dataset.cur === 'USD') { nat[n] = isNaN(v) ? null : { cur: 'USD', amt: v }; vals[n] = isNaN(v) ? null : r2(v * usdRate()); }
+        else vals[n] = isNaN(v) ? null : v;
+      });
+    }
     el.addEventListener('input', function (e) { if (e.target.dataset && e.target.dataset.acc) e.target.dataset.touched = '1'; });
     function total() { return sum(S.meta.accounts, function (a) { var v = vals[a.name] || 0; return a.liability ? -v : v; }); }
     function refresh() {
@@ -4692,8 +4848,8 @@ function checkSheet() {
         c.innerHTML = '<div class="kv"><span>Total you have</span><span>' + money(tot) + '</span></div><p class="note">This first check sets your starting point. Next time, the app shows any gap.</p>';
         acts.innerHTML = '<button class="btn" id="sv" data-mode="none">Save starting point</button>';
       } else {
-        var exp = prev.total + flowsBetween(prev.d, today()), diff = r2(tot - exp);
-        c.innerHTML = '<div class="kv"><span>Last check</span><span>' + money(prev.total) + '</span><span>Change from your logs</span><span>' + signed(flowsBetween(prev.d, today())) + '</span><span>Expected now</span><span>' + money(exp) + '</span><span>You actually have</span><span>' + money(tot) + '</span>' +
+        var mm = accountBalances().reval, exp = prev.total + flowsBetween(prev.d, today()) + mm, diff = r2(tot - exp);
+        c.innerHTML = '<div class="kv"><span>Last check</span><span>' + money(prev.total) + '</span><span>Change from your logs</span><span>' + signed(flowsBetween(prev.d, today())) + '</span>' + (Math.abs(mm) > 0.005 ? '<span>Market moves (US$ and crypto)</span><span>' + signed(mm) + '</span>' : '') + '<span>Expected now</span><span>' + money(exp) + '</span><span>You actually have</span><span>' + money(tot) + '</span>' +
           '<span><b>Gap</b></span><span class="' + (Math.abs(diff) < 1 ? '' : diff < 0 ? 'neg' : 'pos') + '"><b>' + signed(diff) + '</b></span></div>' +
           (Math.abs(diff) < 1 ? '<p class="note">Everything is accounted for.</p>' : diff < 0 ? '<p class="note">You have less than expected: probably spending you did not log. Log what you remember first, then record the rest.</p>' : '<p class="note">You have more than expected: probably income, a refund or a payback you did not log.</p>');
         acts.innerHTML = Math.abs(diff) < 1 ? '<button class="btn" id="sv" data-mode="none">Save check</button>' :
@@ -4720,7 +4876,8 @@ function checkSheet() {
         if (!catObj('❓ Unaccounted')) S.meta.cats.push({ name: '❓ Unaccounted', type: 'exp' });
         (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
       }
-      S.checks.push({ id: uid(), d: today(), total: tot, lines: lines }); mark('checks');
+      var native = {}; Object.keys(nat).forEach(function (n) { if (nat[n]) native[n] = { cur: 'USD', amt: nat[n].amt, rate: usdRate() }; });
+      S.checks.push({ id: uid(), d: today(), total: tot, lines: lines, native: native }); mark('checks');
       closeSheet(); render(); toast('Balance check saved');
     });
   });
@@ -6056,6 +6213,7 @@ function onClick(e) {
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
     else if (a === 'suggest') suggestSheet();
+    else if (a === 'convert') convertSheet();
     else if (a === 'chatnew') { UI.chatId = null; UI.askDraft = ''; render(); var aq = $('#askq'); if (aq) aq.focus(); }
     else if (a === 'chatback') { UI.chatId = null; render(); window.scrollTo(0, 0); }
     else if (a === 'ai') aiSheet();
