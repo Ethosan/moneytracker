@@ -50,7 +50,8 @@ button:active{transform:scale(.98)}
 input,textarea{caret-color:var(--accent)}
 html{scrollbar-color:color-mix(in srgb,var(--muted) 45%,transparent) transparent}
 .ms{font-family:"Material Symbols Rounded";font-weight:400;font-style:normal;font-size:24px;line-height:1;letter-spacing:normal;text-transform:none;white-space:nowrap;direction:ltr;-webkit-font-smoothing:antialiased;font-variation-settings:"FILL" 0,"wght" 400,"opsz" 24;display:inline-block;width:1em;overflow:hidden}
-main{max-width:560px;margin:0 auto;padding:10px 16px 120px;animation:in .22s ease-out}
+main{max-width:560px;margin:0 auto;padding:10px 16px 120px}
+main.arrive{animation:in .22s ease-out}
 @keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 header.top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 0 14px}
 header.top h1{font:700 26px/1.15 "Geist",sans-serif;letter-spacing:-.03em;margin:0}
@@ -386,12 +387,13 @@ label.f{margin:16px 2px 8px}
 @keyframes pop{from{transform:scale(.4);opacity:0}to{transform:none;opacity:1}}
 @keyframes draw{from{clip-path:inset(100% 0 0 0)}to{clip-path:inset(0)}}
 /* motion: rows arrive in a short cascade, the summary tape grows in */
-.panel>.row,.panel>button.row,.legend li{animation:rise .32s cubic-bezier(.2,.8,.2,1) both}
+main.arrive .panel>.row,main.arrive .panel>button.row,main.arrive .legend li{animation:rise .32s cubic-bezier(.2,.8,.2,1) both}
 .panel>:nth-child(2){animation-delay:.03s}.panel>:nth-child(3){animation-delay:.06s}.panel>:nth-child(4){animation-delay:.09s}
 .panel>:nth-child(5){animation-delay:.12s}.panel>:nth-child(n+6){animation-delay:.15s}
 .legend li:nth-child(2){animation-delay:.04s}.legend li:nth-child(3){animation-delay:.08s}.legend li:nth-child(n+4){animation-delay:.12s}
 @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.tape{transform-origin:left;animation:grow .6s cubic-bezier(.2,.8,.2,1) both}
+.tape{transform-origin:left}
+main.arrive .tape{animation:grow .6s cubic-bezier(.2,.8,.2,1) both}
 @keyframes grow{from{transform:scaleX(0)}to{transform:none}}
 .hero .big span{display:inline-block}
 @media (prefers-reduced-motion:reduce){.panel>.row,.panel>button.row,.legend li,.tape,.tick,.tick::after{animation:none!important}}
@@ -536,8 +538,8 @@ dialog.tall{max-height:94vh}
 .ln-m .r{font-weight:600;font-variant-numeric:tabular-nums}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
 @media (prefers-reduced-motion:no-preference){
-  .ln-bar i{animation:lnGrow .7s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--k) * 50ms)}
-  .ln-day i{animation:lnRise .6s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--k) * 45ms)}
+  main.arrive .ln-bar i{animation:lnGrow .7s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--k) * 50ms)}
+  main.arrive .ln-day i{animation:lnRise .6s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(var(--k) * 45ms)}
   .tr-item,.ins-tabs button,.tr-chip{transition:background-color .18s,color .18s,transform .12s}
   .tr-item:active,.tr-chip:active{transform:scale(.98)}
   @keyframes lnGrow{from{transform:scaleX(0)}to{transform:none}}
@@ -2817,7 +2819,13 @@ function render() {
       '<p class="note" style="margin:0 0 12px;word-break:break-word">' + esc(err && err.message || err) + '</p>' +
       '<div class="actions"><button class="btn ghost" data-act="export">Download backup</button><button class="btn" data-tab="home">Go to Month</button></div></div></section>';
   }
-  $('#app').innerHTML = '<main class="tab-' + UI.tab + '">' + v + '</main>' + nav();
+  // Startup redraws several times (saved copy, cloud data, sync, rates, the AI check). Only
+  // arriving somewhere new replays entrance animations; a redraw that changes nothing is skipped.
+  var viewKey = [UI.tab, UI.month, UI.insView, UI.acct, UI.chatId].join('|'), arrive = viewKey !== render.key, html = v + nav();
+  render.key = viewKey; render.arrive = arrive;
+  if (!arrive && html === render.html && !failed) { setSync(store.mode === 'cloud' ? 'Synced' : store.mode === 'local' ? 'On this device' : store.mode === 'cloud-offline' ? 'Offline, will sync' : store.mode === 'error' ? 'Sync problem' : ''); return; }
+  render.html = html;
+  $('#app').innerHTML = '<main class="tab-' + UI.tab + (arrive ? ' arrive' : '') + '">' + v + '</main>' + nav();
   if (failed) { setSync(store.mode === 'cloud' ? 'Synced' : ''); return; }
   setSync(store.mode === 'cloud' ? 'Synced' : store.mode === 'local' ? 'On this device' : store.mode === 'cloud-offline' ? 'Offline, will sync' : store.mode === 'error' ? 'Sync problem' : '');
   document.querySelectorAll('[data-fold]').forEach(function (d) {
@@ -2825,7 +2833,7 @@ function render() {
   });
   if (UI.tab === 'insights') drawInsights();
   if (UI.tab === 'ask') wireAsk();
-  var cu = document.querySelector('[data-count]');
+  var cu = arrive && document.querySelector('[data-count]');
   if (cu && window.requestAnimationFrame && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
     var target = +cu.dataset.count, t0 = performance.now();
     (function step(now) { var k = Math.min(1, (now - t0) / 550), e = 1 - Math.pow(1 - k, 3); cu.textContent = Math.round(target * e).toLocaleString('en-SG'); if (k < 1) requestAnimationFrame(step); })(t0);
@@ -5854,7 +5862,7 @@ function drawTrendChart() {
       { type: 'bar', data: vals, backgroundColor: vals.map(function (v, i) { return i === part ? hatch(acc) : acc; }), borderColor: acc, borderWidth: vals.map(function (v, i) { return i === part ? 1.5 : 0; }), borderRadius: 6, maxBarThickness: 30, order: 2 },
       { type: 'line', data: vals.map(function (v, i) { return i < st ? null : Math.round(d.avg * 100) / 100; }), borderColor: mut, borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, order: 1 }
     ] },
-    options: { responsive: true, maintainAspectRatio: false, animation: REDUCED ? false : { duration: 600, easing: 'easeOutQuart' }, transitions: { resize: { animation: { duration: 0 } } },
+    options: { responsive: true, maintainAspectRatio: false, animation: (REDUCED || !render.arrive) ? false : { duration: 600, easing: 'easeOutQuart' }, transitions: { resize: { animation: { duration: 0 } } },
       interaction: { mode: 'index', intersect: false, axis: 'x' }, plugins: { legend: { display: false }, tooltip: tip },
       onClick: function (evt, els, chart) {
         var hit = chart.getElementsAtEventForMode(evt, 'index', { intersect: false }, false); if (!hit.length) return;
@@ -5951,7 +5959,7 @@ function drawLens() {
     afterLabel: function (it) { var d = days[it.dataIndex]; return d + (d === 1 ? ' day out' : ' days out') + (d ? ', ' + money(it.parsed.y / d, 0) + ' a day' : ''); } };
   charts.push(new Chart(el, {
     type: 'bar', data: { labels: labels, datasets: [{ data: vals, backgroundColor: vals.map(function (v, i) { return start + i === P && prog < 1 ? hatch(acc) : acc; }), borderColor: acc, borderWidth: vals.map(function (v, i) { return start + i === P && prog < 1 ? 1.5 : 0; }), borderRadius: 8, maxBarThickness: 56 }] },
-    options: { responsive: true, maintainAspectRatio: false, animation: REDUCED ? false : { duration: 600, easing: 'easeOutQuart' }, transitions: { resize: { animation: { duration: 0 } } },
+    options: { responsive: true, maintainAspectRatio: false, animation: (REDUCED || !render.arrive) ? false : { duration: 600, easing: 'easeOutQuart' }, transitions: { resize: { animation: { duration: 0 } } },
       interaction: { mode: 'index', intersect: false }, plugins: { legend: { display: false }, tooltip: tip },
       scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 10 } }, y: { grid: { color: cssv('--line') }, border: { display: false }, ticks: { maxTicksLimit: 4, callback: kfmt } } } }
   }));
