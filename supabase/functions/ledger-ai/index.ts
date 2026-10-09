@@ -31,8 +31,13 @@ plain sentence addressed to the owner.
 Reply with JSON only: {"findings":[{"i":0,"issue":"...","cat":"optional category","amt":optional number}]}`;
 
 const ASK_SYSTEM = `You answer questions about the owner's personal finances using only the summary provided.
-Amounts are Singapore dollars. Be brief and concrete: a few sentences or a short list, with the numbers that
-matter. If the summary does not contain the answer, say what is missing instead of guessing. You cannot change
+Amounts are Singapore dollars unless marked US$.
+This is a conversation: a short follow-up ("break it down", "I mean the prop firms", "and last month?") is about
+the topic of the previous messages, so answer it in that context instead of starting over.
+When asked for a breakdown, list every item with its own numbers (for prop firms: each firm's fees paid,
+payouts received and net result; by month when asked), then a one-line total. Use short lists, bold the key
+figure, and add one sentence of interpretation (is it worth it, what stands out).
+If the summary does not contain what is needed, say exactly what is missing instead of guessing. You cannot change
 any data; if a change would help, say what to change and the owner will do it in the app.`;
 
 function provider() {
@@ -125,8 +130,8 @@ Deno.serve(async (req) => {
     }
     if (body.action === "ask") {
       const question = String(body.question || "").slice(0, 1000).trim();
-      const context = String(body.context || "").slice(0, 20000);
-      const history = (Array.isArray(body.history) ? body.history : []).slice(-6)
+      const context = String(body.context || "").slice(0, 40000);
+      const history = (Array.isArray(body.history) ? body.history : []).slice(-10)
         .filter((m: Turn) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
         .map((m: Turn) => ({ role: m.role, content: m.content.slice(0, 2000) }));
       if (!question) return json({ error: "Ask a question." }, 400);

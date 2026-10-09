@@ -1991,6 +1991,30 @@ function aiContext() {
   var ppl = {}; S.debts.forEach(function (d) { ppl[d.person] = r2((ppl[d.person] || 0) + d.amt); });
   var owed = Object.keys(ppl).filter(function (n) { return Math.abs(ppl[n]) > 0.005; });
   if (owed.length) L.push('People balances (positive means they owe me): ' + owed.map(function (n) { return n + ' ' + ppl[n]; }).join(', '));
+  // income by source, month by month, so "where did I earn money" can be broken down
+  for (var k2 = 5; k2 >= 0; k2--) {
+    var mi = addMonth(m0, -k2), ib = incomeBy(mi), src = Object.keys(ib.by).sort(function (a, b) { return ib.by[b] - ib.by[a]; });
+    if (src.length) L.push('Income in ' + monthLabel(mi) + ': ' + src.map(function (c) { return plain(c) + ' ' + ib.by[c]; }).join(', '));
+  }
+  // trading: every prop firm, broker, crypto account and poker, all time
+  var VB = venuesByType(), TN = { prop: 'Prop firm', broker: 'Broker', crypto: 'Crypto', poker: 'Poker' };
+  ['prop', 'poker', 'broker', 'crypto'].forEach(function (ty) {
+    (VB[ty] || []).forEach(function (v) {
+      var p = v.p; if (!p.n) return;
+      L.push(TN[ty] + ' ' + v.name + ' (all time): put in ' + r2(p.inn) + ', taken out ' + r2(p.out) + (p.pnl != null ? ', result ' + r2(p.pnl) : '') +
+        (p.bal != null ? ', last balance ' + r2(p.bal) : '') + (p.outThere ? ', still in the account ' + p.outThere : '') + ', ' + p.n + ' entries, last ' + p.last + '.');
+    });
+  });
+  var tl = S.ledger.filter(function (e) { var ty = venueType(e.venue); return (ty === 'prop' || ty === 'poker') && e.f !== 'bal'; })
+    .sort(function (a, b) { return a.d < b.d ? -1 : 1; }).slice(-40);
+  if (tl.length) L.push('Latest prop firm and poker entries (in = fee or buy-in paid, out = payout or win received): ' +
+    tl.map(function (e) { return e.d + ' ' + e.venue + ' ' + (e.f === 'in' ? 'in' : 'out') + ' ' + r2(e.amt) + (e.note ? ' (' + e.note + ')' : ''); }).join('; '));
+  // where the money is now
+  var AB = accountBalances();
+  if (AB.lc) {
+    L.push('Wallet balances now: ' + AB.accs.map(function (n) { var a = acctOf(n), b = AB.bal[n]; return n + ' ' + (b == null ? 'not counted' : r2(b)) + (a && a.cur === 'USD' && b != null && usdRate() ? ' (US$' + r2(b / usdRate()) + ')' : '') + (a && a.cur === 'CRYPTO' ? ' (' + (a.coins || []).map(function (c) { return c.qty + ' ' + c.sym; }).join(', ') + ')' : ''); }).join(', ') + '. Last counted ' + AB.since + '.');
+  }
+  var owedPL = laterOwed(); if (owedPL > 0.005) L.push('Owed on PayLater: ' + r2(owedPL) + '.');
   return L.join('\n');
 }
 
@@ -2071,7 +2095,7 @@ function askSend(text) {
   if (!aiReady()) { toast('Turn on the AI assistant first'); return; }
   var now = new Date().toISOString(), c = UI.chatId && chatById(UI.chatId);
   if (!c) { c = { id: uid(), title: q.length > 52 ? q.slice(0, 51) + '\u2026' : q, t: now, msgs: [] }; S.chats.push(c); UI.chatId = c.id; }
-  var hist = (c.msgs || []).filter(function (m) { return m.role === 'user' || m.role === 'assistant'; }).slice(-6).map(function (m) { return { role: m.role, content: m.content }; });
+  var hist = (c.msgs || []).filter(function (m) { return m.role === 'user' || m.role === 'assistant'; }).slice(-10).map(function (m) { return { role: m.role, content: m.content }; });
   c.msgs.push({ role: 'user', content: q, at: now }); c.u = now;
   UI.askDraft = ''; UI.askBusy = c.id;
   // keep the history bounded: 50 conversations, 60 messages each
