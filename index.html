@@ -720,6 +720,9 @@ section.blk>h2 a,section.blk>h2 button{padding:13px 10px;margin:-13px -10px;min-
 .searchrow{grid-column:1 / -1}
 /* anything scrolled into view in a sheet stops clear of the sticky header and Add bar */
 dialog.sheet{scroll-padding:72px 0 120px}
+.fromlast{font-size:13.5px;color:var(--muted);margin:8px 2px 0}
+.fromlast b{color:var(--ink);font-weight:600}
+.linkbtn{background:none;border:0;padding:6px 4px;margin:-6px 0;color:var(--accent);font:inherit;font-weight:600;cursor:pointer}
 </style>
 </head>
 <body>
@@ -2899,21 +2902,19 @@ function txSheet(existing, asNew) {
         b.addEventListener('click', function () {
           var o = list[+b.dataset.sug];
           noteEl.value = o.note;
-          if (!t.cat) { // borrow the rest of the shape from the last time you wrote this
-            var wasPay = t.pm === 'later' ? provOf(t) : t.acct, hadTags = t.tags.slice();
+          if (!t.cat) {
+            // borrow only the category: who paid and who you were with are today's facts, not last time's
             t.cat = o.tx.cat; t.sub = cleanSub(o.tx.sub);
             $('#cats', el).innerHTML = catChips();
             $('#sub', el).value = t.sub; $('#subchips', el).innerHTML = subChips();
-            (o.tx.tags || []).forEach(function (g) { if (t.tags.indexOf(g) < 0) t.tags.push(g); }); $('#tags', el).innerHTML = tagChips();
-            if (o.tx.pm === 'later') { t.pm = 'later'; t.plp = provOf(o.tx); delete t.acct; } else if (o.tx.acct) { delete t.pm; t.acct = o.tx.acct; }
-            $('#pm', el).innerHTML = payChips(t); $('#instbox', el).hidden = t.pm !== 'later';
-            var nowPay = t.pm === 'later' ? provOf(t) : t.acct, added = t.tags.filter(function (g) { return hadTags.indexOf(g) < 0; });
-            var bits = [plain(t.cat)], flash = [$('#cats', el)];
-            if (nowPay && nowPay !== wasPay) { bits.push(nowPay); flash.push($('#pm', el)); }
-            if (added.length || t.sub) { $('#txmore', el).open = true; flash.push($('#tags', el)); }
-            added.forEach(function (g) { bits.push(isPersonTag(g) ? 'with ' + g : g); });
-            flash.forEach(function (x) { x.classList.remove('filled'); void x.offsetWidth; x.classList.add('filled'); });
-            toast('Filled in from last time: ' + bits.join(' \u00b7 '));
+            clearNeed();
+            var cats = $('#cats', el); cats.classList.remove('filled'); void cats.offsetWidth; cats.classList.add('filled');
+            var fl = $('#fromlast', el);
+            if (!fl) { fl = document.createElement('p'); fl.id = 'fromlast'; fl.className = 'fromlast'; sug.parentNode.insertBefore(fl, sug.nextSibling); }
+            fl.innerHTML = 'Category from last time: <b>' + esc(plain(t.cat)) + '</b>' + (t.sub ? ' \u00b7 ' + esc(t.sub) : '') + ' <button type="button" class="linkbtn" id="fromlastx">Undo</button>';
+            $('#fromlastx', el).addEventListener('click', function () {
+              t.cat = ''; t.sub = ''; $('#cats', el).innerHTML = catChips(); $('#sub', el).value = ''; $('#subchips', el).innerHTML = subChips(); fl.remove(); drawSug();
+            });
           }
           drawSug();
         });
@@ -2943,7 +2944,7 @@ function txSheet(existing, asNew) {
       el.querySelectorAll('.need').forEach(function (x) { x.classList.remove('need'); });
       el.querySelectorAll('.fielderr').forEach(function (x) { x.remove(); });
     }
-    el.addEventListener('click', function (e) { if (e.target.closest('[data-cat],[data-spw]')) clearNeed(); });
+    el.addEventListener('click', function (e) { if (e.target.closest('[data-cat],[data-spw]')) { clearNeed(); var fl = $('#fromlast', el); if (fl && e.target.closest('[data-cat]')) fl.remove(); } });
     el.addEventListener('input', function (e) { if (e.target.id === 'amt') clearNeed(); });
     $('#save', el).addEventListener('click', function () {
       var a = calcVal($('#amt', el).value);
