@@ -723,6 +723,9 @@ dialog.sheet{scroll-padding:72px 0 120px}
 .fromlast{font-size:13.5px;color:var(--muted);margin:8px 2px 0}
 .fromlast b{color:var(--ink);font-weight:600}
 .linkbtn{background:none;border:0;padding:6px 4px;margin:-6px 0;color:var(--accent);font:inherit;font-weight:600;cursor:pointer}
+.filterhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;grid-column:1 / -1}
+.filterhead h2{margin:0;font:700 22px/1.2 "Geist",sans-serif;letter-spacing:-.02em}
+.filterhead h2 span{font-weight:500;color:var(--muted);font-size:16px;letter-spacing:0}
 </style>
 </head>
 <body>
@@ -2358,7 +2361,9 @@ function renderActivity() {
   var chips = [['all', 'All'], ['exp', 'Spending'], ['inc', 'Income'], ['mov', 'Movements']];
   S.meta.tags.forEach(function (t) { chips.push(['tag:' + t, t]); });
 
-  h += '<div class="chips">' + chips.map(function (c) { return '<button class="chip' + (c[0] === 'tag:Alaina' ? ' rose' : '') + '" data-filter="' + esc(c[0]) + '" aria-pressed="' + (UI.filter === c[0]) + '">' + esc(c[1]) + '</button>'; }).join('') + catPill() + '</div>';
+  // a category filter (from Month, or Filter) is said up front, not hidden at the end of the chip row
+  if (UI.fcat) h += '<div class="filterhead"><h2>' + esc(plain(UI.fcat)) + (UI.fsub ? ' \u203a ' + esc(UI.fsub) : '') + ' <span>' + (UI.all ? 'all time' : 'in ' + monthLabel(UI.month)) + '</span></h2><button class="chip" data-act="catclear">Show all</button></div>';
+  h += '<div class="chips">' + chips.map(function (c) { return '<button class="chip' + (c[0] === 'tag:Alaina' ? ' rose' : '') + '" data-filter="' + esc(c[0]) + '" aria-pressed="' + (UI.filter === c[0] && !(c[0] === 'all' && UI.fcat)) + '">' + esc(c[1]) + '</button>'; }).join('') + catPill() + '</div>';
   h += '<div class="searchrow" style="display:flex;gap:8px;align-items:center"><input class="search" type="search" placeholder="Search words, dates or amounts" aria-label="Search words, a date like 12 sep, or an amount like $29.40" value="' + esc(UI.q) + '" id="q" style="flex:1">' +
     '<button class="chip" data-act="allmonths" aria-pressed="' + UI.all + '" style="margin-bottom:12px">All time</button></div>';
   var f = UI.filter, q = UI.q.toLowerCase();
@@ -2387,7 +2392,7 @@ function renderActivity() {
   var tot = sum(tx, function (t) { return t.t === 'exp' ? ea(t) : 0; });
   h += '<div class="note" style="margin:0 2px 4px">' + tx.length + ' transaction' + (tx.length === 1 ? '' : 's') + (movs.length ? ', ' + movs.length + ' movement' + (movs.length === 1 ? '' : 's') : '') +
     (qDate ? ' on ' + dayYear(qDate) : qPrice ? ' ' + qPrice.label + (ranged ? ', ' + rangeLabel() : ' across all months') : ranged ? ', ' + rangeLabel() : UI.all ? ' across all months' : '') + ', ' + money(tot) + ' spent</div>';
-  if (movAll && !movs.length && (UI.fcat || f === 'exp' || f === 'inc' || f.indexOf('tag:') === 0 || f.indexOf('cat:') === 0))
+  if (movAll && !movs.length && !UI.fcat && (f === 'exp' || f === 'inc' || f.indexOf('tag:') === 0 || f.indexOf('cat:') === 0))
     h += '<button class="banner quiet hint" data-act="showmov"><b>' + movAll + ' repayment' + (movAll === 1 ? '' : 's') + ' and transfer' + (movAll === 1 ? '' : 's') + ' hidden by this filter</b><span>PayLater payments, loans and moves between accounts. Tap to show them</span></button>';
   if (!items.length) return h + '<div class="empty">Nothing matches. Tap + to add something.</div>';
   var day = null, html = '';
