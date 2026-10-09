@@ -726,6 +726,11 @@ dialog.sheet{scroll-padding:72px 0 120px}
 .filterhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 12px;grid-column:1 / -1}
 .filterhead h2{margin:0;font:700 22px/1.2 "Geist",sans-serif;letter-spacing:-.02em}
 .filterhead h2 span{font-weight:500;color:var(--muted);font-size:16px;letter-spacing:0}
+details.morepat{grid-column:1 / -1;margin-top:8px}
+details.morepat>summary{font-size:15px;font-weight:600;color:var(--ink);flex-wrap:wrap;padding:16px 0}
+details.morepat>summary span{flex-basis:100%;font-size:13px;font-weight:400;color:var(--muted);padding-left:23px}
+.morepat-in{display:grid;gap:14px}
+@media (min-width:1024px){.morepat-in{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 22px}}
 </style>
 </head>
 <body>
@@ -5351,8 +5356,9 @@ function inboxSheet() {
 // ---------- insights ----------
 UI.range = 6;
 var charts = [];
-var COVE_L = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#6250d6', '#008300', '#e34948', '#8a8f8b'];
-var COVE_D = ['#3987e5', '#d95926', '#199e70', '#c98500', '#9085e9', '#2f9e2f', '#e66767', '#8a8f8b'];
+// Chart colours come from the app's own blue, in steps, with grey for 'Other' (the month card does the same)
+var COVE_L = ['#2A55F5', '#173AA8', '#6E8CFF', '#A9BBFF', '#D0DAFF', '#D0DAFF', '#2A55F5', '#A7AEBB'];
+var COVE_D = ['#6C8CFF', '#AFC1FF', '#4F6AD0', '#3A4D94', '#2B3A6E', '#2B3A6E', '#6C8CFF', '#5B6475'];
 function isDark() { var t = document.documentElement.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
 function cssv(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
 function dataMonths() {
@@ -5365,8 +5371,8 @@ function dataMonths() {
 function catColorMap() {
   var tot = {}; allTx().forEach(function (t) { if (t.t === 'exp') tot[t.cat] = (tot[t.cat] || 0) + ea(t); });
   var order = Object.keys(tot).sort(function (a, b) { return tot[b] - tot[a]; }), pal = isDark() ? COVE_D : COVE_L, map = {};
-  order.forEach(function (c, i) { map[c] = i < 7 ? pal[i] : pal[7]; });
-  return { map: map, top: order.slice(0, 7) };
+  order.forEach(function (c, i) { map[c] = i < 5 ? pal[i] : pal[7]; });
+  return { map: map, top: order.slice(0, 5) };
 }
 function normNote(n) { return (n || '').toLowerCase().replace(/\(.*?\)/g, '').replace(/\b(w|with|for|to|at|and)\b.*$/, '').replace(/[0-9]+/g, '').replace(/\s+/g, ' ').trim(); }
 
@@ -5654,7 +5660,7 @@ function countUps() {
 }
 
 function renderOverview() {
-  var h = '';
+  var h = '', more = ''; // more: patterns worth a look, folded away so the page answers first
   var ms = dataMonths();
   h += '<div class="seg" id="rng">' + [[3, '3 months'], [6, '6 months'], [12, '12 months'], [0, 'All']].map(function (r) { return '<button data-range="' + r[0] + '" aria-pressed="' + (UI.range === r[0]) + '">' + r[1] + '</button>'; }).join('') + '</div>';
   if (!ms.length) return h + '<div class="empty">Import or log some transactions to see insights.</div>';
@@ -5675,7 +5681,7 @@ function renderOverview() {
   var alTx = exps.filter(function (t) { return (t.tags || []).indexOf('Alaina') > -1; }), alDays = {};
   alTx.forEach(function (t) { alDays[t.d] = (alDays[t.d] || 0) + ea(t); });
   var nd = Object.keys(alDays).length, big = alTx.slice().sort(function (a, b) { return b.amt - a.amt; }).slice(0, 3);
-  h += '<section class="blk" data-c="c3"><h2>Time with Alaina</h2><div class="panel" style="padding:12px 14px">' +
+  more += '<section class="blk" data-c="c3"><h2>Time with Alaina</h2><div class="panel" style="padding:12px 14px">' +
     '<div class="kv"><span>Days with spending together</span><span>' + nd + '</span><span>Average per day together</span><span>' + money(nd ? alTot / nd : 0) + '</span><span>Share of all spending</span><span>' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</span></div>' +
     '<div class="cw" style="height:150px"><canvas id="c3" role="img" aria-label="Monthly spending with Alaina"></canvas></div>' +
     (big.length ? '<div class="note" style="margin-top:8px">Biggest: ' + big.map(function (t) { return esc(t.note || t.cat) + ' ' + money(t.amt, 0); }).join(', ') + '</div>' : '') + '</div></section>';
@@ -5683,7 +5689,7 @@ function renderOverview() {
   // transport
   var grab = exps.filter(function (t) { return t.cat === '🚖 Transport' && /grab/i.test((t.sub || '') + ' ' + (t.note || '')); }), pub = exps.filter(function (t) { return t.cat === '🚖 Transport' && grab.indexOf(t) < 0; });
   var gT = sum(grab, ea), pT = sum(pub, ea);
-  h += chartBlock('c4', 'Grab is ' + (gT + pT ? Math.round(gT / (gT + pT) * 100) : 0) + '% of your transport spending', money(gT, 0) + ' on ' + grab.length + ' Grab rides, averaging ' + money(grab.length ? gT / grab.length : 0) + ' each', 170,
+  more += chartBlock('c4', 'Grab is ' + (gT + pT ? Math.round(gT / (gT + pT) * 100) : 0) + '% of your transport spending', money(gT, 0) + ' on ' + grab.length + ' Grab rides, averaging ' + money(grab.length ? gT / grab.length : 0) + ' each', 170,
     '<div class="lg"><span><i style="background:' + (isDark() ? COVE_D[1] : COVE_L[1]) + '"></i>Grab</span><span><i style="background:' + (isDark() ? COVE_D[0] : COVE_L[0]) + '"></i>Public transport and other</span></div>');
 
   // weekday + heatmap
@@ -5696,8 +5702,8 @@ function renderOverview() {
   }
   var wdAvg = wd.map(function (v, i) { return wdN[i] ? v / wdN[i] : 0; }), topW = wdAvg.indexOf(Math.max.apply(null, wdAvg));
   var WD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
-  h += chartBlock('c5', WD[topW] + ' is your most expensive day', 'Average spent per day of the week', 160, '');
-  h += '<section class="blk"><h2>Every day, last 20 weeks</h2>' + heatmap(byDay) + '<p class="note">Darker means more spent. Empty squares are days with nothing logged; if you know you spent, that is where a gap hides.</p></section>';
+  more += chartBlock('c5', WD[topW] + ' is your most expensive day', 'Average spent per day of the week', 160, '');
+  more += '<section class="blk"><h2>Every day, last 20 weeks</h2>' + heatmap(byDay) + '<p class="note">Darker means more spent. Empty squares are days with nothing logged; if you know you spent, that is where a gap hides.</p></section>';
 
   // category table
   var cc = catColorMap(), catT = {}; exps.forEach(function (t) { catT[t.cat] = (catT[t.cat] || 0) + ea(t); });
@@ -5713,25 +5719,26 @@ function renderOverview() {
   // top places
   var pl = {}; exps.forEach(function (t) { var n = normNote(t.note); if (!n || n.length < 3) return; var o = pl[n] || (pl[n] = { n: t.note, amt: 0, c: 0 }); o.amt += ea(t); o.c++; });
   var tops = Object.keys(pl).map(function (k) { return pl[k]; }).filter(function (o) { return o.c > 1; }).sort(function (a, b) { return b.amt - a.amt; }).slice(0, 10);
-  if (tops.length) h += '<section class="blk"><h2>Where the money repeats</h2><div class="panel">' + tops.map(function (o) {
+  if (tops.length) more += '<section class="blk"><h2>Where the money repeats</h2><div class="panel">' + tops.map(function (o) {
     return '<div class="row"><div class="l"><b>' + esc(o.n) + '</b><span>' + o.c + ' times, ' + money(o.amt / o.c) + ' each on average</span></div><div class="r">' + money(o.amt, 0) + '</div></div>';
   }).join('') + '</div></section>';
 
   var bigs = exps.slice().sort(function (a, b) { return b.amt - a.amt; }).slice(0, 8);
-  h += '<section class="blk"><h2>Largest purchases</h2><div class="panel">' + bigs.map(txRow).join('') + '</div></section>';
+  more += '<section class="blk"><h2>Largest purchases</h2><div class="panel">' + bigs.map(txRow).join('') + '</div></section>';
 
   // income sources
   var incs = {}; tx.filter(function (t) { return t.t === 'inc'; }).forEach(function (t) { incs[t.cat] = (incs[t.cat] || 0) + t.amt; });
   var incK = Object.keys(incs).sort(function (a, b) { return incs[b] - incs[a]; });
-  if (incK.length) h += chartBlock('c6', incK[0] + ' is your biggest source of money in', 'Total over this period. Paybacks included', incK.length * 34 + 30, '');
+  if (incK.length) more += chartBlock('c6', incK[0] + ' is your biggest source of money in', 'Total over this period. Paybacks included', incK.length * 34 + 30, '');
 
   // trading
   var le = S.ledger.filter(function (e) { var t = venueType(e.venue); return (t === 'prop' || t === 'poker') && e.f !== 'bal'; });
   if (le.length) {
     var pf = sum(le.filter(function (e) { return venueType(e.venue) === 'prop'; }), function (e) { return e.f === 'out' ? e.amt : -e.amt; });
     h += chartBlock('c7', (pf >= 0 ? 'Prop firms have made you ' + money(pf, 0) : 'Prop firms have cost you ' + money(-pf, 0)) + ' net so far', 'Running total of prop firm and poker results, all time', 200,
-      '<div class="lg"><span><i style="background:' + (isDark() ? COVE_D[6] : COVE_L[6]) + '"></i>Prop firms</span><span><i style="background:' + (isDark() ? COVE_D[4] : COVE_L[4]) + '"></i>Poker, dashed</span></div>');
+      '<div class="lg"><span><i style="background:' + (isDark() ? COVE_D[6] : COVE_L[6]) + '"></i>Prop firms</span><span><i style="background:' + cssv('--muted') + '"></i>Poker, dashed</span></div>');
   }
+  if (more) h += '<details class="fold morepat" data-fold="morepat"' + (UI.folds.morepat ? ' open' : '') + '><summary>More patterns<span>Time with Alaina, transport, weekdays, every day, repeats, largest purchases, income</span></summary><div class="morepat-in">' + more + '</div></details>';
   return h;
 }
 function chartBlock(id, title, sub, hgt, legend) {
@@ -5812,7 +5819,7 @@ function drawOverview() {
     days.forEach(function (d) { le.filter(function (e) { return e.d === d; }).forEach(function (e) { var v = e.f === 'out' ? e.amt : -e.amt; if (venueType(e.venue) === 'prop') cp += v; else ck += v; }); P.push(r2(cp)); K.push(r2(ck)); });
     mk('c7', { type: 'line', data: { labels: days.map(function (d) { return dayLabel(d); }), datasets: [
       { label: 'Prop firms', data: P, borderColor: pal[6], backgroundColor: pal[6], borderWidth: 2, pointRadius: 0, stepped: true, fill: { target: 'origin', above: 'transparent', below: pal[6] + '1a' } },
-      { label: 'Poker', data: K, borderColor: pal[4], backgroundColor: pal[4], borderWidth: 2, pointRadius: 0, stepped: true, borderDash: [5, 4] }] },
+      { label: 'Poker', data: K, borderColor: mut, backgroundColor: mut, borderWidth: 2, pointRadius: 0, stepped: true, borderDash: [5, 4] }] },
       options: Object.assign(base(false), { interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 5, maxRotation: 0 } }, y: { grid: { color: grid }, border: { display: false }, ticks: { callback: fmt, maxTicksLimit: 5 } } } }) });
   }
 }
