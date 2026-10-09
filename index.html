@@ -27,14 +27,14 @@
   --accent:#6C8CFF;--accent-soft:#1B2447;--accent-ink:#0A0C11;--raised:#2C3446;
   --gain:#34D399;--gain-soft:#10281F;--loss:#FF6B75;--loss-soft:#33161A;--warn:#F5B547;--rose:#FF6FA8;--rose-soft:#351725;
   --hero:#1A2033;--hero-ink:#FFFFFF;--hero-muted:#A3ACC0;
-  --seg1:#6C8CFF;--seg2:#4F6AD0;--seg3:#3A4D94;--seg4:#2B3346;--seg5:#222836;
+  --seg1:#6C8CFF;--seg2:#4F6AD0;--seg3:#3A4D94;--seg4:#4A5571;--seg5:#3A4359;
   --shadow:0 1px 2px rgba(0,0,0,.3);color-scheme:dark;}}
 :root[data-theme="dark"]{
   --bg:#0A0C11;--surface:#141821;--sunk:#1C212C;--ink:#EEF1F7;--muted:#98A1B3;--line:#252B37;
   --accent:#6C8CFF;--accent-soft:#1B2447;--accent-ink:#0A0C11;--raised:#2C3446;
   --gain:#34D399;--gain-soft:#10281F;--loss:#FF6B75;--loss-soft:#33161A;--warn:#F5B547;--rose:#FF6FA8;--rose-soft:#351725;
   --hero:#1A2033;--hero-ink:#FFFFFF;--hero-muted:#A3ACC0;
-  --seg1:#6C8CFF;--seg2:#4F6AD0;--seg3:#3A4D94;--seg4:#2B3346;--seg5:#222836;
+  --seg1:#6C8CFF;--seg2:#4F6AD0;--seg3:#3A4D94;--seg4:#4A5571;--seg5:#3A4359;
   --shadow:0 1px 2px rgba(0,0,0,.3);color-scheme:dark;}
 *,*::before,*::after{box-sizing:border-box}
 html{height:100%;scroll-padding-top:env(safe-area-inset-top,0px)}
@@ -403,7 +403,8 @@ label.f{margin:16px 2px 8px}
   main>*{order:3}
   main>header.top,main>.banner:not(.quiet){order:0}
   main>.hero,main>.legend-wrap{order:1}
-  main>.quick{order:2;grid-column:1 / -1}
+  main>.quick{order:2;grid-column:span 2} /* under the month card, beside the category list */
+  main>.legend-wrap{grid-row:span 2}
   main>.quick .chips{flex-wrap:nowrap;overflow-x:auto}
 }
 @media (min-width:1024px){ main>.hero{align-self:start} } /* sized to its content, not stretched to the list beside it */
@@ -731,6 +732,10 @@ details.morepat>summary{font-size:15px;font-weight:600;color:var(--ink);flex-wra
 details.morepat>summary span{flex-basis:100%;font-size:13px;font-weight:400;color:var(--muted);padding-left:23px}
 .morepat-in{display:grid;gap:14px}
 @media (min-width:1024px){.morepat-in{grid-template-columns:repeat(2,minmax(0,1fr));gap:20px 22px}}
+/* placeholders: the app's muted ink, not the browser's grey (3.9:1 in dark mode) */
+::placeholder{color:var(--muted);opacity:1}
+/* the month card is always dark, so its gains and losses use the bright shades in both themes */
+.hero .big.pos{color:#34D399}.hero .big.neg{color:#FF6B75}
 </style>
 </head>
 <body>
