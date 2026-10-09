@@ -2910,7 +2910,7 @@ function txSheet(existing, asNew) {
     if (!ss.length) return '<p class="note" style="margin:0">No subcategories saved for this category yet.</p>';
     return ss.map(function (x) { return '<button class="chip" data-subpick="' + esc(x) + '" aria-pressed="' + (t.sub === x) + '">' + esc(x) + '</button>'; }).join('');
   }
-  var showAllCats = false;
+  var showAllCats = true; // every category visible, as before
   function catChips() {
     var all = S.meta.cats.filter(function (c) { return c.type === t.t; }).map(function (c) { return c.name; }), list = all;
     if (!showAllCats && all.length > 8) {
@@ -2931,9 +2931,15 @@ function txSheet(existing, asNew) {
     (t.t === 'adj' ? '<button data-t="adj" aria-pressed="true">Adjustment</button>' : '') + '</div>' +
     calcField('amt', t.calc || (t.amt ? t.amt : '')) +
     '<div class="fromusd" id="fromusd"><button type="button" class="linkbtn" id="fromusdgo">Convert from US$</button></div>' +
-    '<label class="f" for="note">What was it?</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="e.g. Chicken rice, Grab home" autocomplete="off" enterkeyhint="done">' +
-    '<div class="wrap" id="nsug" style="margin-top:7px"></div>' +
     '<label class="f" id="catl">Category</label><div class="wrap" id="cats" role="group" aria-labelledby="catl">' + catChips() + '</div>' +
+    '<label class="f" for="sub">Subcategory</label><input class="t" id="sub" value="' + esc(t.sub || '') + '" placeholder="e.g. Grab, drinks, with friends" autocomplete="off">' +
+    '<div class="wrap" id="subchips" style="margin-top:7px">' + subChips() + '</div>' +
+    '<label class="f" id="tagl">Tags</label><div class="wrap" id="tags" role="group" aria-labelledby="tagl">' + tagChips() + '</div>' +
+    '<label class="f">Did you pay for other people?</label><div class="seg" id="sp"><button data-sp="0" aria-pressed="' + !t.split + '">Just me</button><button data-sp="1" aria-pressed="' + !!t.split + '">I paid for others</button></div>' +
+    '<div id="spbox"' + (t.split ? '' : ' hidden') + '><label class="f" for="mine">My share</label><input class="t" id="mine" inputmode="decimal" value="' + (t.split ? t.split.mine : '') + '" placeholder="e.g. 30">' +
+    '<div class="wrap" style="margin-top:7px"><button class="chip" id="mine0">None of it is mine</button><button class="chip" id="minehalf">Half</button></div>' +
+    '<label class="f">Who owes you the rest</label><div class="wrap" id="spwho"></div>' +
+    '<p class="note" id="spmsg"></p></div>' +
     '<label class="f" id="pml">' + (t.t === 'inc' ? 'Received into' : 'Paid with') + '</label><div class="wrap" id="pm" role="group" aria-labelledby="pml">' + payChips(t) + '</div>' +
     '<div id="instbox"' + (t.pm === 'later' ? '' : ' hidden') + '><label class="f">How it gets paid</label><div class="seg" id="instn">' +
       [1, 3, 4, 6, 12].map(function (n) { return '<button data-in="' + n + '" aria-pressed="' + (((t.inst && t.inst.n) || 1) === n) + '">' + (n === 1 ? 'Next month' : n + ' months') + '</button>'; }).join('') +
@@ -2943,17 +2949,9 @@ function txSheet(existing, asNew) {
       '<div id="instfeebox"' + (t.inst && t.inst.n > 1 ? '' : ' hidden') + '><label class="f" for="instfee">Interest or fee on this plan, in total</label>' +
       '<input class="t" id="instfee" inputmode="decimal" value="' + (t.inst && t.inst.fee ? t.inst.fee : '') + '" placeholder="0.00 if it is interest-free"></div>' +
       '<p class="note" id="instmsg" style="margin-top:0"></p></div>' +
-    '<details class="more" id="txmore"' + (moreOpen ? ' open' : '') + '><summary><span>More details</span><span class="note" id="moresum"></span></summary>' +
-    '<label class="f" for="sub">Subcategory</label><input class="t" id="sub" value="' + esc(t.sub || '') + '" placeholder="e.g. Grab, drinks, with friends" autocomplete="off">' +
-    '<div class="wrap" id="subchips" style="margin-top:7px">' + subChips() + '</div>' +
-    '<label class="f" id="tagl">Tags</label><div class="wrap" id="tags" role="group" aria-labelledby="tagl">' + tagChips() + '</div>' +
-    '<label class="f">Did you pay for other people?</label><div class="seg" id="sp"><button data-sp="0" aria-pressed="' + !t.split + '">Just me</button><button data-sp="1" aria-pressed="' + !!t.split + '">I paid for others</button></div>' +
-    '<div id="spbox"' + (t.split ? '' : ' hidden') + '><label class="f" for="mine">My share</label><input class="t" id="mine" inputmode="decimal" value="' + (t.split ? t.split.mine : '') + '" placeholder="e.g. 30">' +
-    '<div class="wrap" style="margin-top:7px"><button class="chip" id="mine0">None of it is mine</button><button class="chip" id="minehalf">Half</button></div>' +
-    '<label class="f">Who owes you the rest</label><div class="wrap" id="spwho"></div>' +
-    '<p class="note" id="spmsg"></p></div>' +
+    '<label class="f" for="note">What was it?</label><input class="t" id="note" value="' + esc(t.note) + '" placeholder="e.g. Chicken rice, Grab home" autocomplete="off" enterkeyhint="done">' +
+    '<div class="wrap" id="nsug" style="margin-top:7px"></div>' +
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + t.d + '">' +
-    '</details>' +
     '<div class="actions sticky">' + (existing ? '<button class="btn danger" id="del">Delete</button>' : '') + '<button class="btn" id="save">' + (existing ? 'Save changes' : 'Add') + '</button></div>';
   openSheet(existing ? 'Edit transaction' : 'New transaction', body, function (el) {
     if (!existing) setTimeout(function () { $('#amt', el).focus(); }, 50);
@@ -2968,7 +2966,7 @@ function txSheet(existing, asNew) {
       $('#cats', el).innerHTML = catChips();
     });
     // opening More details brings its fields into view instead of leaving them under the Add bar
-    $('#txmore', el).addEventListener('toggle', function () { if (this.open) this.scrollIntoView({ block: 'start', behavior: 'smooth' }); });
+    var tm = $('#txmore', el); if (tm) tm.addEventListener('toggle', function () { if (this.open) this.scrollIntoView({ block: 'start', behavior: 'smooth' }); });
     $('#fromusdgo', el).addEventListener('click', function () {
       var box = $('#fromusd', el);
       box.innerHTML = '<span>US$</span><input class="t" id="usdin" inputmode="decimal" placeholder="0.00" aria-label="Amount in US$"><span id="usdout" class="note"></span>';
@@ -3168,7 +3166,7 @@ function txSheet(existing, asNew) {
       if (t.inst && t.inst.n > 1) { var ifee = calcVal($('#instfee', el).value); if (ifee > 0) t.inst.fee = r2(ifee); else delete t.inst.fee; }
       var mineV = parseFloat(($('#mine', el) || {}).value);
       if (!$('#spbox', el).hidden && mineV >= 0 && mineV < t.amt) {
-        if (!spWho) { $('#txmore', el).open = true; need($('#spwho', el), null, 'Say who owes you the rest.', $('#spwho .chip', el)); return; }
+        if (!spWho) { var tmo = $('#txmore', el); if (tmo) tmo.open = true; need($('#spwho', el), null, 'Say who owes you the rest.', $('#spwho .chip', el)); return; }
         t.split = { mine: r2(mineV), person: spWho };
       } else t.split = null;
       if (existing) removeTx(existing);
