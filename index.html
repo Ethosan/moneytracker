@@ -2503,7 +2503,7 @@ function subsSection() {
   var h = '';
   var subs = S.meta.subs.filter(function (s) { return s.active !== false; }).sort(function (a, b) { return (a.next || '9') < (b.next || '9') ? -1 : 1; });
   h += '<section class="blk"><h2>Subscriptions <button data-act="add-sub">Add</button></h2><div class="panel">';
-  h += '<div class="kv" style="padding-top:8px"><span>Per month, all active</span><span>' + money(sum(subs, monthlyEquiv)) + '</span><span>Per year</span><span>' + money(sum(subs, monthlyEquiv) * 12, 0) + '</span></div>';
+  h += '<div class="kv" style="padding-top:8px"><span>Per month, the subscriptions tracked here</span><span>' + money(sum(subs, monthlyEquiv)) + '</span><span>Per year</span><span>' + money(sum(subs, monthlyEquiv) * 12, 0) + '</span></div>';
   subs.forEach(function (s) {
     var days = s.next ? Math.round((new Date(s.next + 'T00:00:00') - new Date(today() + 'T00:00:00')) / 864e5) : null;
     var when = days == null ? 'No renewal date' : days < 0 ? 'Renewal date passed' : days === 0 ? 'Renews today' : 'Renews in ' + days + ' day' + (days === 1 ? '' : 's');
@@ -5660,7 +5660,7 @@ function renderOverview() {
   h += '<div class="kpis"><div><span>Average month</span><b>' + money(avgSpend, 0) + '</b><i>spent after paybacks</i></div>' +
     '<div><span>Savings rate</span><b class="' + tone(kept) + '">' + (inc ? Math.round(kept / inc * 100) : 0) + '%</b><i>' + signed(kept, 0) + ' kept</i></div>' +
     '<div><span>With Alaina</span><b style="color:var(--rose)">' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</b><i>' + money(alTot, 0) + ' of spending over ' + (ms.length === 1 ? '1 month' : ms.length + ' months') + '</i></div>' +
-    '<div><span>Subscriptions</span><b>' + money(subsCat, 0) + '</b><i>per month on average</i></div></div>';
+    '<div><span>Subscriptions</span><b>' + money(subsCat, 0) + '</b><i>a month, everything logged under Subscriptions</i></div></div>';
 
   h += chartBlock('c1', 'Spending peaked in ' + monthLabel(ms[peakI]) + ' at ' + money(st[peakI].net, 0), 'By category, before paybacks', 240, '<div class="lg" id="c1l"></div>');
   h += chartBlock('c2', inc >= sum(st, function (x) { return x.net; }) ? 'You earned more than you spent over this period' : 'You spent more than you brought in over this period', 'Money in versus spending after paybacks', 200, '<div class="lg"><span><i style="background:var(--gain)"></i>Money in</span><span><i style="background:var(--ink)"></i>Spent</span></div>');
@@ -5696,9 +5696,11 @@ function renderOverview() {
   // category table
   var cc = catColorMap(), catT = {}; exps.forEach(function (t) { catT[t.cat] = (catT[t.cat] || 0) + ea(t); });
   var lastM = ms[ms.length - 1], prevAvg = priorAvg(lastM) || {}, lastSt = monthStats(lastM);
-  h += '<section class="blk"><h2>Categories</h2><div class="panel tbl"><div class="th"><span>Category</span><span>Per month</span><span>Share</span><span>' + monthLabel(lastM, true) + ' vs avg</span></div>' +
+  // a month in progress compares with what you usually spend by today, like Month does
+  var ovDay = +today().slice(8, 10), ovNow = lastM === monthOf(today()) ? Math.min(1, ovDay / new Date(+lastM.slice(0, 4), +lastM.slice(5, 7), 0).getDate()) : 1;
+  h += '<section class="blk"><h2>Categories</h2><div class="panel tbl"><div class="th"><span>Category</span><span>Per month</span><span>Share</span><span>' + monthLabel(lastM, true) + (ovNow < 1 ? ' vs usual by day ' + ovDay : ' vs avg') + '</span></div>' +
     Object.keys(catT).sort(function (a, b) { return catT[b] - catT[a]; }).map(function (c) {
-      var d = (lastSt.byCat[c] || 0) - (prevAvg[c] || 0);
+      var d = (lastSt.byCat[c] || 0) - (prevAvg[c] || 0) * ovNow;
       return '<div class="tr"><span><i style="background:' + (cc.map[c] || '#999') + '"></i>' + esc(c) + '</span><span>' + money(catT[c] / ms.length, 0) + '</span><span>' + Math.round(catT[c] / spTot * 100) + '%</span><span class="' + (d > 5 ? 'up' : d < -5 ? 'down' : 'flat') + '">' + (Math.abs(d) < 1 ? '–' : (d > 0 ? '+' : '−') + '$' + Math.abs(Math.round(d))) + '</span></div>';
     }).join('') + '</div></section>';
 
@@ -5721,7 +5723,7 @@ function renderOverview() {
   var le = S.ledger.filter(function (e) { var t = venueType(e.venue); return (t === 'prop' || t === 'poker') && e.f !== 'bal'; });
   if (le.length) {
     var pf = sum(le.filter(function (e) { return venueType(e.venue) === 'prop'; }), function (e) { return e.f === 'out' ? e.amt : -e.amt; });
-    h += chartBlock('c7', 'Prop firms have cost you ' + money(-pf, 0) + ' net so far', 'Running total of prop firm and poker results, all time', 200,
+    h += chartBlock('c7', (pf >= 0 ? 'Prop firms have made you ' + money(pf, 0) : 'Prop firms have cost you ' + money(-pf, 0)) + ' net so far', 'Running total of prop firm and poker results, all time', 200,
       '<div class="lg"><span><i style="background:' + (isDark() ? COVE_D[6] : COVE_L[6]) + '"></i>Prop firms</span><span><i style="background:' + (isDark() ? COVE_D[4] : COVE_L[4]) + '"></i>Poker, dashed</span></div>');
   }
   return h;
