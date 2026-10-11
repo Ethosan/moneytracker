@@ -161,8 +161,7 @@ async function fullLedger(sb: ReturnType<typeof createClient>) {
   }
   const checks = ((doc.checks && doc.checks.entries) || []).slice().sort((a: any, b: any) => (a.d < b.d ? -1 : 1));
   if (checks.length) {
-    rows.push("
-BALANCE COUNTS (real balances I counted; between two counts each wallet should move by exactly what I logged on it): date | wallet amounts | what my logs said at the time");
+    rows.push("\nBALANCE COUNTS (real balances I counted; between two counts each wallet should move by exactly what I logged on it): date | wallet amounts | what my logs said at the time");
     checks.forEach((c: any) => rows.push(`${c.d} | ${Object.keys(c.lines || {}).map((k) => `${k} ${r2(+c.lines[k])}`).join(", ")} | ${c.exp ? Object.keys(c.exp).map((k) => `${k} ${r2(+c.exp[k])}`).join(", ") : ""}`));
   }
   if ((meta.subs || []).length) rows.push("\nSUBSCRIPTIONS: " + meta.subs.map((s: any) => `${s.name} ${s.amt} every ${s.cycle || 1} month(s), next ${s.next || "?"}${s.active === false ? " (stopped)" : ""}`).join("; "));
