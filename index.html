@@ -808,6 +808,24 @@ small.cur{font-size:11px;font-weight:700;color:var(--muted);margin-left:4px;lett
 .fromusd .t{width:120px;min-height:40px;padding:8px 10px}
 .fromusd .note{margin:0}
 .conv-out{padding:6px 16px;margin-top:14px}
+.lock{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:24px 16px calc(24px + env(safe-area-inset-bottom,0px));background:var(--bg)}
+.lock-in{width:100%;max-width:320px;text-align:center}
+.lock-mark{width:56px;height:56px;border-radius:18px;display:grid;place-items:center;margin:0 auto 14px;background:var(--accent-soft);color:var(--accent)}
+.lock h1{font:700 22px "Geist",sans-serif;letter-spacing:-.02em;margin:0 0 6px}
+.lock #lockmsg{color:var(--muted);margin:0 0 18px;min-height:1.4em}
+.lock #lockmsg.bad{color:var(--loss);font-weight:600}
+.pins{display:flex;justify-content:center;gap:14px;margin:0 0 28px}
+.pins i{width:14px;height:14px;border-radius:50%;box-shadow:inset 0 0 0 2px var(--muted)}
+.pins i.on{background:var(--ink);box-shadow:none}
+.pins.shake{animation:shake .35s}
+@keyframes shake{20%,60%{transform:translateX(-8px)}40%,80%{transform:translateX(8px)}}
+.pad{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;justify-items:center}
+.pad button{width:72px;height:72px;border-radius:50%;border:0;background:var(--surface);box-shadow:var(--lift);font:600 26px "Geist",sans-serif;color:var(--ink);cursor:pointer;display:grid;place-items:center}
+.pad button:active{background:var(--sunk)}
+.pad button[data-lk="del"],.pad button[data-lk="bio"]{background:none;box-shadow:none;color:var(--muted);font-size:22px}
+.lock-forgot{margin-top:22px}
+.lkpin{font-size:22px;letter-spacing:.4em;text-align:center}
+@media (prefers-reduced-motion:reduce){.pins.shake{animation:none}}
 </style>
 </head>
 <body>
@@ -1335,7 +1353,7 @@ function normalize() {
   S.v = SCHEMA;
   return moved;
 }
-var UI = { folds: {}, acct: 'bal', tab: 'home', month: monthOf(today()), filter: 'all', q: '', all: false };
+var UI = { locked: true, folds: {}, acct: 'bal', tab: 'home', month: monthOf(today()), filter: 'all', q: '', all: false };
 var LS_KEY = 'ledger-state-v1';
 var store = { mode: 'connecting', col: null, dirty: {}, timer: null, writing: false };
 
@@ -2111,6 +2129,156 @@ function askSend(text) {
     if (UI.tab === 'ask') { render(); askScroll(); var t = $('#askq'); if (t && !isTouch()) t.focus(); }
   });
 }
+
+// ---------- app lock: a PIN (and Face ID / fingerprint where the device has it), per device ----------
+// A privacy screen for whoever picks up the phone or laptop. It is set on each device and never
+// synced; your data itself is protected by your sign-in. The PIN is stored only as a salted hash.
+var LOCK_KEY = 'ledger-lock';
+var LOCK = (function () { try { return JSON.parse(localStorage.getItem(LOCK_KEY) || 'null') || {}; } catch (e) { return {}; } })();
+function lockOn() { return !!(LOCK.on && LOCK.hash); }
+function saveLock() { try { localStorage.setItem(LOCK_KEY, JSON.stringify(LOCK)); } catch (e) { } }
+function b64(buf) { return btoa(String.fromCharCode.apply(null, new Uint8Array(buf))); }
+function unb64(s) { return Uint8Array.from(atob(s), function (c) { return c.charCodeAt(0); }); }
+function pinHash(pin, salt) {
+  var enc = new TextEncoder();
+  return crypto.subtle.importKey('raw', enc.encode(pin), 'PBKDF2', false, ['deriveBits']).then(function (k) {
+    return crypto.subtle.deriveBits({ name: 'PBKDF2', salt: unb64(salt), iterations: 150000, hash: 'SHA-256' }, k, 256);
+  }).then(b64);
+}
+function bioAvailable() {
+  return window.PublicKeyCredential && PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable
+    ? PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable().catch(function () { return false; }) : Promise.resolve(false);
+}
+function bioRegister() {
+  return navigator.credentials.create({ publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: 'Ethan\u2019s Ledger' },
+    user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'ledger', displayName: 'Ledger' },
+    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
+    authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' }, timeout: 60000
+  } }).then(function (c) { return b64(c.rawId); });
+}
+function bioUnlock() {
+  return navigator.credentials.get({ publicKey: {
+    challenge: crypto.getRandomValues(new Uint8Array(32)), allowCredentials: [{ type: 'public-key', id: unb64(LOCK.bio) }], userVerification: 'required', timeout: 60000
+  } });
+}
+var lockEntry = '', lockFails = 0, lockWaitUntil = 0;
+function renderLock(msg) {
+  var n = LOCK.len || 4;
+  $('#app').innerHTML = '<div class="lock" role="dialog" aria-label="App locked"><div class="lock-in">' +
+    '<div class="lock-mark" aria-hidden="true">' + LOCK_ICON + '</div><h1>Ethan\u2019s Ledger</h1>' +
+    '<p id="lockmsg" class="' + (msg && msg.bad ? 'bad' : '') + '" aria-live="polite">' + esc(msg ? msg.text : 'Enter your PIN') + '</p>' +
+    '<div class="pins" aria-hidden="true">' + Array.from({ length: n }, function (x, i) { return '<i class="' + (i < lockEntry.length ? 'on' : '') + '"></i>'; }).join('') + '</div>' +
+    '<div class="pad">' + ['1', '2', '3', '4', '5', '6', '7', '8', '9', LOCK.bio ? 'bio' : '', '0', 'del'].map(function (k) {
+      if (!k) return '<span></span>';
+      if (k === 'bio') return '<button data-lk="bio" aria-label="Unlock with Face ID or fingerprint">' + BIO_ICON + '</button>';
+      if (k === 'del') return '<button data-lk="del" aria-label="Delete">\u232b</button>';
+      return '<button data-lk="' + k + '">' + k + '</button>';
+    }).join('') + '</div>' +
+    '<button class="linkbtn lock-forgot" data-lk="forgot">Forgot your PIN?</button></div></div>';
+}
+function lockPress(k) {
+  if (Date.now() < lockWaitUntil) { renderLock({ text: 'Too many tries. Wait ' + Math.ceil((lockWaitUntil - Date.now()) / 1000) + ' seconds.', bad: true }); return; }
+  if (k === 'bio') { bioUnlock().then(unlockNow, function () { renderLock({ text: 'Use your PIN instead' }); }); return; }
+  if (k === 'forgot') {
+    if (store.mode === 'cloud' || store.mode === 'cloud-offline') {
+      if (confirm('Sign out to remove the lock? Your data is safe in your account; sign back in to get it, then set a new PIN.')) {
+        LOCK = {}; saveLock(); UI.locked = false; store.sb.auth.signOut().then(function () { location.reload(); });
+      }
+    } else renderLock({ text: 'This device\u2019s data isn\u2019t synced, so the lock can\u2019t be reset without the PIN.', bad: true });
+    return;
+  }
+  if (k === 'del') lockEntry = lockEntry.slice(0, -1);
+  else if (lockEntry.length < (LOCK.len || 4)) lockEntry += k;
+  renderLock();
+  if (lockEntry.length === (LOCK.len || 4)) {
+    var tried = lockEntry; lockEntry = '';
+    pinHash(tried, LOCK.salt).then(function (h) {
+      if (h === LOCK.hash) { lockFails = 0; unlockNow(); return; }
+      lockFails++; if (lockFails >= 5) { lockWaitUntil = Date.now() + 30000; lockFails = 0; }
+      renderLock({ text: lockWaitUntil > Date.now() ? 'Too many tries. Wait 30 seconds.' : 'Wrong PIN. Try again.', bad: true });
+      var p = document.querySelector('.pins'); if (p) { p.classList.remove('shake'); void p.offsetWidth; p.classList.add('shake'); }
+    });
+  }
+}
+function unlockNow() { UI.locked = false; lockEntry = ''; render.html = null; render.key = null; render(); }
+function lockNow() { if (!lockOn()) return; UI.locked = true; lockEntry = ''; if (dlg && dlg.open) closeSheet(); render(); }
+function isLocked() { return lockOn() && UI.locked; } // the keypad only listens while the lock screen is up
+document.addEventListener('click', function (e) { var b = e.target.closest && e.target.closest('[data-lk]'); if (b && isLocked()) { e.stopPropagation(); lockPress(b.dataset.lk); } }, true);
+document.addEventListener('keydown', function (e) {
+  if (!isLocked()) return;
+  if (/^[0-9]$/.test(e.key)) { e.preventDefault(); lockPress(e.key); } else if (e.key === 'Backspace') { e.preventDefault(); lockPress('del'); }
+}, true);
+document.addEventListener('visibilitychange', function () {
+  if (!lockOn()) return;
+  if (document.visibilityState === 'hidden') { lockNow.away = Date.now(); if (!LOCK.after) lockNow(); }
+  else if (lockNow.away && Date.now() - lockNow.away >= (LOCK.after || 0) * 60000) lockNow();
+});
+var LOCK_ICON = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><rect x="5" y="10.5" width="14" height="10" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.9"/><path d="M8.5 10.5V8a3.5 3.5 0 0 1 7 0v2.5" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>';
+var BIO_ICON = '<svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3M16 3h3a2 2 0 0 1 2 2v3M8 21H5a2 2 0 0 1-2-2v-3M16 21h3a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M9 9.5v1M15 9.5v1M12 9v4h-1M9.5 15.5c1.4 1.2 3.6 1.2 5 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+// Settings: turn the lock on or off on this device
+function lockSheet() {
+  var on = lockOn();
+  var body = '<p style="margin-top:0">Asks for a PIN when the app opens on <b>this device</b>. Each phone or laptop has its own setting.</p>' +
+    '<div class="seg" id="lkon"><button data-v="1" aria-pressed="' + on + '">On</button><button data-v="0" aria-pressed="' + !on + '">Off</button></div><div id="lkbody"></div>';
+  openSheet('App lock', body, function (el) {
+    var step = on ? 'settings' : 'off', first = '';
+    function draw() {
+      var box = $('#lkbody', el), h = '';
+      if (step === 'off') h = '<p class="note">The app opens straight away on this device.</p>';
+      if (step === 'new' || step === 'confirm' || step === 'disable') {
+        h = '<label class="f" for="lkpin">' + (step === 'new' ? 'Choose a PIN (4 to 6 digits)' : step === 'confirm' ? 'Enter it again' : 'Enter your PIN to turn the lock off') + '</label>' +
+          '<input class="t lkpin" id="lkpin" type="password" inputmode="numeric" autocomplete="off" maxlength="6" pattern="[0-9]*">' +
+          '<p class="fielderr" id="lkerr" hidden></p><div class="actions"><button class="btn" id="lkgo">' + (step === 'disable' ? 'Turn off' : step === 'new' ? 'Next' : 'Turn on') + '</button></div>';
+      }
+      if (step === 'settings') {
+        h = '<label class="f">Lock again after the app has been in the background for</label><div class="seg" id="lkafter">' +
+          [[0, 'Right away'], [1, '1 minute'], [5, '5 minutes']].map(function (x) { return '<button data-a="' + x[0] + '" aria-pressed="' + ((LOCK.after || 0) === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>' +
+          '<div id="lkbio"></div><div class="actions"><button class="btn ghost" id="lkchange">Change PIN</button><button class="btn" id="lklock">Lock now</button></div>';
+      }
+      box.innerHTML = h;
+      var pin = $('#lkpin', el); if (pin) { setTimeout(function () { pin.focus(); }, 50); pin.addEventListener('keydown', function (e) { if (e.key === 'Enter') $('#lkgo', el).click(); }); }
+      if (step === 'settings') bioAvailable().then(function (ok) {
+        var bb = $('#lkbio', el); if (!bb || !ok) return;
+        bb.innerHTML = '<label class="f">Face ID, fingerprint or Windows Hello</label><div class="seg" id="lkbioseg"><button data-b="1" aria-pressed="' + !!LOCK.bio + '">Use it</button><button data-b="0" aria-pressed="' + !LOCK.bio + '">PIN only</button></div>';
+      });
+    }
+    function err(t) { var e = $('#lkerr', el); e.textContent = t; e.hidden = false; }
+    el.addEventListener('click', function (e) {
+      var b;
+      if ((b = e.target.closest('#lkon [data-v]'))) {
+        var want = b.dataset.v === '1';
+        if (want && !lockOn()) step = 'new'; else if (!want && lockOn()) step = 'disable'; else step = lockOn() ? 'settings' : 'off';
+        el.querySelectorAll('#lkon button').forEach(function (x) { x.setAttribute('aria-pressed', x === b); }); draw(); return;
+      }
+      if ((b = e.target.closest('#lkafter [data-a]'))) { LOCK.after = +b.dataset.a; saveLock(); draw(); return; }
+      if ((b = e.target.closest('#lkbioseg [data-b]'))) {
+        if (b.dataset.b === '1') bioRegister().then(function (id) { LOCK.bio = id; saveLock(); toast('Face ID or fingerprint is on'); draw(); }, function () { toast('Couldn\u2019t set it up on this device'); });
+        else { delete LOCK.bio; saveLock(); draw(); }
+        return;
+      }
+      if (e.target.closest('#lkchange')) { step = 'new'; draw(); return; }
+      if (e.target.closest('#lklock')) { closeSheet(); lockNow(); return; }
+      if (e.target.closest('#lkgo')) {
+        var v = $('#lkpin', el).value.trim();
+        if (step === 'new') { if (!/^[0-9]{4,6}$/.test(v)) return err('Use 4 to 6 digits.'); first = v; step = 'confirm'; draw(); return; }
+        if (step === 'confirm') {
+          if (v !== first) { step = 'new'; draw(); return err('The two PINs didn\u2019t match. Choose it again.'); }
+          var salt = b64(crypto.getRandomValues(new Uint8Array(16)));
+          pinHash(v, salt).then(function (h) { LOCK = Object.assign({ after: 1 }, LOCK, { on: true, salt: salt, hash: h, len: v.length }); saveLock(); step = 'settings'; toast('App lock is on'); draw(); render(); });
+          return;
+        }
+        if (step === 'disable') {
+          pinHash(v, LOCK.salt).then(function (h) {
+            if (h !== LOCK.hash) return err('That isn\u2019t your PIN.');
+            LOCK = {}; saveLock(); step = 'off'; toast('App lock is off'); draw(); render();
+          });
+        }
+      }
+    });
+    draw();
+  });
+}
 function aiSheet() {
   var ai = S.meta.ai || {}, on = aiOn(), cloud = store.mode === 'cloud';
   var who = ai.model ? esc(ai.model) : 'the AI';
@@ -2800,6 +2968,7 @@ function renderMore() {
     '<button class="row" data-act="budgets"><div class="l"><b>Budgets</b><span>' + S.meta.budgets.length + ' set</span></div><div class="r">›</div></button>' +
     '<button class="row" data-act="cats"><div class="l"><b>Categories and tags</b><span>' + S.meta.cats.length + ' categories, ' + S.meta.tags.length + ' tags</span></div><div class="r">›</div></button>' +
     '<button class="row" data-act="basis"><div class="l"><b>Investment accounting</b><span>' + (cashBasis() ? 'Cash basis, balances not counted' : 'Balances count as your money') + '</span></div><div class="r">\u203a</div></button>' +
+    '<button class="row" data-act="applock"><div class="l"><b>App lock</b><span>' + (lockOn() ? 'On for this device' + (LOCK.bio ? ', with Face ID or fingerprint' : ', with a PIN') : 'Off. Ask for a PIN when the app opens') + '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="theme"><div class="l"><b>Appearance</b><span>' + ({ light: 'Light', dark: 'Dark' }[localTheme()] || 'Match device') + '</span></div><div class="r">›</div></button>' +
     (isStandalone() ? '' : '<button class="row" data-act="install"><div class="l"><b>Install on your phone</b><span>Home screen icon, full screen, works offline</span></div><div class="r">\u203a</div></button>') +
     '</div></section>';
@@ -2830,6 +2999,7 @@ function localTheme() { try { return localStorage.getItem('ledger-theme') || '';
 function applyTheme() { var t = localTheme(); if (t) document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme'); }
 
 function render() {
+  if (isLocked()) { renderLock(); return; }
   if (!HIST.ready) { histSnap(); HIST.ready = true; }
   if (store.mode === 'auth') { $('#app').innerHTML = renderLogin(); wireLogin(); return; }
   var v, failed = null;
@@ -6243,6 +6413,7 @@ function onClick(e) {
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
     else if (a === 'suggest') suggestSheet();
+    else if (a === 'applock') lockSheet();
     else if (a === 'convert') convertSheet();
     else if (a === 'chatnew') { UI.chatId = null; UI.askDraft = ''; render(); var aq = $('#askq'); if (aq) aq.focus(); }
     else if (a === 'chatback') { UI.chatId = null; render(); window.scrollTo(0, 0); }
