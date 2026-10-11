@@ -826,6 +826,9 @@ small.cur{font-size:11px;font-weight:700;color:var(--muted);margin-left:4px;lett
 .lock-forgot{margin-top:22px}
 .lkpin{font-size:22px;letter-spacing:.4em;text-align:center}
 @media (prefers-reduced-motion:reduce){.pins.shake{animation:none}}
+.gaph{font:600 16px "Geist",sans-serif;margin:18px 0 8px;display:flex;justify-content:space-between}
+.cg-list .row[disabled]{cursor:default;opacity:1}
+.cg-list .r span{display:block;font-size:12.5px;font-weight:600}
 </style>
 </head>
 <body>
@@ -2275,7 +2278,7 @@ function lockSheet() {
           });
         }
       }
-    });
+    }, { signal: sheetScope.signal });
     draw();
   });
 }
@@ -3047,7 +3050,8 @@ function scopeSheetListeners() {
     if (sheetScope) opts = Object.assign({}, typeof opts === 'object' ? opts : { capture: !!opts }, { signal: sheetScope.signal });
     return add.call(dlg, type, fn, opts);
   };
-  add.call(dlg, 'close', function () { if (sheetScope) { sheetScope.abort(); sheetScope = null; } });
+  // close fires a moment after closing; by then another sheet may have opened in its place, so leave that one's listeners alone
+  add.call(dlg, 'close', function () { if (sheetScope && !dlg.open) { sheetScope.abort(); sheetScope = null; } });
 }
 function openSheet(title, body, onReady) {
   if (sheetScope) sheetScope.abort();
@@ -4411,23 +4415,11 @@ function accountBalances() {
   var lc = lastCheck(), since = lc ? lc.d : null, lines = (lc && lc.lines) || {};
   var accs = wallets(), bal = {}, touched = {};
   accs.forEach(function (n) { bal[n] = lines[n] != null ? +lines[n] : null; });
-  function mv(acct, amt, d) {
-    if (!since || d <= since || !acct || !(acct in bal)) return false;
-    bal[acct] = r2((bal[acct] || 0) + amt); touched[acct] = 1; return true;
-  }
-  var noWallet = 0, noWalletN = 0;
-  allTx().forEach(function (t) {
-    if (t.t === 'xfer') { mv(t.from, -t.amt, t.d); mv(t.to, t.amt, t.d); return; }
-    if (t.pm === 'later' || t.propOf) return;
-    var amt = t.t === 'exp' ? -t.amt : t.amt;
-    if (!mv(t.acct, amt, t.d) && since && t.d > since && !t.feeOf && !/Finance fees/.test(t.cat || '')) { noWallet += amt; noWalletN++; }
-  });
-  S.ledger.forEach(function (e) { if (e.f === 'bal') return; var amt = e.f === 'out' ? e.amt : -e.amt; if (!mv(e.acct, amt, e.d) && since && e.d > since) { noWallet += amt; noWalletN++; } });
-  S.bills.forEach(function (b) { (b.payments || []).forEach(function (p) { mv(p.from, -p.amt, p.d); }); });
-  var people = 0;
-  S.debts.forEach(function (x) {
-    if (x.txId || x.ledgerId || !since || x.d <= since) return;
-    if (!mv(x.acct, -x.amt, x.d)) people -= x.amt;
+  var noWallet = 0, noWalletN = 0, people = 0;
+  if (since) walletMoves(since).forEach(function (m) {
+    if (m.acct) { bal[m.acct] = r2((bal[m.acct] || 0) + m.amt); touched[m.acct] = 1; }
+    else if (m.kind === 'debt') people += m.amt;
+    else if (!m.skip) { noWallet += m.amt; noWalletN++; }
   });
   // what you owe on each PayLater line: your count, moved by purchases, fees and payments since
   var liabNames = {};
@@ -4625,10 +4617,12 @@ function walletPage(n, range) {
     });
     body += '<div class="panel wal-list">' + rows + '</div>';
   }
+  body += countGapRows(n);
   openSheet(n, body, function (el) {
     el.closest('dialog') && el.closest('dialog').classList.add('tall');
     $('#wr', el).addEventListener('click', function (e) { var b = e.target.closest('[data-wr]'); if (!b) return; var v = b.dataset.wr === 'all' ? 'all' : +b.dataset.wr; walletPage(n, v); });
     $('#wmanage', el).addEventListener('click', function () { walletSheet(n); });
+    el.addEventListener('click', function (e) { var b = e.target.closest('[data-cg]'); if (b) countGapSheet(S.checks.filter(function (c) { return c.id === b.dataset.cg; })[0], n); }, { signal: sheetScope.signal });
     drawWalletChart(el, M, start, t0, rel);
   });
 }
@@ -4936,6 +4930,176 @@ function walletSub(n, b) {
   if (a.cur === 'USD') return '<span>' + (b != null && usdRate() ? usd(b / usdRate()) : 'US$ wallet') + '</span>';
   return '<span>' + coinsLabel(a) + '</span>';
 }
+
+// Every entry that moves a wallet's money, dated after day a and up to day b (no b: up to now).
+// An entry that names no wallet, or one since removed, comes back with acct null.
+function walletMoves(a, b) {
+  var ok = {}, out = []; wallets().forEach(function (n) { ok[n] = 1; });
+  function add(o) { if (o.d <= a || (b && o.d > b)) return; if (!ok[o.acct]) o.acct = null; out.push(o); }
+  allTx().forEach(function (t) {
+    // a transfer or bill payment with no wallet changes nothing you can count
+    if (t.t === 'xfer') { add({ kind: 'xfer', ref: t, d: t.d, amt: -t.amt, acct: t.from, skip: 1 }); add({ kind: 'xfer', ref: t, d: t.d, amt: t.amt, acct: t.to, skip: 1 }); return; }
+    if (t.pm === 'later' || t.propOf) return;
+    add({ kind: 'tx', ref: t, d: t.d, amt: t.t === 'exp' ? -t.amt : t.amt, acct: t.acct, skip: !!(t.feeOf || /Finance fees/.test(t.cat || '')) });
+  });
+  S.ledger.forEach(function (e) { if (e.f !== 'bal') add({ kind: 'inv', ref: e, d: e.d, amt: e.f === 'out' ? e.amt : -e.amt, acct: e.acct }); });
+  S.bills.forEach(function (bl) { (bl.payments || []).forEach(function (q) { add({ kind: 'bill', ref: q, d: q.d, amt: -q.amt, acct: q.from, skip: 1 }); }); });
+  S.debts.forEach(function (x) { if (!x.txId && !x.ledgerId) add({ kind: 'debt', ref: x, d: x.d, amt: -x.amt, acct: x.acct }); });
+  return out;
+}
+function moveTitle(m) {
+  var r = m.ref;
+  if (m.kind === 'tx') return r.note || plain(r.cat);
+  if (m.kind === 'inv') return r.venue + (r.f === 'out' ? ' withdrawal' : ' deposit');
+  if (m.kind === 'debt') return r.k === 'settle' ? 'Settled up with ' + r.person : r.amt > 0 ? 'Lent to ' + r.person : r.person + ' paid you';
+  return 'Entry';
+}
+
+// ---------- count gaps: each wallet, from one count to the next ----------
+// A count that differs from what your logs say a wallet holds leaves a gap with a known wallet
+// and a known stretch of days, which makes it findable. Gaps are worked out afresh from the
+// counts and your logs, so each fix shrinks them straight away, and every count stays as a
+// checkpoint your history can be tested against.
+var GAP_MIN = 0.05;
+function countGaps(c) {
+  var cs = checksSorted(), i = cs.indexOf(c), p = i > 0 ? cs[i - 1] : null;
+  if (!p) return null;
+  var mv = walletMoves(p.d, c.d), pl = p.lines || {}, cl = c.lines || {}, pn = p.native || {}, cn = c.native || {};
+  var list = wallets().map(function (n) {
+    if (pl[n] == null || cl[n] == null) return null;
+    var a = acctOf(n); if (a && a.cur === 'CRYPTO') return null; // its value moves with prices, so a difference isn't a gap
+    var logs = r2(sum(mv.filter(function (m) { return m.acct === n; }), function (m) { return m.amt; })), gap;
+    // US$ wallets: compare the US$ figures you entered, so exchange-rate moves don't show as gaps
+    if (pn[n] && cn[n] && pn[n].amt != null && cn[n].amt != null) gap = r2((cn[n].amt - pn[n].amt) * (cn[n].rate || usdRate() || 1) - logs);
+    else gap = r2(cl[n] - pl[n] - logs);
+    return { name: n, prev: +pl[n], counted: +cl[n], logs: r2(+cl[n] - gap), gap: gap };
+  }).filter(Boolean);
+  return { prev: p, check: c, moves: mv, wallets: list, open: list.filter(function (w) { return Math.abs(w.gap) >= GAP_MIN; }) };
+}
+// What could explain wallet n's gap. Each fix carries eff: how much of the gap it removes.
+function gapFixes(G, n) {
+  var w = G.wallets.filter(function (x) { return x.name === n; })[0], g = w.gap, T = 0.015, out = [];
+  function helps(e) { return e * g > 0 && Math.abs(e) <= Math.abs(g) + T; }
+  function gapOf(name) { return G.wallets.filter(function (x) { return x.name === name; })[0]; }
+  G.moves.forEach(function (m) {
+    if (m.skip || m.kind === 'xfer' || m.kind === 'bill') return;
+    // 1. logged without a wallet
+    if (!m.acct && helps(m.amt)) out.push({ kind: 'link', m: m, eff: m.amt, title: moveTitle(m), sub: dayLabel(m.d) + ', no wallet chosen', act: 'It was ' + n });
+    // 2. logged on another wallet that is off the other way
+    if (m.acct && m.acct !== n && helps(m.amt)) {
+      var o = gapOf(m.acct);
+      if (o && o.gap * m.amt < 0 && Math.abs(m.amt) <= Math.abs(o.gap) + T)
+        out.push({ kind: 'move', m: m, eff: m.amt, title: moveTitle(m), sub: dayLabel(m.d) + ', logged on ' + m.acct + ' (which is ' + signed(o.gap) + ' off)', act: 'Move to ' + n });
+    }
+  });
+  // 3. another wallet off by the same amount the other way: money moved between them unlogged
+  G.wallets.forEach(function (o) {
+    if (o.name === n || o.gap * g >= 0 || Math.abs(o.gap + g) > Math.max(0.5, Math.abs(g) * 0.02)) return;
+    var from = g > 0 ? o.name : n, to = g > 0 ? n : o.name;
+    out.push({ kind: 'xfer', eff: g, amt: Math.abs(g), from: from, to: to, title: 'Transfer not logged?', sub: o.name + ' is ' + signed(o.gap) + ' off: ' + money(Math.abs(g)) + ' probably moved from ' + from + ' to ' + to, act: 'Log transfer' });
+  });
+  // 4. the same entry logged twice
+  var grp = {};
+  G.moves.forEach(function (m) { if (m.acct === n && m.kind === 'tx') { var k = m.d + '|' + m.amt + '|' + m.ref.t; (grp[k] = grp[k] || []).push(m); } });
+  Object.keys(grp).forEach(function (k) {
+    var gm = grp[k], m = gm[gm.length - 1]; if (gm.length < 2 || !helps(-m.amt)) return;
+    out.push({ kind: 'dup', m: m, eff: -m.amt, title: 'Logged twice?', sub: moveTitle(m) + ', ' + money(Math.abs(m.amt)) + ', ' + gm.length + ' times on ' + dayLabel(m.d), act: 'Remove one' });
+  });
+  // 5. an earlier "unaccounted" or "found" entry for this wallet that the real one now replaces
+  G.moves.forEach(function (m) {
+    if (m.acct !== n || m.kind !== 'tx' || !m.ref.gapOf) return;
+    var e = -Math.sign(m.amt) * Math.min(Math.abs(m.amt), Math.abs(g)); if (!helps(e)) return;
+    out.push({ kind: 'unacc', m: m, eff: r2(e), title: m.ref.note || plain(m.ref.cat), sub: dayLabel(m.d) + ', logged earlier for a gap', act: Math.abs(e) >= Math.abs(m.amt) - T ? 'Remove it' : 'Reduce by ' + money(Math.abs(e)) });
+  });
+  // the fewest fixes (up to three) that add up to exactly the gap
+  var c = out.slice(0, 30), exact = null;
+  for (var a = 0; a < c.length && !exact; a++) if (Math.abs(c[a].eff - g) < T) exact = [c[a]];
+  for (a = 0; a < c.length && !exact; a++) for (var b = a + 1; b < c.length && !exact; b++)
+    if (c[a].m !== c[b].m && Math.abs(c[a].eff + c[b].eff - g) < T) exact = [c[a], c[b]];
+  for (a = 0; a < c.length && !exact; a++) for (b = a + 1; b < c.length && !exact; b++) for (var d = b + 1; d < c.length && !exact; d++)
+    if (Math.abs(c[a].eff + c[b].eff + c[d].eff - g) < T) exact = [c[a], c[b], c[d]];
+  return { w: w, list: out, exact: exact };
+}
+function markMove(m) { if (m.kind === 'tx') markMonth(monthOf(m.ref.d)); else mark(m.kind === 'debt' ? 'debts' : 'ledger'); }
+function pushTx(t) { var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m); }
+function applyGapFix(G, n, f) {
+  if (f.kind === 'link' || f.kind === 'move') { f.m.ref.acct = n; markMove(f.m); return (f.kind === 'link' ? 'Linked to ' : 'Moved to ') + n; }
+  if (f.kind === 'xfer') { pushTx({ id: uid(), d: G.check.d, t: 'xfer', amt: r2(f.amt), from: f.from, to: f.to, note: 'Found from a balance count', src: 'app' }); return 'Transfer logged'; }
+  if (f.kind === 'dup') { removeTx(f.m.ref); return 'Removed the copy'; }
+  if (f.kind === 'unacc') {
+    var t = f.m.ref, left = r2(Math.abs(t.amt) - Math.abs(f.eff));
+    if (left < 0.005) removeTx(t); else { t.amt = left; markMonth(monthOf(t.d)); }
+    return 'Updated';
+  }
+  // the rest: accept it, on this wallet, so the next count starts clean
+  var g = f.eff;
+  if (g < 0 && !catObj('\u2753 Unaccounted')) { S.meta.cats.push({ name: '\u2753 Unaccounted', type: 'exp' }); mark('meta'); }
+  pushTx(g < 0 ? { id: uid(), d: G.check.d, t: 'exp', amt: r2(-g), cat: '\u2753 Unaccounted', sub: '', note: 'Balance count gap', acct: n, tags: [], src: 'app', gapOf: G.check.id }
+    : { id: uid(), d: G.check.d, t: 'adj', amt: r2(g), cat: '\ud83d\udd27 Adjustment', sub: '', note: 'Balance count: found money', acct: n, tags: [], src: 'app', gapOf: G.check.id });
+  return 'Logged ' + money(Math.abs(g)) + (g < 0 ? ' as unaccounted' : ' as found');
+}
+// days in the stretch with nothing spent from this wallet: where unlogged spending usually hides
+function quietWalletDays(G, n) {
+  var has = {}, out = []; G.moves.forEach(function (m) { if (m.acct === n && m.amt < 0) has[m.d] = 1; });
+  for (var d = addDays(G.prev.d, 1); d <= G.check.d && out.length < 60; d = addDays(d, 1)) if (!has[d]) out.push(d);
+  return out;
+}
+function countGapSheet(c, only) {
+  var G = countGaps(c); if (!G) return;
+  var open = G.open.filter(function (w) { return !only || w.name === only; }), F = {};
+  var body = '<p class="note" style="margin-top:0">From your count on ' + dayLabel(G.prev.d) + ' to the one on ' + dayLabel(c.d) + '. Each wallet should have moved by exactly what you logged in between; anything else is a gap.</p>';
+  if (!open.length) body += '<div class="empty">' + (only ? esc(only) + ' matches your logs for this stretch.' : 'Every wallet matches your logs for this stretch.') + '</div>';
+  open.forEach(function (w) {
+    var R = F[w.name] = gapFixes(G, w.name), id = esc(w.name);
+    body += '<h3 class="gaph">' + id + ' <span class="' + (w.gap < 0 ? 'neg' : 'pos') + '">' + signed(w.gap) + '</span></h3>' +
+      '<div class="kv" style="margin-top:0"><span>Counted ' + dayLabel(G.prev.d) + '</span><span>' + money(w.prev) + '</span><span>Logged in between</span><span>' + signed(r2(w.logs - w.prev)) + '</span>' +
+      '<span>So it should hold</span><span>' + money(w.logs) + '</span><span>You counted ' + dayLabel(c.d) + '</span><span>' + money(w.counted) + '</span></div>' +
+      '<p class="note">' + (w.gap < 0 ? 'Less than your logs say: usually spending you didn\u2019t log, or income logged here that went elsewhere.' : 'More than your logs say: usually income, a refund or a payback you didn\u2019t log, or spending logged here that was paid another way.') + '</p>';
+    if (R.exact) body += '<div class="banner" style="margin:6px 0 12px"><b>' + (R.exact.length === 1 ? 'This explains it exactly' : 'These ' + R.exact.length + ' add up to exactly ' + money(Math.abs(w.gap))) + '</b><span>' + R.exact.map(function (f) { return esc(f.title) + ' ' + money(Math.abs(f.eff)); }).join(' + ') + '</span></div>';
+    if (R.list.length) body += '<div class="panel">' + R.list.slice(0, 20).map(function (f, k) {
+      return '<div class="row"><div class="l"><b>' + esc(f.title) + ' <span class="gapamt">' + money(Math.abs(f.eff)) + '</span></b><span style="white-space:normal">' + esc(f.sub) + '</span></div><button class="chip sm" data-fix="' + id + '|' + k + '">' + esc(f.act) + '</button></div>';
+    }).join('') + '</div>';
+    else body += '<p class="note">Nothing in your logs matches it.</p>';
+    if (w.gap < 0) { var q = quietWalletDays(G, w.name); if (q.length && q.length <= 45) body += '<p class="note">Days with nothing spent from ' + id + ': ' + q.slice(0, 10).map(dayLabel).join(', ') + (q.length > 10 ? ' and ' + (q.length - 10) + ' more' : '') + '.</p>'; }
+    body += '<div class="actions wrap-btns" style="margin:8px 0 18px"><button class="btn sm' + (R.list.length ? ' ghost' : '') + '" data-fixlog="' + id + '">Log ' + money(Math.abs(w.gap)) + (w.gap < 0 ? ' as unaccounted' : ' as found') + '</button>' +
+      (aiReady() ? '<button class="btn sm ghost" data-gapask="' + id + '">Ask the assistant</button>' : '') + '</div>';
+  });
+  // PayLater lines have their own finder, against your bills
+  if (c === lastCheck()) accountBalances().liabs.forEach(function (l) {
+    var gp = r2(l.now - l.bills); if (l.counted == null || Math.abs(gp) < 0.01) return;
+    body += '<button class="row gaprow" data-plgap="' + esc(l.name) + '" data-amt="' + gp + '"><span class="av warn">!</span><div class="l"><b>' + money(Math.abs(gp)) + ' unexplained on ' + esc(l.name) + '</b><span>Against your bills. Tap to find it</span></div><div class="r">\u203a</div></button>';
+  });
+  var fine = G.wallets.filter(function (w) { return Math.abs(w.gap) < GAP_MIN && (!only || w.name === only); }).map(function (w) { return w.name; });
+  if (fine.length && open.length) body += '<p class="note">Matches your logs: ' + esc(fine.join(', ')) + '.</p>';
+  body += '<p class="note">Nothing changes until you tap a button, and every change can be undone.</p>';
+  openSheet(only ? only + ': count on ' + dayLabel(c.d) : 'Gaps in your count', body, function (el) {
+    el.addEventListener('click', function (e) {
+      var b, msg, n;
+      if ((b = e.target.closest('[data-fix]'))) { var k = b.dataset.fix.split('|'); n = k[0]; msg = applyGapFix(G, n, F[n].list[+k[1]]); }
+      else if ((b = e.target.closest('[data-fixlog]'))) { n = b.dataset.fixlog; var w = G.open.filter(function (x) { return x.name === n; })[0]; msg = applyGapFix(G, n, { kind: 'rest', eff: w.gap }); }
+      else if ((b = e.target.closest('[data-plgap]'))) { gapSheet(b.dataset.plgap, +b.dataset.amt); return; }
+      else if ((b = e.target.closest('[data-gapask]'))) {
+        n = b.dataset.gapask; var x = G.open.filter(function (y) { return y.name === n; })[0];
+        closeSheet(); UI.tab = 'ask'; UI.chatId = null; render(); window.scrollTo(0, 0);
+        askSend('My ' + n + ' wallet: I counted ' + money(x.prev) + ' on ' + G.prev.d + ' and ' + money(x.counted) + ' on ' + c.d + '. My logs in between say it should be ' + money(x.logs) + ', so it is ' + signed(x.gap) + ' off. Looking at what I usually log on ' + n + ' and the days in between, what did I most likely miss or log wrongly?');
+        return;
+      } else return;
+      render(); toastUndo(msg); countGapSheet(c, only);
+    }, { signal: sheetScope.signal });
+  });
+}
+function countGapRows(n) {
+  // every count of this wallet, newest first, with its gap against the count before
+  var cs = checksSorted(), rows = '';
+  cs.slice().reverse().slice(0, 12).forEach(function (c) {
+    if (!c.lines || c.lines[n] == null) return;
+    var G = countGaps(c), w = G && G.wallets.filter(function (x) { return x.name === n; })[0];
+    var off = w && Math.abs(w.gap) >= GAP_MIN;
+    rows += '<button class="row" data-cg="' + esc(c.id) + '"' + (off ? '' : ' disabled') + '><div class="l"><b>' + dayLabel(c.d) + '</b><span>' + (w ? (off ? 'Your logs said ' + money(w.logs) + '. Tap to find the difference' : 'Matched your logs') : 'First count of ' + esc(n)) + '</span></div>' +
+      '<div class="r">' + money(+c.lines[n]) + (off ? '<span class="' + (w.gap < 0 ? 'neg' : 'pos') + '">' + signed(w.gap) + '</span>' : '') + '</div></button>';
+  });
+  return rows ? '<label class="f">Counts</label><div class="panel cg-list">' + rows + '</div>' : '';
+}
 function balancesSection() {
   var A = accountBalances(), h = '<section class="blk"><h2>Balances <button data-act="check">Count now</button></h2>';
   if (!A.lc) {
@@ -4950,6 +5114,9 @@ function balancesSection() {
     h += '<button class="row" data-wallet="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>' + (counted == null ? 'Not counted yet' : 'Counted ' + money(counted) + ' on ' + dayLabel(A.since) + (A.touched[n] ? ', updated since' : '')) + '</span></div>' +
       '<div class="r">' + (b == null ? '\u2013' : money(b)) + walletSub(n, b) + '</div></button>';
   });
+  var CG = countGaps(A.lc);
+  if (CG && CG.open.length)
+    h += '<button class="row gaprow" data-countgap="1"><span class="av warn">!</span><div class="l"><b>Gaps from your count on ' + dayLabel(A.since) + '</b><span>' + CG.open.map(function (w) { return esc(w.name) + ' ' + signed(w.gap); }).join(', ') + '. Tap to find what\u2019s missing</span></div><div class="r">\u203a</div></button>';
   if (Math.abs(A.reval) > 0.005)
     h += '<div class="row"><div class="l"><b>Market moves</b><span>Change in your US$ and crypto wallets\u2019 value since ' + dayLabel(A.since) + ', at today\u2019s rates</span></div><div class="r ' + tone(A.reval) + '">' + signed(A.reval) + '</div></div>';
   if (Math.abs(A.gone) > 0.005)
@@ -4972,7 +5139,8 @@ function balancesSection() {
     '<p class="note">Tap a wallet to see its balance over time and every entry. Each one starts from your last count and moves with anything since that uses it. Choosing a wallet under "Paid with" keeps it exact.</p></section>';
   return h;
 }
-function lastCheck() { var c = S.checks.slice().sort(function (a, b) { return a.d < b.d ? -1 : 1; }); return c[c.length - 1] || null; }
+function checksSorted() { return S.checks.slice().sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; }); }
+function lastCheck() { var c = checksSorted(); return c[c.length - 1] || null; }
 function quietDays(n) {
   var has = {}; allTx().forEach(function (t) { if (t.t === 'exp') has[t.d] = 1; });
   var out = [], d = new Date(today() + 'T00:00:00');
@@ -5051,10 +5219,8 @@ function checkSheet() {
         var mm = accountBalances().reval, exp = prev.total + flowsBetween(prev.d, today()) + mm, diff = r2(tot - exp);
         c.innerHTML = '<div class="kv"><span>Last check</span><span>' + money(prev.total) + '</span><span>Change from your logs</span><span>' + signed(flowsBetween(prev.d, today())) + '</span>' + (Math.abs(mm) > 0.005 ? '<span>Market moves (US$ and crypto)</span><span>' + signed(mm) + '</span>' : '') + '<span>Expected now</span><span>' + money(exp) + '</span><span>You actually have</span><span>' + money(tot) + '</span>' +
           '<span><b>Gap</b></span><span class="' + (Math.abs(diff) < 1 ? '' : diff < 0 ? 'neg' : 'pos') + '"><b>' + signed(diff) + '</b></span></div>' +
-          (Math.abs(diff) < 1 ? '<p class="note">Everything is accounted for.</p>' : diff < 0 ? '<p class="note">You have less than expected: probably spending you did not log. Log what you remember first, then record the rest.</p>' : '<p class="note">You have more than expected: probably income, a refund or a payback you did not log.</p>');
-        acts.innerHTML = Math.abs(diff) < 1 ? '<button class="btn" id="sv" data-mode="none">Save check</button>' :
-          '<button class="btn ghost" id="sv2" data-mode="none">Just save</button><button class="btn" id="sv" data-mode="log">' + (diff < 0 ? 'Save and log ' + money(-diff) + ' as unaccounted' : 'Save and log ' + money(diff) + ' as found') + '</button>';
-        acts.dataset.diff = diff;
+          (Math.abs(diff) < 1 ? '<p class="note">Everything is accounted for.</p>' : diff < 0 ? '<p class="note">You have less than expected: probably spending you did not log. Save, and the app looks for it wallet by wallet.</p>' : '<p class="note">You have more than expected: probably income, a refund or a payback you did not log. Save, and the app looks for it wallet by wallet.</p>');
+        acts.innerHTML = '<button class="btn" id="sv" data-mode="none">' + (Math.abs(diff) < 1 ? 'Save check' : 'Save and find the gap') + '</button>';
       }
     }
     refresh();
@@ -5069,16 +5235,12 @@ function checkSheet() {
       var touched = [].some.call(el.querySelectorAll('[data-acc]'), function (i) { return i.dataset.touched; });
       if (prev && !touched && Object.keys(expect).length && !confirm('You haven\u2019t changed any of the expected figures. Save them as the real amounts you counted today?')) return;
       var tot = r2(total()), lines = {}; S.meta.accounts.forEach(function (a) { if (vals[a.name] != null) lines[a.name] = vals[a.name]; });
-      if (b.dataset.mode === 'log') {
-        var diff = +$('#acts', el).dataset.diff, m = monthOf(today());
-        var t = diff < 0 ? { id: uid(), d: today(), t: 'exp', amt: r2(-diff), cat: '❓ Unaccounted', sub: '', note: 'Balance check gap', tags: [], src: 'app' }
-          : { id: uid(), d: today(), t: 'adj', amt: r2(diff), cat: '🔧 Adjustment', sub: '', note: 'Balance check: found money', tags: [], src: 'app' };
-        if (!catObj('❓ Unaccounted')) S.meta.cats.push({ name: '❓ Unaccounted', type: 'exp' });
-        (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
-      }
       var native = {}; Object.keys(nat).forEach(function (n) { if (nat[n]) native[n] = { cur: 'USD', amt: nat[n].amt, rate: usdRate() }; });
-      S.checks.push({ id: uid(), d: today(), total: tot, lines: lines, native: native }); mark('checks');
-      closeSheet(); render(); toast('Balance check saved');
+      // exp: what your logs said each wallet held, kept as a record next to what you counted
+      var ck = { id: uid(), d: today(), total: tot, lines: lines, native: native, exp: expect };
+      S.checks.push(ck); mark('checks');
+      closeSheet(); render();
+      var CG = countGaps(ck); if (CG && CG.open.length) countGapSheet(ck); else toast('Balance check saved');
     });
   });
 }
@@ -6341,6 +6503,7 @@ function onClick(e) {
   if ((b = t.closest('[data-tab]'))) { UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-gapfind]'))) { gapSheet(b.dataset.gapfind, +b.dataset.gapamt); return; }
+  if ((b = t.closest('[data-countgap]'))) { countGapSheet(lastCheck()); return; }
   if ((b = t.closest('[data-wallet]'))) { walletPage(b.dataset.wallet); return; }
   if ((b = t.closest('[data-insv]'))) { UI.insView = b.dataset.insv; render(); var f = document.querySelector('[data-insv="' + UI.insView + '"]'); if (f) f.focus({ focusVisible: false }); return; }
   if ((b = t.closest('[data-trkind]'))) { UI.trKind = b.dataset.trkind; UI.trCat = 0; UI.trSub = null; UI.trMonth = ''; UI.trHistN = 30; render(); return; }

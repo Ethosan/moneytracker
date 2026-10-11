@@ -159,6 +159,12 @@ async function fullLedger(sb: ReturnType<typeof createClient>) {
     rows.push("\nPAYLATER BILLS: provider | period from | instalments | fee | payments (date amount)");
     bills.forEach((b: any) => rows.push(`${b.prov || "GrabPay Later"} | ${b.from} | ${b.n || 1} | ${b.fee || 0} | ${(b.payments || []).map((p: any) => p.d + " " + p.amt).join(", ")}`));
   }
+  const checks = ((doc.checks && doc.checks.entries) || []).slice().sort((a: any, b: any) => (a.d < b.d ? -1 : 1));
+  if (checks.length) {
+    rows.push("
+BALANCE COUNTS (real balances I counted; between two counts each wallet should move by exactly what I logged on it): date | wallet amounts | what my logs said at the time");
+    checks.forEach((c: any) => rows.push(`${c.d} | ${Object.keys(c.lines || {}).map((k) => `${k} ${r2(+c.lines[k])}`).join(", ")} | ${c.exp ? Object.keys(c.exp).map((k) => `${k} ${r2(+c.exp[k])}`).join(", ") : ""}`));
+  }
   if ((meta.subs || []).length) rows.push("\nSUBSCRIPTIONS: " + meta.subs.map((s: any) => `${s.name} ${s.amt} every ${s.cycle || 1} month(s), next ${s.next || "?"}${s.active === false ? " (stopped)" : ""}`).join("; "));
   if ((meta.budgets || []).length) rows.push("BUDGETS (monthly): " + meta.budgets.map((b: any) => `${String(b.key).slice(4)} ${b.amt}`).join(", "));
   rows.push("\nTRANSACTIONS, oldest first: date | type (exp spending, inc income, xfer transfer, adj adjustment) | amount | my share if split | category | subcategory | note | paid with | tags");
