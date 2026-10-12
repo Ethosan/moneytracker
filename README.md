@@ -30,7 +30,7 @@ Edit `index.html`, commit, and Pages redeploys. If the phone keeps showing the o
 
 ## AI assistant (optional)
 
-Off until you turn it on in Settings → AI assistant. Once a week it sends entries added since its last look (date, type, amount, category and note only) to the AI, and anything it flags waits in Suggestions for you to approve. You can also ask it questions; each one sends a summary of the last six months.
+Off until you turn it on in Settings → AI assistant. Once a week it sends entries added since its last look (date, type, amount, category and note only) to the AI, and anything it flags waits in Suggestions for you to approve. You can also ask it questions; each one sends your full history: every month's totals and savings, your accounts, and every entry.
 
 The API key never goes in this repo. It lives in a Supabase Edge Function:
 

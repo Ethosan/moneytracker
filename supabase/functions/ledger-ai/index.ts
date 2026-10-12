@@ -7,7 +7,7 @@
 //   AI_PROVIDER         optional: "mistral" or "anthropic", to choose when both keys are set
 //   MISTRAL_MODEL       optional, default mistral-small-latest
 //   ANTHROPIC_MODEL     optional, default claude-opus-5-5
-import { createClient } from "npm:@supabase/supabase-js@2";
+import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import Anthropic from "npm:@anthropic-ai/sdk";
 
 const CORS = {
@@ -32,7 +32,8 @@ Reply with JSON only: {"findings":[{"i":0,"issue":"...","cat":"optional category
 
 const ASK_SYSTEM = `You answer questions about the owner's personal finances using only the data provided: a current snapshot,
 exact totals worked out for you, and every transaction and entry. For any sum, use the exact totals rather than adding rows yourself;
-use the rows to look up specific purchases, dates and patterns.
+use the rows to look up specific purchases, dates and patterns. Savings means income minus spending: every month has a Saved line
+and averages are given, so answer "how much should I save" questions from those numbers.
 Amounts are Singapore dollars unless marked US$.
 This is a conversation: a short follow-up ("break it down", "I mean the prop firms", "and last month?") is about
 the topic of the previous messages, so answer it in that context instead of starting over.
@@ -104,9 +105,11 @@ function firstJson(text: string) {
 type Tx = { d: string; t: string; amt: number; cat?: string; sub?: string; note?: string; acct?: string; pm?: string; plp?: string; tags?: string[]; split?: { mine: number; person: string }; from?: string; to?: string; inst?: { n: number; fee?: number } };
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const plainCat = (c = "") => c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, "");
-const LIMIT = 260000; // characters of row data, comfortably inside the model's context
+// Budget for the whole prompt (rows + snapshot + history), at roughly 4 characters per
+// token: comfortably inside the 128k-token context of mistral-small, with room to spare.
+const PROMPT_BUDGET = 400000;
 
-async function fullLedger(sb: ReturnType<typeof createClient>) {
+async function fullLedger(sb: SupabaseClient, rowLimit: number) {
   const { data, error } = await sb.from("ledger_docs").select("id,body");
   if (error) throw new Error("Couldn't read your ledger: " + error.message);
   const doc: Record<string, any> = {};
@@ -133,6 +136,17 @@ async function fullLedger(sb: ReturnType<typeof createClient>) {
     out.push(`Spent ${m}: total ${tot}; ` + Object.keys(c).sort((a, b) => c[b] - c[a]).map((k) => `${k} ${c[k]}`).join(", "));
   });
   Object.keys(inMonth).sort().forEach((m) => { const c = inMonth[m]; out.push(`Income ${m}: ` + Object.keys(c).map((k) => `${k} ${c[k]}`).join(", ")); });
+  // savings per month (income minus spending) and the averages a savings-goal question needs
+  const saved: Record<string, number> = {};
+  Object.keys(inMonth).forEach((m) => { saved[m] = Object.values(inMonth[m]).reduce((a, b) => a + b, 0); });
+  Object.keys(byMonth).forEach((m) => { saved[m] = (saved[m] || 0) - Object.values(byMonth[m]).reduce((a, b) => a + b, 0); });
+  Object.keys(saved).sort().forEach((m) => out.push(`Saved ${m}: ${r2(saved[m])} (income minus spending)`));
+  const last12 = Object.keys(saved).sort().slice(-12);
+  if (last12.length) {
+    const ai = last12.reduce((a, m) => a + Object.values(inMonth[m] || {}).reduce((x, y) => x + y, 0), 0) / last12.length;
+    const as = last12.reduce((a, m) => a + Object.values(byMonth[m] || {}).reduce((x, y) => x + y, 0), 0) / last12.length;
+    out.push(`Averages over the last ${last12.length} months with entries: income ${r2(ai)}, spent ${r2(as)}, saved ${r2(ai - as)}` + (ai > 0.005 ? ` (${Math.round(((ai - as) / ai) * 100)}% of income)` : "") + ".");
+  }
   const topNotes = Object.keys(notes).sort((a, b) => notes[b].s - notes[a].s).slice(0, 40);
   if (topNotes.length) out.push("Biggest notes, all time: " + topNotes.map((k) => `${k} (${notes[k].cat}) ${notes[k].n}x ${r2(notes[k].s)}`).join("; "));
 
@@ -171,7 +185,7 @@ async function fullLedger(sb: ReturnType<typeof createClient>) {
     x.t === "xfer" ? `${x.from || "?"} -> ${x.to || "?"}` : x.pm === "later" ? `PayLater ${x.plp || "GrabPay Later"}${x.inst && x.inst.n > 1 ? " in " + x.inst.n + " instalments" : ""}` : x.acct || "", (x.tags || []).join("/")].join(" | "));
   // keep the newest rows when it's too much to send
   let used = out.join("\n").length + rows.join("\n").length, keepFrom = 0;
-  for (let i = txRows.length - 1; i >= 0; i--) { used += txRows[i].length + 1; if (used > LIMIT) { keepFrom = i + 1; break; } }
+  for (let i = txRows.length - 1; i >= 0; i--) { used += txRows[i].length + 1; if (used > rowLimit) { keepFrom = i + 1; break; } }
   if (keepFrom > 0) rows.push(`(${keepFrom} older transactions before ${tx[keepFrom].d} are left out to fit; the totals above still include them)`);
   rows.push(...txRows.slice(keepFrom));
   return out.join("\n") + "\n" + rows.join("\n");
@@ -212,12 +226,13 @@ Deno.serve(async (req) => {
     }
     if (body.action === "ask") {
       const question = String(body.question || "").slice(0, 1000).trim();
-      const context = String(body.context || "").slice(0, 40000);
+      const context = String(body.context || "").slice(0, 100000);
       const history = (Array.isArray(body.history) ? body.history : []).slice(-10)
         .filter((m: Turn) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
         .map((m: Turn) => ({ role: m.role, content: m.content.slice(0, 2000) }));
       if (!question) return json({ error: "Ask a question." }, 400);
-      const ledger = await fullLedger(sb);
+      // rows get whatever is left of the prompt budget after the snapshot and history
+      const ledger = await fullLedger(sb, Math.max(150000, PROMPT_BUDGET - context.length - history.reduce((a, m) => a + m.content.length, 0)));
       const messages: Turn[] = [
         { role: "user", content: `My finances. Amounts in SGD.\n\nCURRENT SNAPSHOT (live balances and recent months, from the app):\n${context}\n\nFULL LEDGER:\n${ledger}` },
         { role: "assistant", content: "Got it. What would you like to know?" },

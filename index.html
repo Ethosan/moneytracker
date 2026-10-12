@@ -1993,30 +1993,35 @@ function aiMaybe() {
   if (!aiReady() || (S.meta.ai.lastRun && S.meta.ai.lastRun > addDays(today(), -7))) return;
   clearTimeout(aiMaybe.t); aiMaybe.t = setTimeout(function () { aiReview().catch(function () { }); }, 4000);
 }
-// What a question gets to see: monthly totals, top notes, budgets, subscriptions, people. No ids, no wallets.
+// What a question gets to see: every month's totals (with what was saved), all-time top
+// notes, budgets, subscriptions, people, trading accounts and wallet balances.
 function aiContext() {
   var m0 = monthOf(today()), L = ['Today is ' + today() + '. Amounts in SGD.'];
-  for (var k = 5; k >= 0; k--) {
-    var m = addMonth(m0, -k); if (!S.tx[m]) continue;
+  var months = Object.keys(S.tx).sort();
+  months.forEach(function (m) {
     var st = monthStats(m), inc = incomeBy(m);
     var cats = Object.keys(st.byCat).sort(function (a, b) { return st.byCat[b] - st.byCat[a]; }).map(function (c) { return plain(c) + ' ' + r2(st.byCat[c]); }).join(', ');
-    L.push(monthLabel(m) + (m === m0 ? ' (so far)' : '') + ': spent ' + r2(st.spend) + ', paid back by friends ' + r2(st.reimb) + ', earned from work ' + inc.work + ', other income ' + inc.other + '. By category: ' + (cats || 'none'));
-  }
-  var since = addDays(today(), -90), g = {};
-  allTx().forEach(function (t) { if (t.t !== 'exp' || t.d < since || !t.note) return; var k = t.note.trim(); g[k] = g[k] || { n: 0, s: 0, cat: plain(t.cat || '') }; g[k].n++; g[k].s += ea(t); });
+    L.push(monthLabel(m) + (m === m0 ? ' (so far)' : '') + ': spent ' + r2(st.spend) + ', paid back by friends ' + r2(st.reimb) + ', earned from work ' + inc.work + ', other income ' + inc.other + ', saved ' + r2(st.saved) + '. By category: ' + (cats || 'none'));
+  });
+  // the averages a "how much should I save" question needs, worked out here
+  var win = months.slice(-12), si = 0, ss = 0, sv = 0;
+  win.forEach(function (m) { var st = monthStats(m); si += st.earned + st.other + st.reimb; ss += st.spend; sv += st.saved; });
+  if (win.length) L.push('Averages over the last ' + win.length + ' months with entries: income ' + r2(si / win.length) + ', spent ' + r2(ss / win.length) + ', saved ' + r2(sv / win.length) + (si > 0.005 ? ' (' + Math.round(sv / si * 100) + '% of income)' : '') + '.');
+  var g = {};
+  allTx().forEach(function (t) { if (t.t !== 'exp' || !t.note) return; var k = t.note.trim(); g[k] = g[k] || { n: 0, s: 0, cat: plain(t.cat || '') }; g[k].n++; g[k].s += ea(t); });
   var top = Object.keys(g).sort(function (a, b) { return g[b].s - g[a].s; }).slice(0, 20);
-  if (top.length) L.push('Biggest notes in the last 90 days: ' + top.map(function (k) { return k + ' (' + g[k].cat + ') ' + g[k].n + 'x, ' + r2(g[k].s); }).join('; '));
+  if (top.length) L.push('Biggest notes, all time: ' + top.map(function (k) { return k + ' (' + g[k].cat + ') ' + g[k].n + 'x, ' + r2(g[k].s); }).join('; '));
   if (S.meta.budgets.length) L.push('Monthly budgets: ' + S.meta.budgets.map(function (b) { return b.key.slice(4) + ' ' + b.amt; }).join(', '));
   var subs = S.meta.subs.filter(function (x) { return x.active !== false; });
   if (subs.length) L.push('Subscriptions: ' + subs.map(function (x) { return x.name + ' ' + x.amt + ' ' + cycleLabel(x.cycle); }).join(', '));
   var ppl = {}; S.debts.forEach(function (d) { ppl[d.person] = r2((ppl[d.person] || 0) + d.amt); });
   var owed = Object.keys(ppl).filter(function (n) { return Math.abs(ppl[n]) > 0.005; });
   if (owed.length) L.push('People balances (positive means they owe me): ' + owed.map(function (n) { return n + ' ' + ppl[n]; }).join(', '));
-  // income by source, month by month, so "where did I earn money" can be broken down
-  for (var k2 = 5; k2 >= 0; k2--) {
-    var mi = addMonth(m0, -k2), ib = incomeBy(mi), src = Object.keys(ib.by).sort(function (a, b) { return ib.by[b] - ib.by[a]; });
+  // income by source, month by month, all months, so "where did I earn money" can be broken down
+  months.forEach(function (mi) {
+    var ib = incomeBy(mi), src = Object.keys(ib.by).sort(function (a, b) { return ib.by[b] - ib.by[a]; });
     if (src.length) L.push('Income in ' + monthLabel(mi) + ': ' + src.map(function (c) { return plain(c) + ' ' + ib.by[c]; }).join(', '));
-  }
+  });
   // trading: every prop firm, broker, crypto account and poker, all time
   var VB = venuesByType(), TN = { prop: 'Prop firm', broker: 'Broker', crypto: 'Crypto', poker: 'Poker' };
   ['prop', 'poker', 'broker', 'crypto'].forEach(function (ty) {
@@ -2041,8 +2046,8 @@ function aiContext() {
 
 // ---------- Ask: a chat about your money, in a tab of its own ----------
 // Conversations sync like everything else (the 'chats' document). Each question sends the
-// six-month summary from aiContext() plus the last few messages of that conversation.
-var ASK_STARTERS = ['How much have I spent this month, and on what?', 'Why was last month more expensive?', 'Where could I cut $100 a month?', 'How much do I spend with Alaina?', 'Are my prop firms worth it so far?'];
+// full-history summary from aiContext() plus the last few messages of that conversation.
+var ASK_STARTERS = ['How much have I spent this month, and on what?', 'Why was last month more expensive?', 'Where could I cut $100 a month?', 'How much do I spend with Alaina?', 'Are my prop firms worth it so far?', 'How much should I save each month to reach $100k?'];
 function chatList() { return (S.chats || []).slice().sort(function (a, b) { return (b.u || b.t || '') > (a.u || a.t || '') ? 1 : -1; }); }
 function chatById(id) { return (S.chats || []).filter(function (c) { return c.id === id; })[0] || null; }
 function chatWhen(iso) {
@@ -2071,7 +2076,7 @@ function renderAsk() {
   var h = '<header class="top"><h1>Ask</h1>' + hdRight() + '</header>';
   if (!aiOn() || store.mode !== 'cloud') {
     return h + '<section class="blk ask-off"><div class="panel"><div class="ask-mark" aria-hidden="true">' + ICON.ask + '</div>' +
-      '<b>Ask anything about your money</b><p>Questions like "why was last month expensive?" are answered from a summary of your last six months. Nothing in your data changes from here.</p>' +
+      '<b>Ask anything about your money</b><p>Questions like "why was last month expensive?" are answered from your full history. Nothing in your data changes from here.</p>' +
       (store.mode !== 'cloud' ? '<p class="neg">This needs sync: sign in with your Supabase account first.</p>' : '<button class="btn" data-act="ai">Turn on the AI assistant</button>') +
       '</div></section>';
   }
@@ -2086,7 +2091,7 @@ function renderAsk() {
   var main = '<div class="ask-main">';
   if (!cur) {
     main += '<div class="ask-hello"><div class="ask-mark" aria-hidden="true">' + ICON.ask + '</div><h2>What would you like to know?</h2>' +
-      '<p>Answers come from a summary of your last six months. Nothing in your data changes from here.</p>' +
+      '<p>Answers come from your full history. Nothing in your data changes from here.</p>' +
       '<div class="ask-starters">' + ASK_STARTERS.map(function (q) { return '<button class="chip" data-askq="' + esc(q) + '">' + esc(q) + '</button>'; }).join('') + '</div></div>';
   } else {
     main += '<div class="ask-chat-hd"><button class="ask-back" data-act="chatback" aria-label="All conversations">\u2039</button><b>' + esc(cur.title || 'Conversation') + '</b></div>' +
