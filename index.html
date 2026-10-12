@@ -770,10 +770,17 @@ details.morepat>summary span{flex-basis:100%;font-size:13px;font-weight:400;colo
 .ask-msg time{font-size:11.5px;color:var(--muted);margin:4px 6px 0}
 .ask-msg .bubble{padding:11px 15px;border-radius:20px;font-size:15px;line-height:1.5;overflow-wrap:anywhere}
 .ask-msg.me .bubble{background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:6px}
-.ask-msg.ai .bubble{background:var(--surface);box-shadow:var(--lift);border-top-left-radius:6px}
+.ask-msg.ai .bubble{background:var(--surface);box-shadow:var(--lift);border-top-left-radius:6px;overflow-x:auto}
 .ask-msg.ai .bubble p{margin:0 0 8px}.ask-msg.ai .bubble p:last-child{margin:0}
 .ask-msg.ai .bubble ul,.ask-msg.ai .bubble ol{margin:4px 0 8px;padding-left:20px}.ask-msg.ai .bubble li{margin:3px 0}
 .ask-msg.err .bubble{background:var(--loss-soft);color:var(--ink);font-size:14px}
+.mdtbl{width:100%;border-collapse:collapse;margin:4px 0 8px;font-size:14px}
+.mdtbl th,.mdtbl td{padding:5px 12px 5px 0;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
+.mdtbl th{color:var(--muted);font-weight:600}
+.mdtbl tbody tr:last-child td{border-bottom:none}
+.latex{color:inherit}
+.latex.disp{display:block;margin:2px 0 8px;overflow-x:auto}
+.ask-msg.ai .bubble math{font-size:1.08em}
 .ask-av{flex:none;width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:var(--accent-soft);color:var(--accent);margin-top:2px}
 .ask-av .ms{font-size:17px}
 .bubble.typing{display:flex;gap:5px;align-items:center;padding:14px 16px}
@@ -2057,20 +2064,79 @@ function chatWhen(iso) {
   if (ds === addDays(today(), -1)) return 'Yesterday';
   return ds.slice(0, 4) === today().slice(0, 4) ? dayLabel(ds) : dayYear(ds);
 }
-// Enough formatting for an answer to read well: paragraphs, lists, bold, headings as bold lines.
+// Enough formatting for an answer to read well: paragraphs, lists, bold, headings as bold
+// lines, markdown tables, and LaTeX math (real MathML once temml loads, readable text until then).
 function mdLite(text) {
+  // Pull out math before escaping: $$...$$ and \[...\] are display math, \(...\) is inline.
+  // Single $...$ is never math: amounts are written with $, like $500.
+  var maths = [];
+  text = String(text || '');
+  function grab(re, disp) { text = text.replace(re, function (all, src) { maths.push({ src: src, disp: disp }); return '\u0001' + (maths.length - 1) + '\u0001'; }); }
+  grab(/\$\$([\s\S]+?)\$\$/g, true);
+  grab(/\[([\s\S]+?)\\]/g, true);
+  grab(/\\\(([\s\S]+?)\\\)/g, false);
   var out = [], list = null;
   function close() { if (list) { out.push('</' + list + '>'); list = null; } }
-  esc(text).split(/\n/).forEach(function (l) {
-    var m;
-    if ((m = l.match(/^\s*[-*\u2022]\s+(.*)$/))) { if (list !== 'ul') { close(); out.push('<ul>'); list = 'ul'; } out.push('<li>' + m[1] + '</li>'); }
-    else if ((m = l.match(/^\s*\d+[.)]\s+(.*)$/))) { if (list !== 'ol') { close(); out.push('<ol>'); list = 'ol'; } out.push('<li>' + m[1] + '</li>'); }
+  function inline(s) { return s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\w)/g, '$1<i>$2</i>'); }
+  function cells(line) { return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map(function (x) { return x.trim(); }); }
+  function isSep(line) { var c = cells(line); return c.length > 0 && c.every(function (x) { return /^:?-+:?$/.test(x); }); }
+  var lines = esc(text).split('\n'), i = 0;
+  while (i < lines.length) {
+    var l = lines[i], m;
+    // a markdown table: a header row of pipes, a |---| separator row, then body rows
+    if (l.indexOf('|') > -1 && i + 1 < lines.length && isSep(lines[i + 1])) {
+      close();
+      var head = cells(l), align = cells(lines[i + 1]).map(function (x) { return /^:-+:$/.test(x) ? ' style="text-align:center"' : /^-+:$/.test(x) ? ' style="text-align:right"' : ''; });
+      var tbl = '<table class="mdtbl"><thead><tr>' + head.map(function (c, k) { return '<th' + (align[k] || '') + '>' + inline(c) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      i += 2;
+      while (i < lines.length && lines[i].trim() && lines[i].indexOf('|') > -1) {
+        var row = cells(lines[i]);
+        tbl += '<tr>' + head.map(function (x, k) { return '<td' + (align[k] || '') + '>' + inline(row[k] == null ? '' : row[k]) + '</td>'; }).join('') + '</tr>';
+        i++;
+      }
+      out.push(tbl + '</tbody></table>');
+      continue;
+    }
+    if ((m = l.match(/^\s*[-*\u2022]\s+(.*)$/))) { if (list !== 'ul') { close(); out.push('<ul>'); list = 'ul'; } out.push('<li>' + inline(m[1]) + '</li>'); }
+    else if ((m = l.match(/^\s*\d+[.)]\s+(.*)$/))) { if (list !== 'ol') { close(); out.push('<ol>'); list = 'ol'; } out.push('<li>' + inline(m[1]) + '</li>'); }
     else if (!l.trim()) close();
-    else if ((m = l.match(/^#{1,6}\s+(.*)$/))) { close(); out.push('<p><b>' + m[1] + '</b></p>'); }
-    else { close(); out.push('<p>' + l + '</p>'); }
-  });
+    else if ((m = l.match(/^#{1,6}\s+(.*)$/))) { close(); out.push('<p><b>' + inline(m[1]) + '</b></p>'); }
+    else { close(); out.push('<p>' + inline(l) + '</p>'); }
+    i++;
+  }
   close();
-  return out.join('').replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*\w])\*([^*\n]+?)\*(?!\w)/g, '$1<i>$2</i>');
+  return out.join('').replace(/\u0001(\d+)\u0001/g, function (all, k) {
+    var x = maths[+k];
+    return '<span class="latex' + (x.disp ? ' disp' : '') + '" data-latex="' + esc(x.src.trim()) + '">' + esc(latexPlain(x.src)) + '</span>';
+  });
+}
+// A readable plain-text stand-in for a formula, shown until temml renders it (and if it never loads).
+function latexPlain(src) {
+  var GREEK = { alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', theta: 'θ', lambda: 'λ', mu: 'μ', pi: 'π', sigma: 'σ', omega: 'ω', Delta: 'Δ', Gamma: 'Γ', Pi: 'Π', Sigma: 'Σ', Omega: 'Ω' };
+  var OPS = { times: '×', cdot: '·', div: '÷', pm: '±', approx: '≈', leq: '≤', le: '≤', geq: '≥', ge: '≥', ne: '≠', infty: '∞', sum: 'Σ', prod: '∏', rightarrow: '→', to: '→' };
+  var s = String(src || '').trim();
+  s = s.replace(/\\frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, function (a, x, y) { return '(' + x + ')/(' + y + ')'; });
+  s = s.replace(/\\sqrt\s*\{([^{}]*)\}/g, function (a, x) { return '√(' + x + ')'; });
+  s = s.replace(/\\text\s*\{([^{}]*)\}/g, '$1');
+  s = s.replace(/\^\{([^{}]*)\}/g, '^($1)').replace(/_\{([^{}]*)\}/g, '_($1)');
+  s = s.replace(/\\([A-Za-z]+)/g, function (a, c) { return OPS[c] || GREEK[c] || c; });
+  s = s.replace(/\\(.)/g, '$1');
+  return s.replace(/\s+/g, ' ');
+}
+// temml renders LaTeX to MathML with system fonts and no CSS; loaded on demand like the other CDN libs.
+function needMath() { return window.temml ? Promise.resolve() : (needMath.p = needMath.p || loadScript('https://cdn.jsdelivr.net/npm/temml@0.14.0/dist/temml.min.js').then(function () { if (!window.temml) throw new Error('temml did not load'); }).catch(function (e) { needMath.p = null; throw e; })); }
+// Upgrade the readable stand-ins to real MathML once temml is there.
+function hydrateMath() {
+  var els = document.querySelectorAll('.latex[data-latex]');
+  if (!els.length) return;
+  if (window.temml) {
+    els.forEach(function (el) {
+      if (el.dataset.done) return;
+      try { el.innerHTML = temml.renderToString(el.dataset.latex, { displayMode: el.classList.contains('disp') }); el.dataset.done = '1'; } catch (e) { }
+    });
+    return;
+  }
+  needMath().then(hydrateMath, function () { });
 }
 function renderAsk() {
   var h = '<header class="top"><h1>Ask</h1>' + hdRight() + '</header>';
@@ -3034,7 +3100,7 @@ function render() {
     d.addEventListener('toggle', function () { UI.folds[d.dataset.fold] = d.open; });
   });
   if (UI.tab === 'insights') drawInsights();
-  if (UI.tab === 'ask') wireAsk();
+  if (UI.tab === 'ask') { wireAsk(); hydrateMath(); }
   var cu = arrive && document.querySelector('[data-count]');
   if (cu && window.requestAnimationFrame && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
     var target = +cu.dataset.count, t0 = performance.now();
