@@ -3251,7 +3251,7 @@ function txSheet(existing, asNew) {
     drawInst();
     var spWho = t.split ? t.split.person : '';
     function whoList() {
-      var ps = {}; S.debts.forEach(function (d) { ps[d.person] = 1; }); S.meta.tags.forEach(function (x) { if (x !== 'Alaina') 0; });
+      var ps = {}; S.debts.forEach(function (d) { ps[d.person] = 1; });
       if (spWho) ps[spWho] = 1;
       return Object.keys(ps);
     }
