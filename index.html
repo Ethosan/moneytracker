@@ -1669,16 +1669,16 @@ function wireLogin() {
         if (r.error) { say(otpErr(r.error)); return; }
         sentTo = addr; sentAt = Date.now();
         codebox.hidden = false; resend.hidden = false; code.focus();
-        toast('A code was sent to ' + addr + '. It expires in a few minutes.');
+        toast('A code was sent to ' + addr + '. Only the newest code works.');
       }).catch(function () { si.disabled = false; si.textContent = 'Email me a code'; say('Could not send the code. Check your connection and try again.'); });
       return;
     }
-    var tok = code.value.trim().replace(/[^\d]/g, '');
+    var tok = code.value.trim().replace(/[\s-]/g, '');
     if (!/^\d{6,8}$/.test(tok)) { say('Enter the code from the email.'); return; }
     say(''); si.disabled = true; si.textContent = 'Checking…';
     store.sb.auth.verifyOtp({ email: sentTo, token: tok, type: 'email' }).then(function (r) {
       si.disabled = false; si.textContent = 'Verify code';
-      if (r.error) { say(/expired|invalid/i.test(r.error.message) ? 'That code is wrong or expired. Try again or resend it.' : otpErr(r.error)); return; }
+      if (r.error) { say(/expired|invalid/i.test(r.error.message) ? 'That code is wrong or expired. Request a new code and use the newest email — each new code replaces the previous one.' : otpErr(r.error)); return; }
       connect();
     }).catch(function () { si.disabled = false; si.textContent = 'Verify code'; say('Could not check the code. Check your connection and try again.'); });
   });
@@ -1689,7 +1689,7 @@ function wireLogin() {
     sentAt = Date.now(); say('');
     store.sb.auth.signInWithOtp({ email: sentTo, options: { shouldCreateUser: true, emailRedirectTo: home } }).then(function (r) {
       if (r.error) { say(otpErr(r.error)); return; }
-      toast('Code sent again');
+      toast('New code sent — only the newest code works.');
     }).catch(function () { say('Could not resend the code. Check your connection and try again.'); });
   });
   em.addEventListener('input', function () { if (sentTo && em.value.trim() !== sentTo) reset(); });

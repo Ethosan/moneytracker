@@ -14,7 +14,7 @@ Personal finance tracker: spending (with person tagging), prop firm, broker and 
    <h2>Your Ledger code</h2>
    <p>Enter this code in the app to sign in:</p>
    <p style="font-size:32px;font-weight:bold;letter-spacing:8px">{{ .Token }}</p>
-   <p>It expires in a few minutes. If you did not ask for it, ignore this email.</p>
+   <p>It expires within the hour. If you did not ask for it, ignore this email. Only the newest code works — requesting another one replaces the previous code.</p>
    ```
 
 6. Authentication → URL Configuration: set Site URL to your deployed site address, and add the same address to Redirect URLs. The app passes this address to Supabase as the email link target, so even a link in an email lands on the app and signs in by itself.
