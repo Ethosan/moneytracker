@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#F2F4F8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0A0C11" media="(prefers-color-scheme: dark)">
-<title>Ethan's Ledger</title>
+<title>Ledger</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
@@ -849,11 +849,11 @@ small.cur{font-size:11px;font-weight:700;color:var(--muted);margin-left:4px;lett
 var MM = (function () {
   var CAT_MAP = {
     'dates': '💝 Dates', 'help others buy': '🤝 Help others', 'Games': '🎮 Games',
-    '❤️ mummy': '❤️ Mummy', 'Other': '📦 Other', '👬 Social Life': '👬 Social life',
+    '❤️ mummy': '👨‍👩‍👧 Family', 'Other': '📦 Other', '👬 Social Life': '👬 Social life',
     '✌️😭 interest': '💹 Interest', 'Debt payments': '↩️ Paybacks', '💵 Petty cash': '💵 Petty cash'
   };
   var INC_KIND = {
-    '📖 Tutoring': 'earned', '🪖 NS pay': 'earned', '🌐 Website': 'earned', '🤑 Allowance': 'earned',
+    '📖 Tutoring': 'earned', '💼 Salary': 'earned', '🌐 Website': 'earned', '🤑 Allowance': 'earned',
     '💹 Interest': 'earned', '🏅 Bonus': 'other', '↩️ Paybacks': 'reimb', '💵 Petty cash': 'reimb'
   };
   var VENUES = {
@@ -950,7 +950,7 @@ var MM = (function () {
         var c = CAT_MAP[cat] || cat;
         var t = type === 'Expense' ? 'exp' : 'inc';
         var tags = [];
-        if (c === '💝 Dates' || /alaina/i.test(note)) tags.push('Alaina');
+        var mpt = personTag(); if (mpt && (c === '💝 Dates' || String(note || '').toLowerCase().indexOf(mpt.toLowerCase()) > -1) && tags.indexOf(mpt) < 0) tags.push(mpt);
         out.cats[c] = { name: c, type: t, kind: t === 'inc' ? (INC_KIND[c] || 'other') : undefined };
         out.tx.push({ id: id(), d: d, t: t, amt: amt, cat: c, sub: sub, note: note, tags: tags, src: 'mm' });
       } else if (type === 'Transfer-Out') {
@@ -1137,13 +1137,13 @@ function toast(msg) { if (msg && !/^Undid|^Redone|^Nothing to/.test(msg)) { HIST
 // ---------- state ----------
 var DEFAULT_CATS = [
   ['🍜 Food', 'exp'], ['🚖 Transport', 'exp'], ['💝 Dates', 'exp'], ['🗓 Subscriptions', 'exp'], ['🧥 Shopping', 'exp'],
-  ['❤️ Mummy', 'exp'], ['✝️ Church', 'exp'], ['🤝 Help others', 'exp'], ['🎁 Gift', 'exp'], ['🎮 Games', 'exp'],
+  ['👨‍👩‍👧 Family', 'exp'], ['🙏 Giving', 'exp'], ['🤝 Help others', 'exp'], ['🎁 Gift', 'exp'], ['🎮 Games', 'exp'],
   ['👬 Social life', 'exp'], ['🎟 Experiences', 'exp'], ['❓ Unaccounted', 'exp'], ['📦 Other', 'exp'],
-  ['📖 Tutoring', 'inc', 'earned'], ['🪖 NS pay', 'inc', 'earned'], ['🌐 Website', 'inc', 'earned'], ['💹 Interest', 'inc', 'earned'],
+  ['📖 Tutoring', 'inc', 'earned'], ['💼 Salary', 'inc', 'earned'], ['🌐 Website', 'inc', 'earned'], ['💹 Interest', 'inc', 'earned'],
   ['🤑 Allowance', 'inc', 'earned'], ['🏅 Bonus', 'inc', 'other'], ['↩️ Paybacks', 'inc', 'reimb'], ['💵 Petty cash', 'inc', 'reimb']
 ];
 function freshMeta() {
-  return { cats: DEFAULT_CATS.map(function (c) { return { name: c[0], type: c[1], kind: c[2] }; }), tags: ['Alaina'], budgets: [], subs: [], venues: {}, accounts: [], rules: [], subcats: {}, basis: 'cash' };
+  return { cats: DEFAULT_CATS.map(function (c) { return { name: c[0], type: c[1], kind: c[2] }; }), tags: [], budgets: [], subs: [], venues: {}, accounts: [], rules: [], subcats: {}, basis: 'cash' };
 }
 var S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [], chats: [] };
 var SCHEMA = 3;
@@ -1298,7 +1298,7 @@ function normalize() {
   S.tx = S.tx && typeof S.tx === 'object' ? S.tx : {};
   var m = S.meta;
   m.cats = Array.isArray(m.cats) && m.cats.length ? m.cats : freshMeta().cats;
-  m.tags = Array.isArray(m.tags) ? m.tags : ['Alaina'];
+  m.tags = Array.isArray(m.tags) ? m.tags : [];
   ['budgets', 'subs', 'accounts', 'rules'].forEach(function (k) { if (!Array.isArray(m[k])) m[k] = []; });
   m.venues = m.venues || {}; m.subcats = m.subcats || {};
   // a budget without a key would crash the Month tab, so drop it
@@ -1581,6 +1581,9 @@ function connect() {
     var sess = r.data && r.data.session;
     if (!sess) { store.mode = 'auth'; render(); return; }
     store.uid = sess.user.id; store.email = sess.user.email;
+    // A different account signing in on this device must not inherit the previous
+    // account's local copy: drop it before any merge or push can see it.
+    try { var lastUid = localStorage.getItem('ledger-uid'); if (lastUid && lastUid !== store.uid) { [LS_KEY, 'ledger-dirty', BASE_KEY, HIST.KEY, RP_KEY].forEach(function (k) { localStorage.removeItem(k); }); S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [], chats: [] }; store.dirty = {}; store.base = {}; HIST.list = []; HIST.shadow = {}; HIST.ready = false; } localStorage.setItem('ledger-uid', store.uid); } catch (e) { }
     return store.sb.from('ledger_docs').select('id,body').then(function (res) {
       if (res.error) throw res.error;
       try { (JSON.parse(localStorage.getItem('ledger-dirty') || '[]')).forEach(function (k) { store.dirty[k] = true; }); } catch (e) { }
@@ -1632,7 +1635,7 @@ document.addEventListener('keydown', function (e) {
 });
 window.addEventListener('online', function () { if (store.mode === 'cloud') flush(); else if (store.mode === 'cloud-offline') connect(); });
 function renderLogin() {
-  return '<main class="login"><div class="hero"><div class="lbl">Ethan\'s Ledger</div><div class="big" style="font-size:40px">Sign in</div><div class="sub">Your data syncs to your own Supabase database.</div></div>' +
+  return '<main class="login"><div class="hero"><div class="lbl">Ledger</div><div class="big" style="font-size:40px">Sign in</div><div class="sub">Your data syncs to your own private account.</div></div>' +
     '<div class="panel" style="padding:16px"><label class="f" for="em">Email</label><input class="t" id="em" type="email" autocomplete="email">' +
     '<label class="f" for="pw">Password</label><input class="t" id="pw" type="password" autocomplete="current-password">' +
     '<p class="neg" id="lerr" style="font-size:13px;min-height:1em;margin:10px 2px 0"></p>' +
@@ -1657,12 +1660,12 @@ function wireLogin() {
 // ---------- calculations ----------
 function monthStats(m) {
   var tx = S.tx[m] || [];
-  var o = { spend: 0, earned: 0, other: 0, reimb: 0, alaina: 0, byCat: {}, byTag: {} }, PT = personTag();
+  var o = { spend: 0, earned: 0, other: 0, reimb: 0, person: 0, byCat: {}, byTag: {} }, PT = personTag();
   tx.forEach(function (t) {
     if (t.t === 'exp') {
       var v = ea(t);
       o.spend += v; o.byCat[t.cat] = (o.byCat[t.cat] || 0) + v;
-      if (PT && (t.tags || []).indexOf(PT) > -1) o.alaina += v;
+      if (PT && (t.tags || []).indexOf(PT) > -1) o.person += v;
       (t.tags || []).forEach(function (g) { o.byTag[g] = (o.byTag[g] || 0) + v; });
     } else if (t.t === 'inc') {
       var k = incKind(t.cat); o[k === 'earned' ? 'earned' : k === 'reimb' ? 'reimb' : 'other'] += t.amt;
@@ -2054,7 +2057,7 @@ function aiContext() {
 // ---------- Ask: a chat about your money, in a tab of its own ----------
 // Conversations sync like everything else (the 'chats' document). Each question sends the
 // full-history summary from aiContext() plus the last few messages of that conversation.
-var ASK_STARTERS = ['How much have I spent this month, and on what?', 'Why was last month more expensive?', 'Where could I cut $100 a month?', 'How much do I spend with Alaina?', 'Are my prop firms worth it so far?', 'How much should I save each month to reach $100k?'];
+var ASK_STARTERS = ['How much have I spent this month, and on what?', 'Why was last month more expensive?', 'Where could I cut $100 a month?', 'How much did I spend on food this month?', 'Are my subscriptions worth it?', 'How much should I save each month to reach $100k?'];
 function chatList() { return (S.chats || []).slice().sort(function (a, b) { return (b.u || b.t || '') > (a.u || a.t || '') ? 1 : -1; }); }
 function chatById(id) { return (S.chats || []).filter(function (c) { return c.id === id; })[0] || null; }
 function chatWhen(iso) {
@@ -2225,7 +2228,7 @@ function bioAvailable() {
 }
 function bioRegister() {
   return navigator.credentials.create({ publicKey: {
-    challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: 'Ethan\u2019s Ledger' },
+    challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: 'Ledger' },
     user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'ledger', displayName: 'Ledger' },
     pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
     authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' }, timeout: 60000
@@ -2240,7 +2243,7 @@ var lockEntry = '', lockFails = 0, lockWaitUntil = 0;
 function renderLock(msg) {
   var n = LOCK.len || 4;
   $('#app').innerHTML = '<div class="lock" role="dialog" aria-label="App locked"><div class="lock-in">' +
-    '<div class="lock-mark" aria-hidden="true">' + LOCK_ICON + '</div><h1>Ethan\u2019s Ledger</h1>' +
+    '<div class="lock-mark" aria-hidden="true">' + LOCK_ICON + '</div><h1>Ledger</h1>' +
     '<p id="lockmsg" class="' + (msg && msg.bad ? 'bad' : '') + '" aria-live="polite">' + esc(msg ? msg.text : 'Enter your PIN') + '</p>' +
     '<div class="pins" aria-hidden="true">' + Array.from({ length: n }, function (x, i) { return '<i class="' + (i < lockEntry.length ? 'on' : '') + '"></i>'; }).join('') + '</div>' +
     '<div class="pad">' + ['1', '2', '3', '4', '5', '6', '7', '8', '9', LOCK.bio ? 'bio' : '', '0', 'del'].map(function (k) {
@@ -2257,7 +2260,10 @@ function lockPress(k) {
   if (k === 'forgot') {
     if (store.mode === 'cloud' || store.mode === 'cloud-offline') {
       if (confirm('Sign out to remove the lock? Your data is safe in your account; sign back in to get it, then set a new PIN.')) {
-        LOCK = {}; saveLock(); UI.locked = false; store.sb.auth.signOut().then(function () { location.reload(); });
+        LOCK = {}; saveLock(); UI.locked = false;
+        // same as signing out in Settings: undo history, sync bookkeeping and restore points hold this account's data
+        try { [LS_KEY, 'ledger-dirty', BASE_KEY, HIST.KEY, RP_KEY].forEach(function (k) { localStorage.removeItem(k); }); } catch (e) { }
+        store.sb.auth.signOut().then(function () { location.reload(); });
       }
     } else renderLock({ text: 'This device\u2019s data isn\u2019t synced, so the lock can\u2019t be reset without the PIN.', bad: true });
     return;
@@ -2472,7 +2478,7 @@ function renderHome() {
   var dup = doubleCounts();
   if (dup.length) h += '<button class="banner" data-act="dupes"><b>' + dup.length + ' repayment' + (dup.length > 1 ? 's look' : ' looks') + ' recorded twice</b><span>Once as income and once against a balance. Tap to keep one.</span></button>';
   if (store.mode === 'error') h += '<button class="banner err" data-act="sync"><b>Your changes aren\u2019t syncing</b><span>They\u2019re safe on this device. Tap to see what\u2019s wrong and fix it.</span></button>';
-  if (S.inbox.length) h += '<button class="banner" data-act="inbox"><b>' + S.inbox.length + ' statement rows to review</b><span>Tag Alaina rides and add them</span></button>';
+  if (S.inbox.length) h += '<button class="banner" data-act="inbox"><b>' + S.inbox.length + ' statement rows to review</b><span>Tag shared rides and add them</span></button>';
   var sgN = allDoubts().length;
   if (sgN) h += '<button class="banner" data-act="suggest"><b>' + (sgN === 1 ? '1 entry looks' : sgN + ' entries look') + ' like a slip</b><span>Review the suggestions. Nothing changes until you approve.</span></button>';
   if (UI.homeMode === 'earn') h += earnHero(m, quick);
@@ -2481,16 +2487,16 @@ function renderHome() {
     '<div class="big"><small>$</small><span data-count="' + Math.round(st.net) + '">' + Math.round(st.net).toLocaleString('en-SG') + '</span></div>' +
     '<div class="sub">' + money(st.spend, 0) + ' out, ' + money(st.reimb, 0) + ' paid back by friends</div>' + paceLine(m, st, avg);
   if (cats.length) {
-    // tape: Alaina-tagged share drawn as its own hatched segment
+    // tape: person-tagged share drawn as its own hatched segment
     var tape = '', i = 0;
     var rest = {}; cats.forEach(function (c) { rest[c] = st.byCat[c]; });
     var PT = personTag();
     (S.tx[m] || []).forEach(function (t) { if (PT && t.t === 'exp' && (t.tags || []).indexOf(PT) > -1) rest[t.cat] -= ea(t); });
-    if (st.alaina > 0) tape += '<i class="al" style="width:' + (st.alaina / st.spend * 100) + '%" title="' + esc(PT) + '"></i>';
+    if (st.person > 0) tape += '<i class="al" style="width:' + (st.person / st.spend * 100) + '%" title="' + esc(PT) + '"></i>';
     cats.forEach(function (c, k) { if (rest[c] > 0.005) tape += '<i style="width:' + (rest[c] / st.spend * 100) + '%;background:' + SEGS[Math.min(k, 4)] + '"></i>'; });
     h += '<div class="tape" role="img" aria-label="Spending by category">' + tape + '</div>';
     h += '</div>' + quick + '<div class="panel legend-wrap"><ul class="legend">';
-    if (st.alaina > 0) h += '<li class="tagrow" data-lensgo="' + esc(PT) + '" role="button" tabindex="0"><span class="sw" style="background:var(--rose-soft);--c:var(--rose)"><span class="ms" style="font-size:20px;color:var(--rose)" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M240,102c0,70-103.79,126.66-108.21,129a8,8,0,0,1-7.58,0C119.79,228.66,16,172,16,102A62.07,62.07,0,0,1,78,40c20.65,0,38.73,8.88,50,23.89C139.27,48.88,157.35,40,178,40A62.07,62.07,0,0,1,240,102Z"/></svg></span></span><span>With ' + esc(PT) + ' <span class="note" style="display:inline;margin:0">all categories</span></span><span></span><span class="amt" style="color:var(--rose)">' + money(st.alaina, 0) + '</span></li>';
+    if (st.person > 0) h += '<li class="tagrow" data-lensgo="' + esc(PT) + '" role="button" tabindex="0"><span class="sw" style="background:var(--rose-soft);--c:var(--rose)"><span class="ms" style="font-size:20px;color:var(--rose)" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-fill"><path d="M240,102c0,70-103.79,126.66-108.21,129a8,8,0,0,1-7.58,0C119.79,228.66,16,172,16,102A62.07,62.07,0,0,1,78,40c20.65,0,38.73,8.88,50,23.89C139.27,48.88,157.35,40,178,40A62.07,62.07,0,0,1,240,102Z"/></svg></span></span><span>With ' + esc(PT) + ' <span class="note" style="display:inline;margin:0">all categories</span></span><span></span><span class="amt" style="color:var(--rose)">' + money(st.person, 0) + '</span></li>';
     (S.meta.tags || []).forEach(function (g) {
       var v = st.byTag[g] || 0; if (g === PT || v < 0.005) return;
       h += '<li class="tagrow" data-lensgo="' + esc(g) + '" role="button" tabindex="0"><span class="sw" style="background:var(--accent-soft);--c:var(--accent)"><span style="font-size:19px;color:var(--accent);display:inline-flex">' + TAG_ICON + '</span></span><span>' + esc(g) + ' <span class="note" style="display:inline;margin:0">all categories</span></span><span></span><span class="amt">' + money(v, 0) + '</span></li>';
@@ -2526,7 +2532,7 @@ function renderHome() {
     });
     h += '</div></section>';
   } else {
-    h += '<section class="blk"><h2>Budgets</h2><div class="panel"><div class="empty" style="padding:14px">Set monthly limits for the categories that move, like Grab or time with Alaina.<br><button class="btn sm" data-act="budgets">Set budgets</button></div></div></section>';
+    h += '<section class="blk"><h2>Budgets</h2><div class="panel"><div class="empty" style="padding:14px">Set monthly limits for the categories that move, like food or transport.<br><button class="btn sm" data-act="budgets">Set budgets</button></div></div></section>';
   }
 
   // trading this month + prop fees watch
@@ -2568,7 +2574,7 @@ function renderHome() {
   }
   // trend
   var months = []; for (var k = 8; k >= 0; k--) months.push(addMonth(m, -k));
-  var vals = months.map(function (mm) { return monthStats(mm).net; }), al = months.map(function (mm) { return monthStats(mm).alaina; });
+  var vals = months.map(function (mm) { return monthStats(mm).net; }), al = months.map(function (mm) { return monthStats(mm).person; });
   var mx = Math.max.apply(null, vals.concat([1]));
   var W = 340, H = 120, bw = W / months.length, svg = '';
   months.forEach(function (mm, i) {
@@ -2578,7 +2584,7 @@ function renderHome() {
     svg += '<text x="' + (x + w / 2) + '" y="' + (H - 3) + '" text-anchor="middle">' + monthLabel(mm, true) + '</text>';
   });
   h += '<section class="blk trend"><h2>Last 9 months</h2><svg viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Monthly spending after paybacks">' + svg + '</svg>' +
-    '<p class="note">Pink shows the part spent with Alaina.</p></section>';
+    '<p class="note">' + (personTag() ? 'Pink shows the part spent with ' + esc(personTag()) + '.' : 'Pink marks spending tagged with a person you track.') + '</p></section>';
   return h;
 }
 
@@ -2795,7 +2801,7 @@ function renderActivity() {
 
   // a category filter (from Month, or Filter) is said up front, not hidden at the end of the chip row
   if (UI.fcat) h += '<div class="filterhead"><h2>' + esc(plain(UI.fcat)) + (UI.fsub ? ' \u203a ' + esc(UI.fsub) : '') + ' <span>' + (UI.all ? 'all time' : 'in ' + monthLabel(UI.month)) + '</span></h2><button class="chip" data-act="catclear">Show all</button></div>';
-  h += '<div class="chips">' + chips.map(function (c) { return '<button class="chip' + (c[0] === 'tag:Alaina' ? ' rose' : '') + '" data-filter="' + esc(c[0]) + '" aria-pressed="' + (UI.filter === c[0] && !(c[0] === 'all' && UI.fcat)) + '">' + esc(c[1]) + '</button>'; }).join('') + catPill() + '</div>';
+  h += '<div class="chips">' + chips.map(function (c) { return '<button class="chip' + (c[0].indexOf('tag:') === 0 && isPersonTag(c[1]) ? ' rose' : '') + '" data-filter="' + esc(c[0]) + '" aria-pressed="' + (UI.filter === c[0] && !(c[0] === 'all' && UI.fcat)) + '">' + esc(c[1]) + '</button>'; }).join('') + catPill() + '</div>';
   h += '<div class="searchrow" style="display:flex;gap:8px;align-items:center"><input class="search" type="search" placeholder="Search words, dates or amounts" aria-label="Search words, a date like 12 sep, or an amount like $29.40" value="' + esc(UI.q) + '" id="q" style="flex:1">' +
     '<button class="chip" data-act="allmonths" aria-pressed="' + UI.all + '" style="margin-bottom:12px">All time</button></div>';
   var f = UI.filter, q = UI.q.toLowerCase();
@@ -3275,7 +3281,7 @@ function txSheet(existing, asNew) {
       if (e.target.closest('[data-catmore]')) { showAllCats = true; $('#cats', el).innerHTML = catChips(); return; }
       var b = e.target.closest('[data-cat]'); if (!b) return; t.cat = b.dataset.cat;
       el.querySelectorAll('#cats .chip').forEach(function (x) { x.setAttribute('aria-pressed', x === b); });
-      if (t.cat === '💝 Dates' && t.tags.indexOf('Alaina') < 0) { t.tags.push('Alaina'); $('#tags', el).innerHTML = tagChips(); }
+      var pt = personTag(); if (t.cat === '💝 Dates' && pt && t.tags.indexOf(pt) < 0) { t.tags.push(pt); $('#tags', el).innerHTML = tagChips(); }
       $('#subchips', el).innerHTML = subChips();
       drawSug();
     });
@@ -4088,9 +4094,9 @@ function importSheet() {
             '.<br>Column headings found: ' + esc((res && res.headers.length ? res.headers.join(', ') : 'none')) +
             '.<br>The reader needs a date column, an amount column and an Income/Expense column. Send the file to Claude and it can be fitted to your export.</p>'; return;
         }
-        var al = sum(res.tx.filter(function (t) { return t.tags.indexOf('Alaina') > -1; }), function (t) { return t.amt; });
+        var mpt = personTag(); var al = mpt ? sum(res.tx.filter(function (t) { return t.tags.indexOf(mpt) > -1; }), function (t) { return t.amt; }) : 0;
         $('#imp', el).innerHTML = '<div class="kv" style="margin-top:14px"><span>Transactions</span><span>' + res.tx.length + '</span><span>Trading and poker entries</span><span>' + res.ledger.length +
-          '</span><span>Friend loans and paybacks</span><span>' + res.debts.length + '</span><span>Tagged with Alaina</span><span>' + money(al, 0) + '</span></div>' +
+          '</span><span>Friend loans and paybacks</span><span>' + res.debts.length + '</span><span>' + (mpt ? 'Tagged with ' + esc(mpt) : 'Tagged rows') + '</span><span>' + money(al, 0) + '</span></div>' +
           '<div class="actions"><button class="btn" id="go">Import</button></div>';
         $('#go', el).addEventListener('click', function () { applyImport(res); closeSheet(); UI.tab = 'home'; render(); toast('Imported ' + res.tx.length + ' transactions'); });
       };
@@ -5853,7 +5859,7 @@ function classify(desc) {
 }
 function applyRules(row) {
   var d = row.desc.toLowerCase();
-  if (/alaina/.test(d) && row.tags.indexOf('Alaina') < 0) row.tags.push('Alaina');
+  var pt = personTag(); if (pt && d.indexOf(pt.toLowerCase()) > -1 && row.tags.indexOf(pt) < 0) row.tags.push(pt);
   S.meta.rules.forEach(function (r) { if (r.match && d.indexOf(r.match.toLowerCase()) > -1 && row.tags.indexOf(r.tag) < 0) row.tags.push(r.tag); });
 }
 function makeRow(d, desc, amt, src) {
@@ -5944,7 +5950,7 @@ function pdfText(buf) {
   });
 }
 function stmtSheet() {
-  var body = '<p style="margin-top:0">Bring in rides and deliveries from Grab, including PayLater, or any bank or card statement. Each row lands in a review list first, so you can tag Alaina rides and skip anything already logged.</p>' +
+  var body = '<p style="margin-top:0">Bring in rides and deliveries from Grab, including PayLater, or any bank or card statement. Each row lands in a review list first, so you can tag shared rides and skip anything already logged.</p>' +
     '<label class="f">Excel, CSV or PDF</label><input type="file" id="sf" accept=".xlsx,.xls,.csv,.pdf" class="t">' +
     '<label class="f">Or paste text copied from the Grab app or a statement</label><textarea class="t" id="st" rows="6" placeholder="12 Sep 2026  GrabCar to Bishan  S$18.40"></textarea>' +
     '<div class="actions"><button class="btn" id="sp">Read pasted text</button></div><div id="sres"></div>' +
@@ -5992,11 +5998,12 @@ function stmtSheet() {
 }
 var IB = { f: 'all', sort: 'new', q: '', m: '', win: 3, later: true };
 function inboxSheet() {
+  var ipt = personTag();
   function shown() {
     var q = IB.q.toLowerCase();
     return S.inbox.filter(function (r) {
       if (IB.f === 'dup' && !r.dup) return false;
-      if (IB.f === 'alaina' && r.tags.indexOf('Alaina') < 0) return false;
+      if (IB.f === 'person' && (!ipt || r.tags.indexOf(ipt) < 0)) return false;
       if (['ride', 'food', 'buy', 'fun', 'other', 'skip', 'refund'].indexOf(IB.f) > -1 && r.kind !== IB.f) return false;
       if (IB.f === 'new' && r.dup) return false;
       if (IB.f === 'instal' && !r.instal) return false;
@@ -6009,32 +6016,33 @@ function inboxSheet() {
   function catOpts(r) { var ty = r.kind === 'refund' ? 'inc' : 'exp', cs = S.meta.cats.filter(function (c) { return c.type === ty; }).map(function (c) { return c.name; }); if (cs.indexOf(r.cat) < 0) cs.unshift(r.cat); return cs.map(function (c) { return '<option' + (c === r.cat ? ' selected' : '') + '>' + esc(c) + '</option>'; }).join(''); }
   function list() {
     var rs = shown(), sel = S.inbox.filter(function (r) { return r.include; });
-    var h = '<div class="note" style="margin:0 0 6px">' + rs.length + ' shown. ' + sel.length + ' selected, ' + money(sum(sel, function (r) { return r.amt; })) + '. With Alaina: ' + money(sum(sel.filter(function (r) { return r.tags.indexOf('Alaina') > -1; }), function (r) { return r.amt; })) + '</div><div class="panel">';
+    var h = '<div class="note" style="margin:0 0 6px">' + rs.length + ' shown. ' + sel.length + ' selected, ' + money(sum(sel, function (r) { return r.amt; })) + (ipt ? '. With ' + esc(ipt) + ': ' + money(sum(sel.filter(function (r) { return r.tags.indexOf(ipt) > -1; }), function (r) { return r.amt; })) : '') + '</div><div class="panel">';
     if (!rs.length) h += '<div class="empty" style="padding:14px">Nothing matches this filter.</div>';
     rs.slice(0, 300).forEach(function (r) {
       h += '<div class="row irow' + (r.include ? '' : ' off') + '"><button class="ck" data-inc="' + r.id + '" aria-pressed="' + r.include + '" aria-label="Include">' + (r.include ? '✓' : '') + '</button>' +
         '<div class="l" style="flex:1"><b>' + esc(r.desc) + '</b><span>' + dayLabel(r.d) + ', ' + KL[r.kind] + (r.instal ? ', instalment ' + (r.instal === 'yes' ? '' : r.instal) : '') + '</span>' +
         (r.dup ? '<span class="match">Matches: ' + esc(r.match) + '</span>' : '') + (r.warn ? '<span class="neg" style="white-space:normal">' + esc(r.warn) + '</span>' : '') +
         '<select class="csel" data-cs="' + r.id + '" aria-label="Category">' + catOpts(r) + '</select></div>' +
-        '<div class="r">' + money(r.amt) + '<button class="chip rose sm" data-al="' + r.id + '" aria-pressed="' + (r.tags.indexOf('Alaina') > -1) + '">Alaina</button></div></div>';
+        '<div class="r">' + money(r.amt) + (ipt ? '<button class="chip rose sm" data-al="' + r.id + '" aria-pressed="' + (r.tags.indexOf(ipt) > -1) + '">' + esc(ipt) + '</button>' : '') + '</div></div>';
     });
     if (rs.length > 300) h += '<div class="note" style="padding:8px 0">Showing the first 300. Narrow with search or a filter.</div>';
     return h + '</div>';
   }
-  var chips = [['all', 'All'], ['new', 'Not yet logged'], ['dup', 'Already logged'], ['ride', 'Rides'], ['food', 'Food'], ['buy', 'Purchases'], ['fun', 'Experiences'], ['other', 'Other'], ['instal', 'Instalments'], ['alaina', 'Alaina'], ['skip', 'Skipped'], ['refund', 'Refunds']];
+  var chips = [['all', 'All'], ['new', 'Not yet logged'], ['dup', 'Already logged'], ['ride', 'Rides'], ['food', 'Food'], ['buy', 'Purchases'], ['fun', 'Experiences'], ['other', 'Other'], ['instal', 'Instalments'], ['skip', 'Skipped'], ['refund', 'Refunds']];
+  if (ipt) chips.splice(9, 0, ['person', ipt]);
   function monthOpts() {
     var c = {}; S.inbox.forEach(function (r) { var m = monthOf(r.d); c[m] = (c[m] || 0) + 1; });
     return '<option value="">All months (' + S.inbox.length + ')</option>' + Object.keys(c).sort().reverse().map(function (m) { return '<option value="' + m + '"' + (IB.m === m ? ' selected' : '') + '>' + monthLabel(m) + ' (' + c[m] + ')</option>'; }).join('');
   }
   var expCats = S.meta.cats.filter(function (c) { return c.type === 'exp'; }).map(function (c) { return '<option>' + esc(c.name) + '</option>'; }).join('');
   var body = '<div class="chips" id="ibf">' + chips.map(function (c) { return '<button class="chip" data-ibf="' + c[0] + '" aria-pressed="' + (IB.f === c[0]) + '">' + c[1] + '</button>'; }).join('') + '</div>' +
-    '<div style="display:flex;gap:8px"><input class="search" id="ibq" type="search" placeholder="Search, e.g. her postal code or street" value="' + esc(IB.q) + '" style="flex:1">' +
+    '<div style="display:flex;gap:8px"><input class="search" id="ibq" type="search" placeholder="Search, e.g. a street, shop or amount" value="' + esc(IB.q) + '" style="flex:1">' +
     '<select class="t" id="ibs" style="width:auto;margin-bottom:10px"><option value="new">Newest</option><option value="old">Oldest</option><option value="big">Largest</option></select></div>' +
     '<div style="display:flex;gap:8px;margin-bottom:10px"><select class="t" id="ibm" style="flex:1">' + monthOpts() + '</select>' +
     '<select class="t" id="ibw" style="width:auto" aria-label="Match window"><option value="1">Match ±1 day</option><option value="3">Match ±3 days</option><option value="7">Match ±7 days</option><option value="14">Match ±14 days</option></select></div>' +
     '<div style="display:flex;gap:8px;margin-bottom:8px;align-items:center"><button class="chip" id="plt" aria-pressed="' + (IB.later !== false) + '">Charged to</button>' +
     '<select class="t" id="plpsel" style="flex:1">' + providers().map(function (p) { return '<option' + ((IB.plp || GRAB) === p.name ? ' selected' : '') + '>' + esc(p.name) + '</option>'; }).join('') + '</select></div>' +
-    '<div class="wrap" style="margin-bottom:8px"><button class="chip" data-bulk="sel">Select shown</button><button class="chip" data-bulk="unsel">Deselect shown</button><button class="chip rose" data-bulk="tag">Tag shown Alaina</button><button class="chip" data-bulk="untag">Untag shown</button><button class="chip" data-bulk="drop">Discard unselected shown</button></div>' +
+    '<div class="wrap" style="margin-bottom:8px"><button class="chip" data-bulk="sel">Select shown</button><button class="chip" data-bulk="unsel">Deselect shown</button>' + (ipt ? '<button class="chip rose" data-bulk="tag">Tag shown ' + esc(ipt) + '</button><button class="chip" data-bulk="untag">Untag shown ' + esc(ipt) + '</button>' : '') + '<button class="chip" data-bulk="drop">Discard unselected shown</button></div>' +
     '<div style="display:flex;gap:8px;margin-bottom:10px"><select class="t" id="ibcat" style="flex:1"><option value="">Set category for shown…</option>' + expCats + '<option value="__new">New category…</option></select></div>' +
     '<div id="ibrule"></div><div id="ibl">' + list() + '</div>' +
     '<div class="actions"><button class="btn ghost" id="ibc">Clear list</button><button class="btn" id="iba">Add selected</button></div>';
@@ -6053,9 +6061,9 @@ function inboxSheet() {
     el.addEventListener('change', function (e) { var sl = e.target.closest('[data-cs]'); if (!sl) return; var r = S.inbox.filter(function (x) { return x.id === sl.dataset.cs; })[0]; if (r) { r.cat = sl.value; mark('inbox'); } });
     function ruleHint() {
       var q = IB.q.trim();
-      $('#ibrule', el).innerHTML = q.length >= 3 ? '<button class="banner" id="mkrule" style="margin:0 0 10px"><b>Always tag rows containing "' + esc(q) + '" as Alaina</b><span>Applies to these rows and every future import</span></button>' : '';
+      $('#ibrule', el).innerHTML = ipt && q.length >= 3 ? '<button class="banner" id="mkrule" style="margin:0 0 10px"><b>Always tag rows containing "' + esc(q) + '" as ' + esc(ipt) + '</b><span>Applies to these rows and every future import</span></button>' : '';
       var b = $('#mkrule', el); if (b) b.addEventListener('click', function () {
-        S.meta.rules.push({ match: q, tag: 'Alaina' }); mark('meta');
+        S.meta.rules.push({ match: q, tag: ipt }); mark('meta');
         S.inbox.forEach(applyRules); mark('inbox'); re(); toast('Rule saved');
       });
     }
@@ -6066,12 +6074,12 @@ function inboxSheet() {
     el.addEventListener('click', function (e) {
       var b = e.target.closest('[data-inc],[data-al],[data-bulk]'); if (!b) return;
       if (b.dataset.inc) { var r = S.inbox.filter(function (x) { return x.id === b.dataset.inc; })[0]; if (r) r.include = !r.include; }
-      else if (b.dataset.al) { var r2x = S.inbox.filter(function (x) { return x.id === b.dataset.al; })[0]; if (r2x) { var i = r2x.tags.indexOf('Alaina'); if (i > -1) r2x.tags.splice(i, 1); else r2x.tags.push('Alaina'); } }
+      else if (b.dataset.al) { var r2x = S.inbox.filter(function (x) { return x.id === b.dataset.al; })[0]; if (r2x && ipt) { var i = r2x.tags.indexOf(ipt); if (i > -1) r2x.tags.splice(i, 1); else r2x.tags.push(ipt); } }
       else {
         var k = b.dataset.bulk; shown().forEach(function (r) {
           if (k === 'sel') r.include = true; else if (k === 'unsel') r.include = false;
           else if (k === 'drop') { if (!r.include) r._drop = true; }
-          else if (k === 'tag' && r.tags.indexOf('Alaina') < 0) r.tags.push('Alaina'); else if (k === 'untag') r.tags = r.tags.filter(function (t) { return t !== 'Alaina'; });
+          else if (k === 'tag' && ipt && r.tags.indexOf(ipt) < 0) r.tags.push(ipt); else if (k === 'untag' && ipt) r.tags = r.tags.filter(function (t) { return t !== ipt; });
         });
       }
       if (b.dataset.bulk === 'drop') S.inbox = S.inbox.filter(function (r) { return !r._drop; });
@@ -6301,13 +6309,13 @@ function drawTrendChart() {
       scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxRotation: 0, autoSkip: true, autoSkipPadding: 10 } }, y: { grid: { color: cssv('--line') }, border: { display: false }, ticks: { maxTicksLimit: 4, callback: kfmt } } } }
   }));
 }
-// ----- a lens on one tag (Alaina by default) -----
+// ----- a lens on one tag (the person tag by default) -----
 function lensTag() {
   var tags = S.meta.tags || [], used = {};
   allTx().forEach(function (t) { (t.tags || []).forEach(function (g) { used[g] = (used[g] || 0) + 1; }); });
   var usable = tags.filter(function (g) { return used[g]; });
   if (UI.lensTag && usable.indexOf(UI.lensTag) > -1) return UI.lensTag;
-  return usable.indexOf('Alaina') > -1 ? 'Alaina' : usable[0] || null;
+  var pt = personTag(); return (pt && usable.indexOf(pt) > -1) ? pt : usable[0] || null;
 }
 function lensData(tag) {
   var ms = trendMonths(), ix = {}; ms.forEach(function (m, i) { ix[m] = i; });
@@ -6407,25 +6415,28 @@ function renderOverview() {
   if (!ms.length) return h + '<div class="empty">Import or log some transactions to see insights.</div>';
   var st = ms.map(monthStats), tx = allTx().filter(function (t) { return ms.indexOf(monthOf(t.d)) > -1; }), exps = tx.filter(function (t) { return t.t === 'exp'; });
   var avgSpend = sum(st, function (x) { return x.net; }) / ms.length, inc = sum(st, function (x) { return x.earned + x.other; }), kept = sum(st, function (x) { return x.saved; });
-  var alTot = sum(st, function (x) { return x.alaina; }), spTot = sum(st, function (x) { return x.spend; });
+  var alTot = sum(st, function (x) { return x.person; }), spTot = sum(st, function (x) { return x.spend; });
   var subsCat = sum(exps.filter(function (t) { return t.cat === '🗓 Subscriptions'; }), ea) / ms.length;
   var peakI = st.reduce(function (b, x, i) { return x.net > st[b].net ? i : b; }, 0);
   h += '<div class="kpis"><div><span>Average month</span><b>' + money(avgSpend, 0) + '</b><i>spent after paybacks</i></div>' +
     '<div><span>Savings rate</span><b class="' + tone(kept) + '">' + (inc ? Math.round(kept / inc * 100) : 0) + '%</b><i>' + signed(kept, 0) + ' kept</i></div>' +
-    '<div><span>With Alaina</span><b style="color:var(--rose)">' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</b><i>' + money(alTot, 0) + ' of spending over ' + (ms.length === 1 ? '1 month' : ms.length + ' months') + '</i></div>' +
+    (personTag() ? '<div><span>With ' + esc(personTag()) + '</span><b style="color:var(--rose)">' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</b><i>' + money(alTot, 0) + ' of spending over ' + (ms.length === 1 ? '1 month' : ms.length + ' months') + '</i></div>' : '') +
     '<div><span>Subscriptions</span><b>' + money(subsCat, 0) + '</b><i>a month, everything logged under Subscriptions</i></div></div>';
 
   h += chartBlock('c1', 'Spending peaked in ' + monthLabel(ms[peakI]) + ' at ' + money(st[peakI].net, 0), 'By category, before paybacks', 240, '<div class="lg" id="c1l"></div>');
   h += chartBlock('c2', inc >= sum(st, function (x) { return x.net; }) ? 'You earned more than you spent over this period' : 'You spent more than you brought in over this period', 'Money in versus spending after paybacks', 200, '<div class="lg"><span><i style="background:var(--gain)"></i>Money in</span><span><i style="background:var(--ink)"></i>Spent</span></div>');
 
-  // Alaina
-  var alTx = exps.filter(function (t) { return (t.tags || []).indexOf('Alaina') > -1; }), alDays = {};
-  alTx.forEach(function (t) { alDays[t.d] = (alDays[t.d] || 0) + ea(t); });
-  var nd = Object.keys(alDays).length, big = alTx.slice().sort(function (a, b) { return b.amt - a.amt; }).slice(0, 3);
-  more += '<section class="blk" data-c="c3"><h2>Time with Alaina</h2><div class="panel" style="padding:12px 14px">' +
-    '<div class="kv"><span>Days with spending together</span><span>' + nd + '</span><span>Average per day together</span><span>' + money(nd ? alTot / nd : 0) + '</span><span>Share of all spending</span><span>' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</span></div>' +
-    '<div class="cw" style="height:150px"><canvas id="c3" role="img" aria-label="Monthly spending with Alaina"></canvas></div>' +
-    (big.length ? '<div class="note" style="margin-top:8px">Biggest: ' + big.map(function (t) { return esc(t.note || t.cat) + ' ' + money(t.amt, 0); }).join(', ') + '</div>' : '') + '</div></section>';
+  // time with the person tag
+  var pTag = personTag();
+  if (pTag) {
+    var alTx = exps.filter(function (t) { return (t.tags || []).indexOf(pTag) > -1; }), alDays = {};
+    alTx.forEach(function (t) { alDays[t.d] = (alDays[t.d] || 0) + ea(t); });
+    var nd = Object.keys(alDays).length, big = alTx.slice().sort(function (a, b) { return b.amt - a.amt; }).slice(0, 3);
+    more += '<section class="blk" data-c="c3"><h2>Time with ' + esc(pTag) + '</h2><div class="panel" style="padding:12px 14px">' +
+      '<div class="kv"><span>Days with spending together</span><span>' + nd + '</span><span>Average per day together</span><span>' + money(nd ? alTot / nd : 0) + '</span><span>Share of all spending</span><span>' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</span></div>' +
+      '<div class="cw" style="height:150px"><canvas id="c3" role="img" aria-label="Monthly spending with ' + esc(pTag) + '"></canvas></div>' +
+      (big.length ? '<div class="note" style="margin-top:8px">Biggest: ' + big.map(function (t) { return esc(t.note || t.cat) + ' ' + money(t.amt, 0); }).join(', ') + '</div>' : '') + '</div></section>';
+  }
 
   // transport
   var grab = exps.filter(function (t) { return t.cat === '🚖 Transport' && /grab/i.test((t.sub || '') + ' ' + (t.note || '')); }), pub = exps.filter(function (t) { return t.cat === '🚖 Transport' && grab.indexOf(t) < 0; });
@@ -6479,7 +6490,7 @@ function renderOverview() {
     h += chartBlock('c7', (pf >= 0 ? 'Prop firms have made you ' + money(pf, 0) : 'Prop firms have cost you ' + money(-pf, 0)) + ' net so far', 'Running total of prop firm and poker results, all time', 200,
       '<div class="lg"><span><i style="background:' + (isDark() ? COVE_D[6] : COVE_L[6]) + '"></i>Prop firms</span><span><i style="background:' + cssv('--muted') + '"></i>Poker, dashed</span></div>');
   }
-  if (more) h += '<details class="fold morepat" data-fold="morepat"' + (UI.folds.morepat ? ' open' : '') + '><summary>More patterns<span>Time with Alaina, transport, weekdays, every day, repeats, largest purchases, income</span></summary><div class="morepat-in">' + more + '</div></details>';
+  if (more) h += '<details class="fold morepat" data-fold="morepat"' + (UI.folds.morepat ? ' open' : '') + '><summary>More patterns<span>' + (pTag ? 'Time with ' + esc(pTag) + ', ' : '') + 'transport, weekdays, every day, repeats, largest purchases, income</span></summary><div class="morepat-in">' + more + '</div></details>';
   return h;
 }
 function chartBlock(id, title, sub, hgt, legend) {
@@ -6531,8 +6542,8 @@ function drawOverview() {
     { label: 'Money in', data: st.map(function (x) { return r2(x.earned + x.other); }), borderColor: cssv('--gain'), backgroundColor: cssv('--gain'), borderWidth: 2, pointRadius: 3, tension: 0.25 },
     { label: 'Spent', data: st.map(function (x) { return r2(x.net); }), borderColor: ink, backgroundColor: ink, borderWidth: 2, pointRadius: 3, tension: 0.25, borderDash: [5, 4] }] },
     options: Object.assign(base(false), { interaction: { mode: 'index', intersect: false } }) });
-  // c3 alaina
-  mk('c3', { type: 'bar', data: { labels: labels, datasets: [Object.assign({ label: 'With Alaina', data: st.map(function (x) { return r2(x.alaina); }), backgroundColor: cssv('--rose') }, bar)] }, options: base(false) });
+  // c3 time with the person tag
+  mk('c3', { type: 'bar', data: { labels: labels, datasets: [Object.assign({ label: 'With ' + (personTag() || 'person'), data: st.map(function (x) { return r2(x.person); }), backgroundColor: cssv('--rose') }, bar)] }, options: base(false) });
   // c4 transport
   var tr = ms.map(function (m) {
     var g = 0, p = 0; (S.tx[m] || []).forEach(function (t) { if (t.t === 'exp' && t.cat === '🚖 Transport') { if (/grab/i.test((t.sub || '') + ' ' + (t.note || ''))) g += ea(t); else p += ea(t); } }); return [r2(g), r2(p)];

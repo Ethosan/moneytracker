@@ -194,6 +194,11 @@ async function fullLedger(sb: SupabaseClient, rowLimit: number) {
   return out.join("\n") + "\n" + rows.join("\n");
 }
 
+// Best-effort per-user usage cap: the AI spends the owner's API credits and the app is shared,
+// so one account cannot hammer it. Kept in memory, so it is per isolate and resets on a cold start.
+const CALLS = new Map<string, { n: number; reset: number }>();
+const CALL_LIMIT = 120, CALL_WINDOW_MS = 3600000;
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
@@ -203,6 +208,12 @@ Deno.serve(async (req) => {
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return json({ error: "Sign in first." }, 401);
+
+  const now = Date.now();
+  const rec = CALLS.get(user.id);
+  if (rec && rec.reset > now) { if (rec.n >= CALL_LIMIT) return json({ error: "Too many AI requests. Try again in a little while." }, 429); rec.n++; }
+  else CALLS.set(user.id, { n: 1, reset: now + CALL_WINDOW_MS });
+  if (CALLS.size > 1000) { for (const [k, v] of CALLS) { if (v.reset <= now) CALLS.delete(k); } }
 
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return json({ error: "Bad request" }, 400); }
