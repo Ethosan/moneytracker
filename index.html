@@ -1572,14 +1572,21 @@ function docsToState(rows) {
   return n;
 }
 function connect() {
+  if (store.connectBusy) return;
+  store.connectBusy = true;
   var cfg = window.LEDGER_CONFIG || {};
   if (!window.supabase || !cfg.supabaseUrl || /YOUR-/.test(cfg.supabaseUrl + cfg.supabaseAnonKey)) {
-    store.mode = 'local'; setSync('On this device'); render(); ratesMaybe(); return;
+    store.mode = 'local'; setSync('On this device'); render(); ratesMaybe(); store.connectBusy = false; return;
   }
-  store.sb = store.sb || window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true } });
+  store.sb = store.sb || window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  if (!store.authSub) store.authSub = store.sb.auth.onAuthStateChange(function (ev) {
+    // an email link landing on this page completes sign-in through the URL; pick it up here
+    if (ev === 'SIGNED_IN' && store.mode !== 'cloud' && store.mode !== 'cloud-offline') connect();
+    if (ev === 'SIGNED_OUT') { store.mode = 'auth'; render(); }
+  });
   store.sb.auth.getSession().then(function (r) {
     var sess = r.data && r.data.session;
-    if (!sess) { store.mode = 'auth'; render(); return; }
+    if (!sess) { store.mode = 'auth'; render(); store.connectBusy = false; return; }
     store.uid = sess.user.id; store.email = sess.user.email;
     // A different account signing in on this device must not inherit the previous
     // account's local copy: drop it before any merge or push can see it.
@@ -1596,9 +1603,10 @@ function connect() {
         res.data.forEach(function (d) { absorb(d.id, d.body); }); histSnap();
         normalize(); saveLocal(); markAll();
       } else if (allTx().length || S.ledger.length) markAll();
-      store.mode = 'cloud'; setSync('Synced'); render(); flush(); aiMaybe(); ratesMaybe();
+      store.mode = 'cloud'; setSync('Synced'); render(); flush(); aiMaybe(); ratesMaybe(); store.connectBusy = false;
     });
   }).catch(function (e) {
+    store.connectBusy = false;
     store.err = errText(e);
     if (isNetworkErr(e)) {
       // genuinely offline: keep working from the local copy and try again shortly
@@ -1635,26 +1643,52 @@ document.addEventListener('keydown', function (e) {
 });
 window.addEventListener('online', function () { if (store.mode === 'cloud') flush(); else if (store.mode === 'cloud-offline') connect(); });
 function renderLogin() {
-  return '<main class="login"><div class="hero"><div class="lbl">Ledger</div><div class="big" style="font-size:40px">Sign in</div><div class="sub">Your data syncs to your own private account.</div></div>' +
-    '<div class="panel" style="padding:16px"><label class="f" for="em">Email</label><input class="t" id="em" type="email" autocomplete="email">' +
-    '<label class="f" for="pw">Password</label><input class="t" id="pw" type="password" autocomplete="current-password">' +
-    '<p class="neg" id="lerr" style="font-size:13px;min-height:1em;margin:10px 2px 0"></p>' +
-    '<div class="actions" style="margin-top:8px"><button class="btn ghost" id="su">Create account</button><button class="btn" id="si">Sign in</button></div></div></main>';
+  return '<main class=\"login\"><div class=\"hero\"><div class=\"lbl\">Ledger</div><div class=\"big\" style=\"font-size:40px\">Sign in</div><div class=\"sub\">Your data syncs to your own private account. No password needed.</div></div>' +
+    '<div class=\"panel\" style=\"padding:16px\"><label class=\"f\" for=\"em\">Email</label><input class=\"t\" id=\"em\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">' +
+    '<div id=\"codebox\" hidden><label class=\"f\" for=\"code\">Code from the email</label><input class=\"t\" id=\"code\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"6\" placeholder=\"123456\"></div>' +
+    '<p class=\"neg\" id=\"lerr\" style=\"font-size:13px;min-height:1em;margin:10px 2px 0\"></p>' +
+    '<div class=\"actions\" style=\"margin-top:8px\"><button class=\"btn ghost\" id=\"resend\" hidden>Resend code</button><button class=\"btn\" id=\"si\">Email me a code</button></div></div></main>';
 }
 function wireLogin() {
-  function go(signup) {
-    var em = $('#em').value.trim(), pw = $('#pw').value, err = $('#lerr');
-    if (!em || pw.length < 6) { err.textContent = 'Enter your email and a password of at least 6 characters.'; return; }
-    err.textContent = '';
-    var p = signup ? store.sb.auth.signUp({ email: em, password: pw }) : store.sb.auth.signInWithPassword({ email: em, password: pw });
-    p.then(function (r) {
-      if (r.error) { err.textContent = r.error.message; return; }
-      if (signup && !r.data.session) { err.textContent = 'Check your email to confirm the account, then sign in.'; return; }
+  var em = $('#em'), code = $('#code'), err = $('#lerr'), si = $('#si'), resend = $('#resend'), codebox = $('#codebox');
+  var sentTo = '', sentAt = 0;
+  function say(t) { err.textContent = t; }
+  function reset() { sentTo = ''; codebox.hidden = true; resend.hidden = true; si.textContent = 'Email me a code'; code.value = ''; }
+  si.addEventListener('click', function () {
+    if (!sentTo) {
+      var addr = em.value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) { say('Enter your email address.'); return; }
+      say(''); si.disabled = true; si.textContent = 'Sending…';
+      store.sb.auth.signInWithOtp({ email: addr, options: { shouldCreateUser: true } }).then(function (r) {
+        si.disabled = false; si.textContent = 'Verify code';
+        if (r.error) { say(r.error.message); return; }
+        sentTo = addr; sentAt = Date.now();
+        codebox.hidden = false; resend.hidden = false; code.focus();
+        toast('Code sent to ' + addr + '. It expires in a few minutes.');
+      });
+      return;
+    }
+    var tok = code.value.trim();
+    if (!/^\d{6}$/.test(tok)) { say('Enter the 6-digit code from the email.'); return; }
+    say(''); si.disabled = true; si.textContent = 'Checking…';
+    store.sb.auth.verifyOtp({ email: sentTo, token: tok, type: 'email' }).then(function (r) {
+      si.disabled = false; si.textContent = 'Verify code';
+      if (r.error) { say(/expired|invalid/i.test(r.error.message) ? 'That code is wrong or expired. Try again or resend it.' : r.error.message); return; }
       connect();
     });
-  }
-  $('#si').addEventListener('click', function () { go(false); });
-  $('#su').addEventListener('click', function () { go(true); });
+  });
+  resend.addEventListener('click', function () {
+    if (!sentTo) return;
+    if (Date.now() - sentAt < 60000) { say('Wait a minute before requesting another code.'); return; }
+    sentAt = Date.now(); say('');
+    store.sb.auth.signInWithOtp({ email: sentTo, options: { shouldCreateUser: true } }).then(function (r) {
+      if (r.error) { say(r.error.message); return; }
+      toast('Code sent again');
+    });
+  });
+  em.addEventListener('input', function () { if (sentTo && em.value.trim() !== sentTo) reset(); });
+  em.addEventListener('keydown', function (e) { if (e.key === 'Enter') si.click(); });
+  code.addEventListener('keydown', function (e) { if (e.key === 'Enter') si.click(); });
 }
 
 // ---------- calculations ----------

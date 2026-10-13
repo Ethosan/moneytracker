@@ -6,7 +6,7 @@ Personal finance tracker: spending (with Alaina tagging), prop firm, broker and 
 
 1. Create a project at supabase.com (the free tier is plenty).
 2. SQL Editor → New query → paste `supabase/schema.sql` → Run.
-3. Authentication → Sign In / Providers → Email: make sure it is enabled. To skip the confirmation email, turn off "Confirm email".
+3. Authentication → Sign In / Providers → Email: make sure it is enabled. Sign-in uses a one-time code emailed to you, so no confirmation email is involved. Also set Authentication → URL Configuration → Site URL to your deployed site address, so any link Supabase emails ever sends lands on the app instead of localhost.
 4. Project Settings → API: copy the Project URL and the `anon` public key into `config.js`.
 
 ## 2. GitHub Pages
