@@ -1657,6 +1657,7 @@ function wireLogin() {
   function say(t) { err.textContent = t; }
   if (store.err) say(store.err);
   function reset() { sentTo = ''; codebox.hidden = true; resend.hidden = true; si.textContent = 'Email me a code'; code.value = ''; }
+  function otpErr(e) { var st = e && e.status; if (st === 502 || st === 503 || st === 504) return 'The sign-in service is unreachable. If the app was idle for a week or more, the project may be paused — restore it in the Supabase dashboard, then try again.'; return (e && e.message) || 'Could not reach the sign-in service. Check your connection and try again.'; }
   si.addEventListener('click', function () {
     if (!store.sb) { say('Sign-in is unavailable right now — check your connection, then reopen the app and try again.'); return; }
     if (!sentTo) {
@@ -1665,7 +1666,7 @@ function wireLogin() {
       say(''); si.disabled = true; si.textContent = 'Sending…';
       store.sb.auth.signInWithOtp({ email: addr, options: { shouldCreateUser: true, emailRedirectTo: home } }).then(function (r) {
         si.disabled = false; si.textContent = 'Verify code';
-        if (r.error) { say(r.error.message); return; }
+        if (r.error) { say(otpErr(r.error)); return; }
         sentTo = addr; sentAt = Date.now();
         codebox.hidden = false; resend.hidden = false; code.focus();
         toast('A 6-digit code was sent to ' + addr + '. It expires in a few minutes.');
@@ -1677,7 +1678,7 @@ function wireLogin() {
     say(''); si.disabled = true; si.textContent = 'Checking…';
     store.sb.auth.verifyOtp({ email: sentTo, token: tok, type: 'email' }).then(function (r) {
       si.disabled = false; si.textContent = 'Verify code';
-      if (r.error) { say(/expired|invalid/i.test(r.error.message) ? 'That code is wrong or expired. Try again or resend it.' : r.error.message); return; }
+      if (r.error) { say(/expired|invalid/i.test(r.error.message) ? 'That code is wrong or expired. Try again or resend it.' : otpErr(r.error)); return; }
       connect();
     }).catch(function () { si.disabled = false; si.textContent = 'Verify code'; say('Could not check the code. Check your connection and try again.'); });
   });
@@ -1687,7 +1688,7 @@ function wireLogin() {
     if (Date.now() - sentAt < 60000) { say('Wait a minute before requesting another code.'); return; }
     sentAt = Date.now(); say('');
     store.sb.auth.signInWithOtp({ email: sentTo, options: { shouldCreateUser: true, emailRedirectTo: home } }).then(function (r) {
-      if (r.error) { say(r.error.message); return; }
+      if (r.error) { say(otpErr(r.error)); return; }
       toast('Code sent again');
     }).catch(function () { say('Could not resend the code. Check your connection and try again.'); });
   });
