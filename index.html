@@ -1651,7 +1651,7 @@ function renderLogin() {
 }
 function wireLogin() {
   var em = $('#em'), code = $('#code'), err = $('#lerr'), si = $('#si'), resend = $('#resend'), codebox = $('#codebox');
-  var sentTo = '', sentAt = 0;
+  var sentTo = '', sentAt = 0; var home = location.origin + location.pathname.replace(/[^/]*$/, '');
   function say(t) { err.textContent = t; }
   function reset() { sentTo = ''; codebox.hidden = true; resend.hidden = true; si.textContent = 'Email me a code'; code.value = ''; }
   si.addEventListener('click', function () {
@@ -1659,12 +1659,12 @@ function wireLogin() {
       var addr = em.value.trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) { say('Enter your email address.'); return; }
       say(''); si.disabled = true; si.textContent = 'Sending…';
-      store.sb.auth.signInWithOtp({ email: addr, options: { shouldCreateUser: true } }).then(function (r) {
+      store.sb.auth.signInWithOtp({ email: addr, options: { shouldCreateUser: true, emailRedirectTo: home } }).then(function (r) {
         si.disabled = false; si.textContent = 'Verify code';
         if (r.error) { say(r.error.message); return; }
         sentTo = addr; sentAt = Date.now();
         codebox.hidden = false; resend.hidden = false; code.focus();
-        toast('Code sent to ' + addr + '. It expires in a few minutes.');
+        toast('A 6-digit code was sent to ' + addr + '. It expires in a few minutes.');
       });
       return;
     }
@@ -1681,7 +1681,7 @@ function wireLogin() {
     if (!sentTo) return;
     if (Date.now() - sentAt < 60000) { say('Wait a minute before requesting another code.'); return; }
     sentAt = Date.now(); say('');
-    store.sb.auth.signInWithOtp({ email: sentTo, options: { shouldCreateUser: true } }).then(function (r) {
+    store.sb.auth.signInWithOtp({ email: sentTo, options: { shouldCreateUser: true, emailRedirectTo: home } }).then(function (r) {
       if (r.error) { say(r.error.message); return; }
       toast('Code sent again');
     });

@@ -1,13 +1,23 @@
-# Ethan's Ledger
+# Ledger
 
-Personal finance tracker: spending (with Alaina tagging), prop firm, broker and poker P&L, Grab and PayLater imports, balance checks, and insights. It is a single-page web app that installs to your phone's home screen, stores data in your own Supabase project, and keeps a copy on the phone so it opens offline.
+Personal finance tracker: spending (with person tagging), prop firm, broker and poker P&L, Grab and PayLater imports, balance checks, and insights. It is a single-page web app that installs to your phone's home screen, stores data in your own Supabase project, and keeps a copy on the phone so it opens offline.
 
 ## 1. Supabase (5 minutes)
 
 1. Create a project at supabase.com (the free tier is plenty).
 2. SQL Editor → New query → paste `supabase/schema.sql` → Run.
-3. Authentication → Sign In / Providers → Email: make sure it is enabled. Sign-in uses a one-time code emailed to you, so no confirmation email is involved. Also set Authentication → URL Configuration → Site URL to your deployed site address, so any link Supabase emails ever sends lands on the app instead of localhost.
-4. Project Settings → API: copy the Project URL and the `anon` public key into `config.js`.
+3. Authentication → Sign In / Providers → Email: make sure it is enabled. Sign-in uses a one-time code emailed to you, so no confirmation email is involved.
+4. Authentication → Email Templates → Magic Link: replace the body with one that shows the code (the default template only contains a login link). Paste this as the template body:
+
+   ```
+   <h2>Your Ledger code</h2>
+   <p>Enter this code in the app to sign in:</p>
+   <p style="font-size:32px;font-weight:bold;letter-spacing:8px">{{ .Token }}</p>
+   <p>It expires in a few minutes. If you did not ask for it, ignore this email.</p>
+   ```
+
+5. Authentication → URL Configuration: set Site URL to your deployed site address, and add the same address to Redirect URLs. The app passes this address to Supabase as the email link target, so even a link in an email lands on the app and signs in by itself.
+6. Project Settings → API: copy the Project URL and the `anon` public key into `config.js`.
 
 ## 2. GitHub Pages
 
