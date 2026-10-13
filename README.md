@@ -5,7 +5,7 @@ Personal finance tracker: spending (with person tagging), prop firm, broker and 
 ## 1. Supabase (5 minutes)
 
 1. Create a project at supabase.com (the free tier is plenty).
-2. SQL Editor → New query → paste `supabase/schema.sql` → Run.
+2. SQL Editor → New query → paste `supabase/schema.sql` → Run. Safe to run again if you already ran it once — it replaces existing policies instead of failing.
 3. Authentication → Sign In / Providers → Email: make sure it is enabled. Sign-in uses a one-time code emailed to you, so no confirmation email is involved.
 4. Authentication → Email Templates → Magic Link: replace the body with one that shows the code (the default template only contains a login link). Paste this as the template body:
 

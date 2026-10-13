@@ -1,4 +1,4 @@
--- Run once in Supabase → SQL Editor.
+-- Run in Supabase → SQL Editor. Safe to re-run: existing policies are replaced, not duplicated.
 -- One row per document: meta, ledger, debts, inbox, checks, and one tx-YYYY-MM per month.
 create table if not exists public.ledger_docs (
   user_id    uuid        not null default auth.uid() references auth.users (id) on delete cascade,
@@ -10,7 +10,11 @@ create table if not exists public.ledger_docs (
 
 alter table public.ledger_docs enable row level security;
 
+drop policy if exists "Read own docs" on public.ledger_docs;
 create policy "Read own docs"   on public.ledger_docs for select using (auth.uid() = user_id);
+drop policy if exists "Insert own docs" on public.ledger_docs;
 create policy "Insert own docs" on public.ledger_docs for insert with check (auth.uid() = user_id);
+drop policy if exists "Update own docs" on public.ledger_docs;
 create policy "Update own docs" on public.ledger_docs for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+drop policy if exists "Delete own docs" on public.ledger_docs;
 create policy "Delete own docs" on public.ledger_docs for delete using (auth.uid() = user_id);
