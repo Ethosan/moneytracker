@@ -7,7 +7,7 @@ Personal finance tracker: spending (with person tagging), prop firm, broker and 
 1. Create a project at supabase.com (the free tier is plenty).
 2. SQL Editor → New query → paste `supabase/schema.sql` → Run. Safe to run again if you already ran it once — it replaces existing policies instead of failing.
 3. Email sending (SMTP): Supabase’s built-in email sender is capped at a few codes per hour and often lands in spam. Use a free one instead: sign up at resend.com, open API Keys, create a key. Then in Supabase go to Project Settings → Auth → SMTP Settings, turn on Custom SMTP, and enter: Host `smtp.resend.com`, Port `587`, Username `resend`, Password = the Resend API key, Sender email `onboarding@resend.dev` (works without owning a domain), Sender name `Ledger`. Save. The free tier sends 100 emails a day, which is plenty for you and a few friends. Once you verify your own domain in Resend, change Sender email to `code@yourdomain.com` — see "Your own domain" below.
-4. Authentication → Sign In / Providers → Email: make sure it is enabled. Sign-in uses a one-time code emailed to you, so no confirmation email is involved.
+4. Authentication → Sign In / Providers → Email: make sure it is enabled. Sign-in uses a one-time code emailed to you, so no confirmation email is involved. If there is a "Confirm email" toggle in the Email provider settings, turn it off — with code sign-in it only sends a second, different code.
 5. Authentication → Email Templates → Magic Link: replace the body with one that shows the code (the default template only contains a login link). Paste this as the template body:
 
    ```
@@ -50,6 +50,7 @@ One domain is enough for everything: your portfolio at the root, and each projec
 - Sign-in shows no code box, or says sign-in is unavailable: something failed to load. Check your connection, then close the app fully and reopen it twice (updates download in the background). The sign-in library now comes from the site itself, so this should only happen on a very bad connection.
 - The browser warns the site is dangerous or not secure: that is Google Safe Browsing being cautious about a code-by-email login page on a free hosting address, not a problem with your data. Tap through Advanced to visit the site. For a permanent fix, point a custom domain at the site (Netlify gives free HTTPS) and set it as the Site URL in Supabase; the app follows the address automatically.
 - 504 errors in the browser console: a server hiccuped while loading. Reload once; the app keeps working from its cached copy offline.
+- You pressed Verify, nothing seemed to happen, and a second press said the code was wrong: the first press usually succeeded — a successful verify consumes the code. Wait a few seconds for the app to open; if it does not open, close and reopen the app (you are already signed in).
 
 ## Updating
 

@@ -1677,9 +1677,13 @@ function wireLogin() {
     if (!/^\d{6,8}$/.test(tok)) { say('Enter the code from the email.'); return; }
     say(''); si.disabled = true; si.textContent = 'Checking…';
     store.sb.auth.verifyOtp({ email: sentTo, token: tok, type: 'email' }).then(function (r) {
-      si.disabled = false; si.textContent = 'Verify code';
-      if (r.error) { say(/expired|invalid/i.test(r.error.message) ? 'That code is wrong or expired. Request a new code and use the newest email — each new code replaces the previous one.' : otpErr(r.error)); return; }
+      if (r.error) { si.disabled = false; si.textContent = 'Verify code'; say(/expired|invalid/i.test(r.error.message) ? 'That code is wrong or expired. Request a new code and use the newest email — each new code replaces the previous one.' : otpErr(r.error)); return; }
+      // a successful verify consumes the code: hold the button so a second press cannot reuse it
+      si.textContent = 'Signing in…';
       connect();
+      setTimeout(function () {
+        if (store.mode === 'auth') { si.disabled = false; si.textContent = 'Verify code'; say('Sign-in succeeded but the app could not open your account. Close and reopen the app — you are already signed in.'); }
+      }, 6000);
     }).catch(function () { si.disabled = false; si.textContent = 'Verify code'; say('Could not check the code. Check your connection and try again.'); });
   });
   resend.addEventListener('click', function () {
