@@ -843,8 +843,9 @@ small.cur{font-size:11px;font-weight:700;color:var(--muted);margin-left:4px;lett
 <dialog class="sheet" id="sheet" aria-label="Details"></dialog>
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script src="config.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<!-- The sign-in library is vendored so a CDN hiccup can never break the login screen. -->
+<script src="vendor/supabase-js.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'"></script>
 <script>// ---- Money Manager import mapper ----
 var MM = (function () {
   var CAT_MAP = {
@@ -1576,6 +1577,7 @@ function connect() {
   store.connectBusy = true;
   var cfg = window.LEDGER_CONFIG || {};
   if (!window.supabase || !cfg.supabaseUrl || /YOUR-/.test(cfg.supabaseUrl + cfg.supabaseAnonKey)) {
+    if (!window.supabase) { store.mode = 'auth'; store.err = 'A library failed to load, so sign-in is unavailable. Close and reopen the app to retry.'; render(); store.connectBusy = false; return; }
     store.mode = 'local'; setSync('On this device'); render(); ratesMaybe(); store.connectBusy = false; return;
   }
   store.sb = store.sb || window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
@@ -1653,8 +1655,10 @@ function wireLogin() {
   var em = $('#em'), code = $('#code'), err = $('#lerr'), si = $('#si'), resend = $('#resend'), codebox = $('#codebox');
   var sentTo = '', sentAt = 0; var home = location.origin + location.pathname.replace(/[^/]*$/, '');
   function say(t) { err.textContent = t; }
+  if (store.err) say(store.err);
   function reset() { sentTo = ''; codebox.hidden = true; resend.hidden = true; si.textContent = 'Email me a code'; code.value = ''; }
   si.addEventListener('click', function () {
+    if (!store.sb) { say('Sign-in is unavailable right now — check your connection, then reopen the app and try again.'); return; }
     if (!sentTo) {
       var addr = em.value.trim();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) { say('Enter your email address.'); return; }
@@ -1665,7 +1669,7 @@ function wireLogin() {
         sentTo = addr; sentAt = Date.now();
         codebox.hidden = false; resend.hidden = false; code.focus();
         toast('A 6-digit code was sent to ' + addr + '. It expires in a few minutes.');
-      });
+      }).catch(function () { si.disabled = false; si.textContent = 'Email me a code'; say('Could not send the code. Check your connection and try again.'); });
       return;
     }
     var tok = code.value.trim();
@@ -1675,16 +1679,17 @@ function wireLogin() {
       si.disabled = false; si.textContent = 'Verify code';
       if (r.error) { say(/expired|invalid/i.test(r.error.message) ? 'That code is wrong or expired. Try again or resend it.' : r.error.message); return; }
       connect();
-    });
+    }).catch(function () { si.disabled = false; si.textContent = 'Verify code'; say('Could not check the code. Check your connection and try again.'); });
   });
   resend.addEventListener('click', function () {
+    if (!store.sb) { say('Sign-in is unavailable right now — check your connection, then reopen the app and try again.'); return; }
     if (!sentTo) return;
     if (Date.now() - sentAt < 60000) { say('Wait a minute before requesting another code.'); return; }
     sentAt = Date.now(); say('');
     store.sb.auth.signInWithOtp({ email: sentTo, options: { shouldCreateUser: true, emailRedirectTo: home } }).then(function (r) {
       if (r.error) { say(r.error.message); return; }
       toast('Code sent again');
-    });
+    }).catch(function () { say('Could not resend the code. Check your connection and try again.'); });
   });
   em.addEventListener('input', function () { if (sentTo && em.value.trim() !== sentTo) reset(); });
   em.addEventListener('keydown', function (e) { if (e.key === 'Enter') si.click(); });

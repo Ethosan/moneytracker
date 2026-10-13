@@ -35,6 +35,12 @@ Free GitHub Pages needs a public repository. That only exposes the code, not you
 3. Add to home screen: Safari → Share → Add to Home Screen, or Chrome → ⋮ → Install app.
 4. Once your account exists, lock the door: Supabase → Authentication → Sign In / Providers → turn off "Allow new users to sign up".
 
+## Troubleshooting
+
+- Sign-in shows no code box, or says sign-in is unavailable: something failed to load. Check your connection, then close the app fully and reopen it twice (updates download in the background). The sign-in library now comes from the site itself, so this should only happen on a very bad connection.
+- The browser warns the site is dangerous or not secure: that is Google Safe Browsing being cautious about a code-by-email login page on a free hosting address, not a problem with your data. Tap through Advanced to visit the site. For a permanent fix, point a custom domain at the site (Netlify gives free HTTPS) and set it as the Site URL in Supabase; the app follows the address automatically.
+- 504 errors in the browser console: a server hiccuped while loading. Reload once; the app keeps working from its cached copy offline.
+
 ## Updating
 
 Edit `index.html`, commit, and Pages redeploys. If the phone keeps showing the old version, close and reopen the app twice (the offline cache refreshes in the background).
