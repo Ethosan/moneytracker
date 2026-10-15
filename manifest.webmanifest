@@ -1,6 +1,6 @@
 {
-  "name": "Ledger",
-  "short_name": "Ledger",
+  "name": "20bucks",
+  "short_name": "20bucks",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
