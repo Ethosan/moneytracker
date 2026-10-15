@@ -836,6 +836,16 @@ small.cur{font-size:11px;font-weight:700;color:var(--muted);margin-left:4px;lett
 .gaph{font:600 16px "Geist",sans-serif;margin:18px 0 8px;display:flex;justify-content:space-between}
 .cg-list .row[disabled]{cursor:default;opacity:1}
 .cg-list .r span{display:block;font-size:12.5px;font-weight:600}
+.gicon{display:inline-flex;flex:none;width:20px;height:20px;color:var(--muted)}
+.gicon svg{width:100%;height:100%;display:block}
+.tour-ic{width:46px;height:46px;border-radius:14px;background:var(--sunk);color:var(--ink);display:flex;align-items:center;justify-content:center;margin:4px auto 0}
+.tour-ic .gicon{width:24px;height:24px;color:inherit}
+.tour-dots{display:flex;gap:6px;justify-content:center;margin:16px 0 0}
+.tour-dots i{width:7px;height:7px;border-radius:50%;background:var(--line)}
+.tour-dots i.on{background:var(--ink)}
+.tour h4{text-align:center;margin:12px 0 6px;font-size:17px}
+.tour .note{text-align:center;white-space:normal;margin:0 4px}
+.tour .actions{justify-content:center;margin-top:16px}
 </style>
 </head>
 <body>
@@ -2433,6 +2443,30 @@ var ICON = {
   more: '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M140,128a12,12,0,1,1-12-12A12,12,0,0,1,140,128Zm56-12a12,12,0,1,0,12,12A12,12,0,0,0,196,116ZM60,116a12,12,0,1,0,12,12A12,12,0,0,0,60,116Z"/></svg></span>',
   history: '<span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M136,80v43.47l36.12,21.67a8,8,0,0,1-8.24,13.72l-40-24A8,8,0,0,1,120,128V80a8,8,0,0,1,16,0Zm-8-48A95.44,95.44,0,0,0,60.08,60.15C52.81,67.51,46.35,74.59,40,82V64a8,8,0,0,0-16,0v40a8,8,0,0,0,8,8H72a8,8,0,0,0,0-16H49c7.15-8.42,14.27-16.35,22.39-24.57a80,80,0,1,1,1.66,114.75,8,8,0,1,0-11,11.64A96,96,0,1,0,128,32Z"/></svg></span>'
 };
+
+var GICON = {
+  book: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v16" /> <path d="M20.001 19A2 2 0 0022 17V5a2 2 0 00-1.999-2L16 3.002A5 5 0 0012 5a5 5 0 00-4-2H4a2 2 0 00-2 2v12a2 2 0 001.999 2H8a5 5 0 014 2 5 5 0 014-2z" /></svg></span>',
+  sparkles: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11.017 2.814a1 1 0 0 1 1.966 0l1.051 5.558a2 2 0 0 0 1.594 1.594l5.558 1.051a1 1 0 0 1 0 1.966l-5.558 1.051a2 2 0 0 0-1.594 1.594l-1.051 5.558a1 1 0 0 1-1.966 0l-1.051-5.558a2 2 0 0 0-1.594-1.594l-5.558-1.051a1 1 0 0 1 0-1.966l5.558-1.051a2 2 0 0 0 1.594-1.594z" /> <path d="M20 2v4" /> <path d="M22 4h-4" /> <circle cx="4" cy="20" r="2" /></svg></span>',
+  plus: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14" /> <path d="M12 5v14" /></svg></span>',
+  wallet: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" /> <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" /></svg></span>',
+  tags: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13.172 2a2 2 0 0 1 1.414.586l6.71 6.71a2.4 2.4 0 0 1 0 3.408l-4.592 4.592a2.4 2.4 0 0 1-3.408 0l-6.71-6.71A2 2 0 0 1 6 9.172V3a1 1 0 0 1 1-1z" /> <path d="M2 7v6.172a2 2 0 0 0 .586 1.414l6.71 6.71a2.4 2.4 0 0 0 3.191.193" /> <circle cx="10.5" cy="6.5" r=".5" fill="currentColor" /></svg></span>',
+  piggy: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 17h3v2a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1v-3a3.16 3.16 0 0 0 2-2h1a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1h-1a5 5 0 0 0-2-4V3a4 4 0 0 0-3.2 1.6l-.3.4H11a6 6 0 0 0-6 6v1a5 5 0 0 0 2 4v3a1 1 0 0 0 1 1h2a1 1 0 0 0 1-1z" /> <path d="M16 10h.01" /> <path d="M2 8v1a2 2 0 0 0 2 2h1" /></svg></span>',
+  repeat: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m17 2 4 4-4 4" /> <path d="M3 11v-1a4 4 0 0 1 4-4h14" /> <path d="m7 22-4-4 4-4" /> <path d="M21 13v1a4 4 0 0 1-4 4H3" /></svg></span>',
+  landmark: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 18v-7" /> <path d="M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" /> <path d="M14 18v-7" /> <path d="M18 18v-7" /> <path d="M3 22h18" /> <path d="M6 18v-7" /></svg></span>',
+  scale: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18" /> <path d="m19 8 3 8a5 5 0 0 1-6 0zV7" /> <path d="M3 7h1a17 17 0 0 0 8-2 17 17 0 0 0 8 2h1" /> <path d="m5 8 3 8a5 5 0 0 1-6 0zV7" /> <path d="M7 21h10" /></svg></span>',
+  clip: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1" /> <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /> <path d="m9 14 2 2 4-4" /></svg></span>',
+  fileup: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M12 12v6" /> <path d="m15 15-3-3-3 3" /></svg></span>',
+  upload: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12" /> <path d="m17 8-5-5-5 5" /> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /></svg></span>',
+  table: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18" /> <rect width="18" height="18" x="3" y="3" rx="2" /> <path d="M3 9h18" /> <path d="M3 15h18" /></svg></span>',
+  chart: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 7h6v6" /> <path d="m22 7-8.5 8.5-5-5L2 17" /></svg></span>',
+  bulb: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" /> <path d="M9 18h6" /> <path d="M10 22h4" /></svg></span>',
+  ask: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /></svg></span>',
+  lock: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /> <path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg></span>',
+  download: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3" /> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /> <path d="m7 10 5 5 5-5" /></svg></span>',
+  rotate: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /> <path d="M3 3v5h5" /></svg></span>',
+  shield: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z" /></svg></span>'
+};
+
 function avatar(cat) { var m = String(cat || '').match(/^(\p{Extended_Pictographic}\uFE0F?)/u); return m ? m[1] : String(cat || '?').charAt(0).toUpperCase(); }
 function nav() {
   function b(id, label, ic) { return '<button data-tab="' + id + '"' + (UI.tab === id ? ' aria-current="page"' : '') + '>' + ICON[ic] + label + '</button>'; }
@@ -3076,6 +3110,9 @@ function renderAccounts() {
 }
 function renderMore() {
   var h = '<header class="top"><h1>Settings</h1>' + hdRight() + '</header>';
+  h += '<section class="blk"><h2>Help</h2><div class="panel">' +
+    '<button class="row" data-act="help">' + GICON.book + '<div class="l"><b>Guide and welcome tour</b><span>How everything works, step by step</span></div><div class="r">›</div></button>' +
+    '</div></section>';
   h += '<section class="blk"><h2>Import and export</h2><div class="panel">' +
     '<button class="row" data-act="stmt"><div class="l"><b>Grab or bank statement</b><span>Excel, CSV, PDF or pasted text, including PayLater</span></div><div class="r">›</div></button>' +
     (S.inbox.length ? '<button class="row" data-act="inbox"><div class="l"><b>Review imported rows</b><span>' + S.inbox.length + ' waiting</span></div><div class="r">›</div></button>' : '') +
@@ -3157,6 +3194,7 @@ function render() {
     (function step(now) { var k = Math.min(1, (now - t0) / 550), e = 1 - Math.pow(1 - k, 3); cu.textContent = Math.round(target * e).toLocaleString('en-SG'); if (k < 1) requestAnimationFrame(step); })(t0);
   }
   var q = $('#q'); if (q) q.addEventListener('input', function () { UI.q = q.value; var pos = q.selectionStart; render(); var q2 = $('#q'); q2.focus(); q2.setSelectionRange(pos, pos); });
+  maybeFirstRun();
 }
 
 // ---------- sheets ----------
@@ -3183,6 +3221,81 @@ function openSheet(title, body, onReady) {
   if (onReady) onReady(dlg);
 }
 function closeSheet() { if (dlg.open) dlg.close(); }
+
+// ---------- help guide and first-run tour ----------
+function guideRow(ic, title, sub) {
+  return '<div class="row">' + GICON[ic] + '<div class="l"><b>' + esc(title) + '</b><span style="white-space:normal">' + esc(sub) + '</span></div></div>';
+}
+function renderHelp() {
+  var h = '<p class="note" style="margin-top:0">Everything here works offline. Your data lives in your own Supabase account, and no other account can see it.</p>';
+  h += '<section class="blk"><h2>Getting started</h2><div class="panel">' +
+    guideRow('sparkles', 'Sign in with your email', 'A one-time code arrives by email — no password. Each new code replaces the previous one, so use the latest email.') +
+    guideRow('plus', 'Add your first entry', 'Tap the + button, choose income or spending, pick a category, type a short note. That is the whole habit.') +
+    guideRow('wallet', 'Wallets and PayLater', 'Add each wallet (cash, bank, card) when you log an entry. PayLater providers track what you owe until you pay it back.') +
+    '</div></section>';
+  h += '<section class="blk"><h2>Make it yours</h2><div class="panel">' +
+    guideRow('tags', 'Categories, notes and tags', 'Settings → Categories and tags. Tag entries with people to split bills, or with projects. Repeated notes can become auto-tag rules.') +
+    guideRow('piggy', 'Budgets', 'Settings → Budgets sets a monthly cap per category. The Month screen shows how close you are.') +
+    guideRow('repeat', 'Subscriptions', 'Log recurring charges under the Subscriptions category; the app suggests the ones you forgot to record.') +
+    '</div></section>';
+  h += '<section class="blk"><h2>Money beyond spending</h2><div class="panel">' +
+    guideRow('landmark', 'Investments — Accounts tab', 'Prop firm, broker and poker results are logged as entries. Pick cash or accrual basis in Settings → Investment accounting.') +
+    guideRow('scale', 'Debts', 'Money you owe or are owed, with due dates and reminders.') +
+    guideRow('clip', 'Balance checks', 'Count your wallets now and then. The app compares the total with your entries and flags the difference. Set a reminder so it happens weekly.') +
+    '</div></section>';
+  h += '<section class="blk"><h2>Bring in old data</h2><div class="panel">' +
+    guideRow('fileup', 'Grab or bank statement', 'Settings → Grab or bank statement reads Excel, CSV, PDF or pasted text, including PayLater. Imported rows wait for your review before they count.') +
+    guideRow('upload', 'Money Manager export', 'Settings → Money Manager export reads your old .xlsx and replaces anything imported from it before.') +
+    guideRow('table', 'Clean up in a spreadsheet', 'Export to CSV, fix things in Excel or Sheets, then bring the file back.') +
+    '</div></section>';
+  h += '<section class="blk"><h2>See the picture</h2><div class="panel">' +
+    guideRow('chart', 'Month and Activity', 'Month shows this month at a glance. Activity lists every entry with filters by category, wallet and date.') +
+    guideRow('bulb', 'Insights', 'Trends, biggest categories, saving rate and pace — switch views at the top of the tab.') +
+    guideRow('ask', 'Ask — AI assistant', 'Off until you turn it on in Settings → AI assistant. Ask questions about your money, or let it review new entries weekly. Questions send your data to the AI model; the weekly review sends only the new entries.') +
+    '</div></section>';
+  h += '<section class="blk"><h2>Keep it safe</h2><div class="panel">' +
+    guideRow('lock', 'App lock', 'Settings → App lock asks for a PIN — or Face ID on phones that have it — every time the app opens.') +
+    guideRow('download', 'Backup', 'Settings → Download a backup saves everything as one file. Do it after a big import.') +
+    guideRow('rotate', 'Restore', 'Restore a backup replaces everything you have now — but the current state is kept as a restore point first.') +
+    guideRow('shield', 'Privacy', 'Data sits in your Supabase project behind row level security: each account sees only its own rows. Signing out wipes the copy on the phone. The AI key lives in Supabase, never in this app.') +
+    '</div></section>';
+  h += '<div class="actions"><button class="btn ghost" data-act="tour">Replay the welcome tour</button></div>';
+  return h;
+}
+function helpSheet() { openSheet('Help and guide', renderHelp()); }
+var TOUR = [
+  { ic: 'sparkles', t: 'Welcome to 20bucks', s: 'Your money, on your own account. A one-time code emailed to you signs you in — no password. Everything you add stays yours: it is stored in your Supabase project, and no other account can see it.' },
+  { ic: 'plus', t: 'Log every entry with +', s: 'Tap the + button for income or spending: amount, category, a short note, tags for people or projects, and the wallet it came from. Two minutes a day is enough.' },
+  { ic: 'chart', t: 'Watch it add up', s: 'Month shows this month at a glance, Insights draws the trends, and Ask answers questions in plain language. Ask is off until you turn it on in Settings.' },
+  { ic: 'lock', t: 'Lock the door', s: 'Settings → App lock turns on a PIN or Face ID, and Settings → Download a backup keeps a copy of everything as one file. Both take a minute.' }
+];
+function tourSheet(i) {
+  i = i || 0;
+  var st = TOUR[i], last = i === TOUR.length - 1;
+  var body = '<div class="tour">' +
+    '<div class="tour-ic">' + GICON[st.ic] + '</div>' +
+    '<h4>' + esc(st.t) + '</h4>' +
+    '<p class="note">' + esc(st.s) + '</p>' +
+    '<div class="tour-dots">' + TOUR.map(function (_, k) { return '<i' + (k === i ? ' class="on"' : '') + '></i>'; }).join('') + '</div>' +
+    '<div class="actions">' +
+    (i > 0 ? '<button class="btn ghost" data-tback>Back</button>' : '<button class="btn ghost" data-tskip>Skip tour</button>') +
+    '<button class="btn" data-tnext>' + (last ? 'Done' : 'Next') + '</button>' +
+    '</div></div>';
+  openSheet(i === 0 ? 'Welcome' : 'Getting started, step ' + (i + 1) + ' of ' + TOUR.length, body, function (el) {
+    var nx = el.querySelector('[data-tnext]'), bk = el.querySelector('[data-tback]'), sk = el.querySelector('[data-tskip]');
+    if (nx) nx.addEventListener('click', function () { if (last) closeSheet(); else tourSheet(i + 1); });
+    if (bk) bk.addEventListener('click', function () { tourSheet(i - 1); });
+    if (sk) sk.addEventListener('click', function () { closeSheet(); });
+  });
+}
+// Shown once per device, after the first real screen — never over the lock or login screen.
+function maybeFirstRun() {
+  var seen = false;
+  try { seen = !!localStorage.getItem('ledger-seen-help'); } catch (e) { }
+  if (seen) return;
+  try { localStorage.setItem('ledger-seen-help', '1'); } catch (e) { }
+  tourSheet(0);
+}
 
 // Notes you have written before, most used and most recent first.
 function noteIndex() {
@@ -6701,6 +6814,8 @@ function onClick(e) {
     else if (a === 'unlinked') unlinkedSheet();
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
+    else if (a === 'help') helpSheet();
+    else if (a === 'tour') { closeSheet(); tourSheet(0); }
     else if (a === 'suggest') suggestSheet();
     else if (a === 'applock') lockSheet();
     else if (a === 'convert') convertSheet();

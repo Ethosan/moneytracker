@@ -49,6 +49,9 @@ manifest.webmanifest       install metadata
 supabase/schema.sql        tables and row level security policies
 supabase/functions/        AI assistant Edge Function
 netlify.toml               build, cache and security headers
+vendor/                    sign-in library, served locally
+icons/                     app icons
+docs/screenshots/          demo screenshots
 ```
 
 ## Getting started
@@ -67,7 +70,7 @@ netlify.toml               build, cache and security headers
    <h2>Your 20bucks code</h2>
    <p>Enter this code in the app to sign in:</p>
    <p style="font-size:32px;font-weight:bold;letter-spacing:8px">{{ .Token }}</p>
-   <p>It expires within the hour. If you did not ask for it, ignore this email. Only the newest code works.</p>
+   <p>It expires within the hour. If you did not ask for it, ignore this email. Only the newest code works — requesting another one replaces the previous code.</p>
    ```
 
 6. **Authentication → URL Configuration:** set Site URL to your deployed address and add it to Redirect URLs.
@@ -83,7 +86,7 @@ A public repository only exposes the code. Your data lives in Supabase behind ro
 
 ### 3. First run
 
-1. Open the site on your phone and create an account.
+1. Open the site on your phone, enter your email and tap "Email me a code", then enter the code from the email. A short welcome tour appears on your first sign-in, and ⋯ → Help reopens the full guide any time.
 2. Optionally restore a backup (**⋯ → Restore a backup**) or import a Money Manager export.
 3. Install it: Safari → Share → Add to Home Screen, or Chrome → ⋮ → Install app.
 4. Once your account exists, turn off **Allow new users to sign up** in Supabase if the app is just for you.
