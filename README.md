@@ -42,17 +42,30 @@ A personal finance tracker that installs to your phone like a native app. Track 
 ## Project structure
 
 ```
-index.html                 the whole app
+index.html                 page shell
+app.css                    styles
+js/app.js                  the app
+js/dates.js                date helpers (month-end rules, statement date parsing)
+js/mm-import.js            Money Manager import mapper
+tests/                     unit tests (npm test)
 sw.js                      offline cache
 config.js                  Supabase URL and public anon key
 manifest.webmanifest       install metadata
 supabase/schema.sql        tables and row level security policies
 supabase/functions/        AI assistant Edge Function
 netlify.toml               build, cache and security headers
-vendor/                    sign-in library, served locally
+vendor/                    third-party libraries, served locally: sign-in, charts, spreadsheet and PDF import, maths
 icons/                     app icons
 docs/screenshots/          demo screenshots
 ```
+
+## Running tests
+
+```bash
+npm test
+```
+
+Needs Node 18 or newer and nothing else: no install step, no build. The tests cover the date rules that are easy to get wrong, such as instalments and renewals on the 29th to 31st, leap years, and impossible statement dates like 31 Feb.
 
 ## Getting started
 

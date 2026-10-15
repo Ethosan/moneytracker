@@ -1,0 +1,8 @@
+{
+  "name": "20bucks",
+  "private": true,
+  "description": "Personal finance tracker. No build step; this file only runs the tests.",
+  "scripts": {
+    "test": "node --test"
+  }
+}

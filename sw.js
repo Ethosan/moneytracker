@@ -1,6 +1,7 @@
 // Keeps the app opening offline. Pages and scripts: try the network, fall back to the cached copy.
-const CACHE = 'ledger-v74';
-const SHELL = ['./', './index.html', './config.js', './vendor/supabase-js.min.js', './vendor/591.supabase.js', './vendor/chart.umd.min.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
+// The import and maths libraries in vendor/ are large and rarely used, so they are cached on first use instead.
+const CACHE = 'ledger-v75';
+const SHELL = ['./', './index.html', './app.css', './js/mm-import.js', './js/dates.js', './js/app.js', './config.js', './vendor/supabase-js.min.js', './vendor/591.supabase.js', './vendor/chart.umd.min.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
   './icons/icon-512-maskable.png', './icons/apple-touch-icon.png',
   './fonts/Geist-Regular.woff2', './fonts/Geist-Medium.woff2', './fonts/Geist-SemiBold.woff2', './fonts/Geist-Bold.woff2'];
 // On a weak signal the network can hang for a long time without failing. After this long,
