@@ -23,6 +23,9 @@ type Turn = { role: "user" | "assistant"; content: string };
 
 const REVIEW_SYSTEM = `You check a personal spending log (Singapore dollars) for likely data-entry mistakes.
 Each entry has an index i, date d, type t (exp = spending, inc = income), amount amt, category cat and note.
+When the owner's usual patterns are provided, compare each entry with them: a note that is usually income is
+income even if the note sounds like an expense, and an entry that matches the usual type, amount and category is
+a habit, not a mistake: a subscription that is always the same amount is fine.
 Flag only entries that are probably wrong: a category that clearly does not fit the note, an amount that looks
 like a typo for that kind of purchase, income logged as spending or the reverse, or a note that contradicts the
 amount. Unusual but plausible spending is not a mistake. When unsure, leave it out; an empty list is a good answer.
@@ -223,7 +226,19 @@ Deno.serve(async (req) => {
       const items = (Array.isArray(body.items) ? body.items : []).slice(0, 200) as Item[];
       const cats = (Array.isArray(body.cats) ? body.cats : []).slice(0, 100).map(String);
       if (!items.length) return json({ findings: [] });
-      const prompt = `Allowed categories: ${JSON.stringify(cats)}\nEntries:\n${items.map((x) => JSON.stringify(x)).join("\n")}`;
+      // Usual patterns per note, computed on the phone from the owner's older entries. They tell the
+      // model what normal looks like, so a steady subscription or a steady income is not flagged.
+      const hist = (Array.isArray(body.history) ? body.history : []).slice(0, 100).map((h: any) => ({
+        note: String((h && h.note) || "").slice(0, 80),
+        t: h && h.t === "inc" ? "inc" : "exp",
+        amt: Math.round((Number(h && h.amt) || 0) * 100) / 100,
+        cat: String((h && h.cat) || "").slice(0, 60),
+        n: Math.round(Number(h && h.n) || 0),
+      })).filter((h) => h.note && h.amt > 0 && h.n > 0);
+      const histBlock = hist.length
+        ? "\nThe owner's usual patterns for these notes, from their own past entries (note, usual type, usual amount, usual category, times seen):\n" + hist.map((h) => JSON.stringify(h)).join("\n")
+        : "";
+      const prompt = `Allowed categories: ${JSON.stringify(cats)}\nEntries:\n${items.map((x) => JSON.stringify(x)).join("\n")}${histBlock}`;
       const out = await complete(REVIEW_SYSTEM, [{ role: "user", content: prompt }], true);
       const parsed = firstJson(out.text);
       const valid = new Set(items.map((x) => x.i)), catSet = new Set(cats);
