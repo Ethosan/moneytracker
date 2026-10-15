@@ -1073,7 +1073,7 @@ function aiReview() {
   var done = function (notes, model) { ai.lastRun = today(); ai.reviewedTo = addDays(today(), -1); if (model) ai.model = model; delete ai.err; mark('meta'); render(); return notes; };
   if (!pick.length) return Promise.resolve(done(0));
   var items = pick.map(function (t, i) { return { i: i, d: t.d, t: t.t, amt: t.amt, cat: t.cat || '', note: t.note || '' }; });
-  return aiCall({ action: 'review', items: items, cats: S.meta.cats.map(function (c) { return c.name; }), history: usualPatterns(pick) }).then(function (res) {
+  return aiCall({ action: 'review', items: items, cats: S.meta.cats.map(function (c) { return { name: c.name, t: c.type || '' }; }), history: usualPatterns(pick) }).then(function (res) {
     var have = {}; (S.meta.aiNotes || []).forEach(function (n) { have[n.key] = 1; });
     var notes = (res.findings || []).map(function (f) {
       var t = pick[f.i]; if (!t) return null;
@@ -2282,7 +2282,7 @@ function renderHelp() {
   h += '<section class="blk"><h2>See the picture</h2><div class="panel">' +
     guideRow('chart', 'Month and Activity', 'Month shows this month at a glance. Activity lists every entry with filters by category, wallet and date.') +
     guideRow('bulb', 'Insights', 'Trends, biggest categories, saving rate and pace — switch views at the top of the tab.') +
-    guideRow('ask', 'Ask — AI assistant', 'Off until you turn it on in Settings → AI assistant. Ask questions about your money, or let it review new entries weekly. Questions send your data to the AI model; the weekly review sends the new entries plus your usual patterns for those notes and categories, worked out from your older entries.') +
+    guideRow('ask', 'Ask — AI assistant', 'Off until you turn it on in Settings → AI assistant. Ask questions about your money, or let it review new entries weekly. Questions send your data to the AI model; the weekly review sends the new entries, the type of each category, and your usual patterns for those notes and categories from your older entries.') +
     '</div></section>';
   h += '<section class="blk"><h2>Keep it safe</h2><div class="panel">' +
     guideRow('lock', 'App lock', 'Settings → App lock asks for a PIN — or Face ID on phones that have it — every time the app opens.') +

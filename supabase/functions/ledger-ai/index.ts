@@ -27,6 +27,7 @@ When the owner's usual patterns are provided, compare each entry with them. An e
 usual type, amount and category is a habit, not a mistake: a subscription that is always the same amount
 is fine. A note that is usually income is income even if the note sounds like an expense, and a category
 the owner usually uses for income is an income category even if its name sounds like an expense.
+Each category also has a type the owner set (income or spending); an entry whose type matches its category's type is correct.
 Flag only entries that are probably wrong: a category that clearly does not fit the note, an amount that looks
 like a typo for that kind of purchase, income logged as spending or the reverse, or a note that contradicts the
 amount. Unusual but plausible spending is not a mistake. When unsure, leave it out; an empty list is a good answer.
@@ -225,7 +226,13 @@ Deno.serve(async (req) => {
   try {
     if (body.action === "review") {
       const items = (Array.isArray(body.items) ? body.items : []).slice(0, 200) as Item[];
-      const cats = (Array.isArray(body.cats) ? body.cats : []).slice(0, 100).map(String);
+      // Categories arrive as {name, type} so the model knows which are income and which are
+      // spending; plain strings (older app versions) are still accepted.
+      const catsRaw = (Array.isArray(body.cats) ? body.cats : []).slice(0, 100).map((c: any) =>
+        typeof c === "string" ? { name: c, t: "" } : { name: String((c && c.name) || ""), t: (c && c.t) === "inc" ? "inc" : (c && c.t) === "exp" ? "exp" : "" }
+      ).filter((c) => c.name);
+      const cats = catsRaw.map((c) => c.name);
+      const catTypes = catsRaw.filter((c) => c.t).map((c) => `${c.name} = ${c.t === "inc" ? "income" : "spending"}`).join(", ");
       if (!items.length) return json({ findings: [] });
       // Usual patterns computed on the phone from the owner's older entries: per note the usual type,
       // amount and category, per category the usual type. They tell the model what normal looks like, so a
@@ -246,7 +253,7 @@ Deno.serve(async (req) => {
       const histBlock = (histNotes.length || histCats.length)
         ? "\nThe owner's usual patterns, from their own past entries. Notes (note, usual type, usual amount, usual category, times seen):\n" + histNotes.map((h) => JSON.stringify(h)).join("\n") + (histCats.length ? "\nCategories (category, usual type, times seen):\n" + histCats.map((h) => JSON.stringify(h)).join("\n") : "")
         : "";
-      const prompt = `Allowed categories: ${JSON.stringify(cats)}\nEntries:\n${items.map((x) => JSON.stringify(x)).join("\n")}${histBlock}`;
+      const prompt = `Allowed categories: ${JSON.stringify(cats)}${catTypes ? `\nCategory types (income or spending, as the owner set them): ${catTypes}` : ""}\nEntries:\n${items.map((x) => JSON.stringify(x)).join("\n")}${histBlock}`;
       const out = await complete(REVIEW_SYSTEM, [{ role: "user", content: prompt }], true);
       const parsed = firstJson(out.text);
       const valid = new Set(items.map((x) => x.i)), catSet = new Set(cats);
