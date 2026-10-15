@@ -855,7 +855,8 @@ small.cur{font-size:11px;font-weight:700;color:var(--muted);margin-left:4px;lett
 <script src="config.js"></script>
 <!-- The sign-in library is vendored so a CDN hiccup can never break the login screen. -->
 <script src="vendor/supabase-js.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js'"></script>
+<!-- Charts too: from a CDN they went missing whenever it was slow, blocked or offline. -->
+<script src="vendor/chart.umd.min.js"></script>
 <script>// ---- Money Manager import mapper ----
 var MM = (function () {
   var CAT_MAP = {
