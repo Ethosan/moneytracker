@@ -1939,29 +1939,42 @@ function noteHabits() {
   });
   return g;
 }
-// The usual pattern for each note in `entries`, computed over the whole history: the usual
-// type, amount and category, and how often the note appears. Sent with the weekly AI review
-// so it can tell a habit (a subscription that is always the same amount) from a real slip.
-// Everything here comes from the owner's own entries; nothing is fixed in advance.
-function notePatterns(entries) {
-  var want = {}, g = {};
+// The usual pattern over the whole history for the notes and categories in `entries`:
+// per note the usual type, amount and category, per category the usual type, and how
+// often each appears. Sent with the weekly AI review so it can tell a habit (a
+// subscription that is always the same amount, income under a category whose name
+// sounds like an expense) from a real slip. Everything comes from the owner's own
+// entries; nothing is fixed in advance.
+function usualPatterns(entries) {
+  var wantN = {}, wantC = {}, gn = {}, gc = {};
   entries.forEach(function (t) {
-    if (!t.note) return;
-    var k = noteKey(t.note);
-    if (!(k in want)) want[k] = t.note.trim();
+    if (t.note) { var k = noteKey(t.note); if (!(k in wantN)) wantN[k] = t.note.trim(); }
+    if (t.cat && !(t.cat in wantC)) wantC[t.cat] = 1;
   });
   allTx().forEach(function (t) {
-    if ((t.t !== 'exp' && t.t !== 'inc') || !t.note) return;
-    var k = noteKey(t.note);
-    if (!(k in want)) return;
-    var o = g[k] || (g[k] = { note: want[k], amts: [], types: {}, cats: {}, n: 0 });
-    o.amts.push(t.amt); o.types[t.t] = (o.types[t.t] || 0) + 1; o.cats[t.cat || ''] = (o.cats[t.cat || ''] || 0) + 1; o.n++;
+    if (t.t !== 'exp' && t.t !== 'inc') return;
+    if (t.note) {
+      var k = noteKey(t.note);
+      if (k in wantN) {
+        var o = gn[k] || (gn[k] = { note: wantN[k], amts: [], types: {}, cats: {}, n: 0 });
+        o.amts.push(t.amt); o.types[t.t] = (o.types[t.t] || 0) + 1; o.cats[t.cat || ''] = (o.cats[t.cat || ''] || 0) + 1; o.n++;
+      }
+    }
+    if (t.cat && (t.cat in wantC)) {
+      var c = gc[t.cat] || (gc[t.cat] = { cat: t.cat, types: {}, n: 0 });
+      c.types[t.t] = (c.types[t.t] || 0) + 1; c.n++;
+    }
   });
   function top(m) { return Object.keys(m).sort(function (a, b) { return m[b] - m[a]; })[0]; }
-  return Object.keys(g).map(function (k) {
-    var o = g[k];
+  var notes = Object.keys(gn).map(function (k) {
+    var o = gn[k];
     return { note: o.note, t: top(o.types), amt: r2(median(o.amts)), cat: top(o.cats), n: o.n };
   }).sort(function (a, b) { return b.n - a.n; }).slice(0, 100);
+  var cats = Object.keys(gc).map(function (k) {
+    var o = gc[k];
+    return { cat: o.cat, t: top(o.types), n: o.n };
+  }).sort(function (a, b) { return b.n - a.n; }).slice(0, 100);
+  return { notes: notes, cats: cats };
 }
 // What looks wrong with one transaction and, where the correction is obvious, the fix.
 // Nothing is changed here. onSave leaves out the category check: you just picked it.
@@ -2067,7 +2080,7 @@ function aiReview() {
   var done = function (notes, model) { ai.lastRun = today(); ai.reviewedTo = addDays(today(), -1); if (model) ai.model = model; delete ai.err; mark('meta'); render(); return notes; };
   if (!pick.length) return Promise.resolve(done(0));
   var items = pick.map(function (t, i) { return { i: i, d: t.d, t: t.t, amt: t.amt, cat: t.cat || '', note: t.note || '' }; });
-  return aiCall({ action: 'review', items: items, cats: S.meta.cats.map(function (c) { return c.name; }), history: notePatterns(pick) }).then(function (res) {
+  return aiCall({ action: 'review', items: items, cats: S.meta.cats.map(function (c) { return c.name; }), history: usualPatterns(pick) }).then(function (res) {
     var have = {}; (S.meta.aiNotes || []).forEach(function (n) { have[n.key] = 1; });
     var notes = (res.findings || []).map(function (f) {
       var t = pick[f.i]; if (!t) return null;
@@ -3276,7 +3289,7 @@ function renderHelp() {
   h += '<section class="blk"><h2>See the picture</h2><div class="panel">' +
     guideRow('chart', 'Month and Activity', 'Month shows this month at a glance. Activity lists every entry with filters by category, wallet and date.') +
     guideRow('bulb', 'Insights', 'Trends, biggest categories, saving rate and pace — switch views at the top of the tab.') +
-    guideRow('ask', 'Ask — AI assistant', 'Off until you turn it on in Settings → AI assistant. Ask questions about your money, or let it review new entries weekly. Questions send your data to the AI model; the weekly review sends the new entries plus the usual type, amount and category for each note from your older entries.') +
+    guideRow('ask', 'Ask — AI assistant', 'Off until you turn it on in Settings → AI assistant. Ask questions about your money, or let it review new entries weekly. Questions send your data to the AI model; the weekly review sends the new entries plus your usual patterns for those notes and categories, worked out from your older entries.') +
     '</div></section>';
   h += '<section class="blk"><h2>Keep it safe</h2><div class="panel">' +
     guideRow('lock', 'App lock', 'Settings → App lock asks for a PIN — or Face ID on phones that have it — every time the app opens.') +

@@ -93,7 +93,7 @@ A public repository only exposes the code. Your data lives in Supabase behind ro
 
 ## AI assistant (optional)
 
-Off until enabled in **Settings → AI assistant**. Once a week it sends entries added since its last review (date, type, amount, category and note), plus each note's usual type, amount and category worked out from your older entries, and puts anything it flags in Suggestions for you to approve. Questions you ask send your full history so the answer has context.
+Off until enabled in **Settings → AI assistant**. Once a week it sends entries added since its last review (date, type, amount, category and note), plus the usual type, amount and category for those notes and the usual type for those categories, worked out from your older entries, and puts anything it flags in Suggestions for you to approve. Questions you ask send your full history so the answer has context.
 
 The API key never lives in this repository; it is stored as a Supabase secret:
 
