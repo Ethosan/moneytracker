@@ -1,4 +1,4 @@
-# Abacus
+# 20bucks
 
 Personal finance tracker: spending (with person tagging), prop firm, broker and poker P&L, Grab and PayLater imports, balance checks, and insights. It is a single-page web app that installs to your phone's home screen, stores data in your own Supabase project, and keeps a copy on the phone so it opens offline.
 
@@ -6,12 +6,12 @@ Personal finance tracker: spending (with person tagging), prop firm, broker and 
 
 1. Create a project at supabase.com (the free tier is plenty).
 2. SQL Editor → New query → paste `supabase/schema.sql` → Run. Safe to run again if you already ran it once — it replaces existing policies instead of failing.
-3. Email sending (SMTP): Supabase’s built-in email sender is capped at a few codes per hour and often lands in spam. Use a free one instead: sign up at resend.com, open API Keys, create a key. Then in Supabase go to Project Settings → Auth → SMTP Settings, turn on Custom SMTP, and enter: Host `smtp.resend.com`, Port `587`, Username `resend`, Password = the Resend API key, Sender email `onboarding@resend.dev` (works without owning a domain), Sender name `Abacus`. Save. The free tier sends 100 emails a day, which is plenty for you and a few friends. Once you verify your own domain in Resend, change Sender email to `code@yourdomain.com` — see "Your own domain" below.
+3. Email sending (SMTP): Supabase’s built-in email sender is capped at a few codes per hour and often lands in spam. Use a free one instead: sign up at resend.com, open API Keys, create a key. Then in Supabase go to Project Settings → Auth → SMTP Settings, turn on Custom SMTP, and enter: Host `smtp.resend.com`, Port `587`, Username `resend`, Password = the Resend API key, Sender email `onboarding@resend.dev` (works without owning a domain), Sender name `20bucks`. Save. The free tier sends 100 emails a day, which is plenty for you and a few friends. Once you verify your own domain in Resend, change Sender email to `code@yourdomain.com` — see "Your own domain" below.
 4. Authentication → Sign In / Providers → Email: make sure it is enabled. Sign-in uses a one-time code emailed to you, so no confirmation email is involved. If there is a "Confirm email" toggle in the Email provider settings, turn it off — with code sign-in it only sends a second, different code.
 5. Authentication → Email Templates → Magic Link: replace the body with one that shows the code (the default template only contains a login link). Paste this as the template body:
 
    ```
-   <h2>Your Abacus code</h2>
+   <h2>Your 20bucks code</h2>
    <p>Enter this code in the app to sign in:</p>
    <p style="font-size:32px;font-weight:bold;letter-spacing:8px">{{ .Token }}</p>
    <p>It expires within the hour. If you did not ask for it, ignore this email. Only the newest code works — requesting another one replaces the previous code.</p>
@@ -22,9 +22,9 @@ Personal finance tracker: spending (with person tagging), prop firm, broker and 
 
 ## 2. GitHub Pages
 
-1. Create a new repository (for example `abacus`) and upload every file in this folder, keeping the `icons` and `supabase` folders.
+1. Create a new repository (for example `20bucks`) and upload every file in this folder, keeping the `icons` and `supabase` folders.
 2. Settings → Pages → Source: Deploy from a branch → `main`, folder `/ (root)` → Save.
-3. After a minute the app is at `https://<your-username>.github.io/abacus/`.
+3. After a minute the app is at `https://<your-username>.github.io/20bucks/`.
 
 Free GitHub Pages needs a public repository. That only exposes the code, not your money: data lives in Supabase behind row level security, and `.gitignore` blocks backup and spreadsheet files from being committed. If you would rather keep the repo private, drag this folder onto Netlify Drop instead.
 
@@ -33,9 +33,9 @@ Free GitHub Pages needs a public repository. That only exposes the code, not you
 One domain is enough for everything: your portfolio at the root, and each project on its own subdomain.
 
 1. Buy one domain (for example `yourname.com`) at Cloudflare Registrar, Porkbun or Namecheap — about $10 a year. Avoid free domains (.tk, .ml and friends): email providers and browsers distrust them, which is also what causes "dangerous site" warnings.
-2. Point the root at your portfolio site. Each project gets a subdomain: this app at `abacus.yourname.com`, the next one at `something.yourname.com`, and so on. Subdomains are separate sites, so their data and logins never overlap. Never use a well-known brand as the subdomain or app name (`ledger`, `paypal`, `wallet`, `bank`...): Google Safe Browsing blocks a sign-in page on an unrelated domain that carries a brand name as a deceptive site. This app was called Ledger until `ledger.` got flagged for looking like the Ledger crypto wallet.
-3. On Netlify: Site settings → Domain management → Add custom domain → `abacus.yourname.com`. Netlify issues free HTTPS by itself. In your DNS (for example Cloudflare), add a CNAME: `abacus` → `<your-site>.netlify.app`.
-4. In Supabase: Authentication → URL Configuration → set Site URL to `https://abacus.yourname.com` and add it to Redirect URLs. The app uses whatever address it is opened from, so email links follow the new domain with no code change.
+2. Point the root at your portfolio site. Each project gets a subdomain: this app at `20bucks.yourname.com`, the next one at `something.yourname.com`, and so on. Subdomains are separate sites, so their data and logins never overlap. Never use a well-known brand as the subdomain or app name (`ledger`, `paypal`, `wallet`, `bank`...): Google Safe Browsing blocks a sign-in page on an unrelated domain that carries a brand name as a deceptive site. This app was called Ledger until `ledger.` got flagged for looking like the Ledger crypto wallet.
+3. On Netlify: Site settings → Domain management → Add custom domain → `20bucks.yourname.com`. Netlify issues free HTTPS by itself. In your DNS (for example Cloudflare), add a CNAME: `20bucks` → `<your-site>.netlify.app`.
+4. In Supabase: Authentication → URL Configuration → set Site URL to `https://20bucks.yourname.com` and add it to Redirect URLs. The app uses whatever address it is opened from, so email links follow the new domain with no code change.
 5. In Resend: Domains → Add domain → `yourname.com` → add the DNS records it gives you → wait for verification. Then in Supabase’s SMTP settings set Sender email to `code@yourname.com`. Until then, `onboarding@resend.dev` works with no verification.
 
 ## 3. First run

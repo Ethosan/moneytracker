@@ -1,4 +1,4 @@
-// Abacus AI: reviews new entries for likely mistakes and answers questions about your spending.
+// 20bucks AI: reviews new entries for likely mistakes and answers questions about your spending.
 // The API key lives here as a Supabase secret, never in the app. Only signed-in users can call it.
 //
 // Secrets (Supabase dashboard -> Edge Functions -> Secrets):

@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#F2F4F8" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#0A0C11" media="(prefers-color-scheme: dark)">
-<title>Abacus</title>
+<title>20bucks</title>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="icon" href="icons/icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="Abacus">
+<meta name="apple-mobile-web-app-title" content="20bucks">
 <style>@font-face{font-family:'Geist';src:url('fonts/Geist-Regular.woff2') format('woff2');font-weight:400;font-style:normal;font-display:swap}@font-face{font-family:'Geist';src:url('fonts/Geist-Medium.woff2') format('woff2');font-weight:500;font-style:normal;font-display:swap}@font-face{font-family:'Geist';src:url('fonts/Geist-SemiBold.woff2') format('woff2');font-weight:600;font-style:normal;font-display:swap}@font-face{font-family:'Geist';src:url('fonts/Geist-Bold.woff2') format('woff2');font-weight:700;font-style:normal;font-display:swap}/* Radius rule: cards 22px, controls 14px, chips/buttons full pill. */
 :root{
   --bg:#F2F4F8;--surface:#FFFFFF;--sunk:#EBEEF4;--ink:#0D1017;--muted:#5D6472;--line:#E3E7EE;
@@ -1645,7 +1645,7 @@ document.addEventListener('keydown', function (e) {
 });
 window.addEventListener('online', function () { if (store.mode === 'cloud') flush(); else if (store.mode === 'cloud-offline') connect(); });
 function renderLogin() {
-  return '<main class=\"login\"><div class=\"hero\"><div class=\"lbl\">Abacus</div><div class=\"big\" style=\"font-size:40px\">Sign in</div><div class=\"sub\">Your data syncs to your own private account. No password needed.</div></div>' +
+  return '<main class=\"login\"><div class=\"hero\"><div class=\"lbl\">20bucks</div><div class=\"big\" style=\"font-size:40px\">Sign in</div><div class=\"sub\">Your data syncs to your own private account. No password needed.</div></div>' +
     '<div class=\"panel\" style=\"padding:16px\"><label class=\"f\" for=\"em\">Email</label><input class=\"t\" id=\"em\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">' +
     '<div id=\"codebox\" hidden><label class=\"f\" for=\"code\">Code from the email</label><input class=\"t\" id=\"code\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"8\" placeholder=\"123456\"></div>' +
     '<p class=\"neg\" id=\"lerr\" style=\"font-size:13px;min-height:1em;margin:10px 2px 0\"></p>' +
@@ -2272,8 +2272,8 @@ function bioAvailable() {
 }
 function bioRegister() {
   return navigator.credentials.create({ publicKey: {
-    challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: 'Abacus' },
-    user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'abacus', displayName: 'Abacus' },
+    challenge: crypto.getRandomValues(new Uint8Array(32)), rp: { name: '20bucks' },
+    user: { id: crypto.getRandomValues(new Uint8Array(16)), name: '20bucks', displayName: '20bucks' },
     pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
     authenticatorSelection: { authenticatorAttachment: 'platform', userVerification: 'required', residentKey: 'discouraged' }, timeout: 60000
   } }).then(function (c) { return b64(c.rawId); });
@@ -2287,7 +2287,7 @@ var lockEntry = '', lockFails = 0, lockWaitUntil = 0;
 function renderLock(msg) {
   var n = LOCK.len || 4;
   $('#app').innerHTML = '<div class="lock" role="dialog" aria-label="App locked"><div class="lock-in">' +
-    '<div class="lock-mark" aria-hidden="true">' + LOCK_ICON + '</div><h1>Abacus</h1>' +
+    '<div class="lock-mark" aria-hidden="true">' + LOCK_ICON + '</div><h1>20bucks</h1>' +
     '<p id="lockmsg" class="' + (msg && msg.bad ? 'bad' : '') + '" aria-live="polite">' + esc(msg ? msg.text : 'Enter your PIN') + '</p>' +
     '<div class="pins" aria-hidden="true">' + Array.from({ length: n }, function (x, i) { return '<i class="' + (i < lockEntry.length ? 'on' : '') + '"></i>'; }).join('') + '</div>' +
     '<div class="pad">' + ['1', '2', '3', '4', '5', '6', '7', '8', '9', LOCK.bio ? 'bio' : '', '0', 'del'].map(function (k) {
