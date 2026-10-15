@@ -1,6 +1,6 @@
 {
-  "name": "Ledger",
-  "short_name": "Ledger",
+  "name": "Abacus",
+  "short_name": "Abacus",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
