@@ -7,6 +7,14 @@ A personal finance tracker that installs to your phone like a native app. Track 
 ![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=white)
 ![Netlify](https://img.shields.io/badge/Netlify-00C7B7?logo=netlify&logoColor=white)
 
+<p align="center">
+  <img src="docs/screenshots/month.png" width="24%" alt="Month overview">
+  <img src="docs/screenshots/activity.png" width="24%" alt="Activity feed">
+  <img src="docs/screenshots/insights.png" width="24%" alt="Spending insights">
+  <img src="docs/screenshots/month-light.png" width="24%" alt="Month overview in light mode">
+</p>
+<p align="center"><sub>Month overview, activity feed, insights, and light mode. Shown with demo data.</sub></p>
+
 ## Features
 
 - **Spending and budgets.** Categorised transactions, a monthly view that compares each category with what you usually spend by this day, and drill-down by category.
