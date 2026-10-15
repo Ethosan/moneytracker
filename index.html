@@ -3123,9 +3123,10 @@ function localTheme() { try { return localStorage.getItem('ledger-theme') || '';
 function applyTheme() { var t = localTheme(); if (t) document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme'); }
 
 function render() {
-  if (isLocked()) { renderLock(); return; }
+  // the lock and login screens replace the app, so the next app redraw must not be skipped as unchanged
+  if (isLocked()) { render.html = render.key = null; renderLock(); return; }
   if (!HIST.ready) { histSnap(); HIST.ready = true; }
-  if (store.mode === 'auth') { $('#app').innerHTML = renderLogin(); wireLogin(); return; }
+  if (store.mode === 'auth') { render.html = render.key = null; $('#app').innerHTML = renderLogin(); wireLogin(); return; }
   var v, failed = null;
   try {
     v = UI.tab === 'activity' ? renderActivity() : UI.tab === 'pnl' ? renderAccounts() : UI.tab === 'more' ? renderMore() : UI.tab === 'insights' ? renderInsights() : UI.tab === 'ask' ? renderAsk() : renderHome();
