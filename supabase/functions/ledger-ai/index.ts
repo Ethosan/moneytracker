@@ -1,5 +1,7 @@
 // 20bucks AI: reviews new entries for likely mistakes and answers questions about your spending.
-// The API key lives here as a Supabase secret, never in the app. Only signed-in users can call it.
+// The API key lives here as a Supabase secret, never in the app. Only accounts on the
+// AI_ALLOWED_IDS allowlist can call it — sign-in creates an account for anyone, so
+// "any signed-in user" would let a stranger spend the key.
 //
 // Secrets (Supabase dashboard -> Edge Functions -> Secrets):
 //   MISTRAL_API_KEY     to use Mistral (the default when it is set)
@@ -7,6 +9,9 @@
 //   AI_PROVIDER         optional: "mistral" or "anthropic", to choose when both keys are set
 //   MISTRAL_MODEL       optional, default mistral-small-latest
 //   ANTHROPIC_MODEL     optional, default claude-opus-5-5
+//   AI_ALLOWED_IDS      comma-separated user ids allowed to call this function (Supabase
+//                       dashboard -> Authentication -> Users -> copy the UUID). Required:
+//                       until it is set, the function answers nobody.
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
 import Anthropic from "npm:@anthropic-ai/sdk";
 
@@ -213,6 +218,12 @@ Deno.serve(async (req) => {
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!, { global: { headers: { Authorization: auth } } });
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return json({ error: "Sign in first." }, 401);
+
+  // Only the owner may spend the API key: anyone can create an account on the project,
+  // so "any signed-in user" is not a gate. The allowlist is.
+  const allowed = (Deno.env.get("AI_ALLOWED_IDS") || "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (!allowed.length) return json({ error: "The AI assistant is not enabled. The owner can allow an account by setting the AI_ALLOWED_IDS secret (see the README)." }, 403);
+  if (!allowed.includes(user.id)) return json({ error: "The AI assistant is not enabled for this account." }, 403);
 
   const now = Date.now();
   const rec = CALLS.get(user.id);

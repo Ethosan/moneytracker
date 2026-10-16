@@ -300,6 +300,16 @@ function tagSheet(g) {
   });
 }
 
+// Rows normalize() leaves out because their date is unreadable, kept for this session so
+// Data health can say what happened to them instead of them vanishing without a word.
+var DROPPED = [];
+function noteDropped(t) {
+  var key = (t.id || '') + '|' + (t.d || '') + '|' + (t.amt || '') + '|' + (t.note || '');
+  if (DROPPED.some(function (x) { return (x.id || '') + '|' + (x.d || '') + '|' + (x.amt || '') + '|' + (x.note || '') === key; })) return;
+  DROPPED.push(t);
+  if (DROPPED.length > 100) DROPPED.shift();
+}
+
 function normalize() {
   S.meta = S.meta || freshMeta();
   ['bills', 'inbox', 'checks', 'ledger', 'debts', 'chats'].forEach(function (k) { if (!Array.isArray(S[k])) S[k] = []; });
@@ -317,7 +327,9 @@ function normalize() {
   var seen = {}, fixed = {}, moved = 0;
   Object.keys(S.tx).forEach(function (k) {
     (S.tx[k] || []).forEach(function (t) {
-      if (!t || !t.d || !/^\d{4}-\d{2}-\d{2}$/.test(t.d)) return;
+      // a row whose date cannot be read at all (hand-edited backup, broken import) is left
+      // out here; it is kept aside so Data health can say what happened, not dropped in silence
+      if (!t || !t.d || !/^\d{4}-\d{2}-\d{2}$/.test(t.d)) { if (t) noteDropped(t); return; }
       if (!t.id || seen[t.id]) t.id = uid();
       seen[t.id] = 1;
       t.amt = Math.abs(num(t.amt)); if (!t.amt) return;
@@ -399,7 +411,16 @@ function isClosed(v) { return !!(S.meta.venues[v] && S.meta.venues[v].closed); }
 function venueType(v) { return (S.meta.venues[v] && S.meta.venues[v].type) || 'broker'; }
 
 // ---------- persistence ----------
-function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) { } }
+// localStorage holds the state, the change history, the restore points and the sync
+// bookkeeping. When it fills up a failed save must be seen: an edit that lives only in
+// memory vanishes on the next reload, while the app still says it is waiting to sync.
+function quotaWarn() {
+  if (quotaWarn.on) return;
+  quotaWarn.on = true;
+  toast('This device is out of storage — changes are kept in memory only and may be lost if the app is closed. Free up space on the device, then reopen the app.');
+  HIST.label = ''; // a warning must not become the next change's undo label
+}
+function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); quotaWarn.on = false; } catch (e) { quotaWarn(); } }
 function loadLocal() {
   try { var raw = localStorage.getItem(LS_KEY); if (raw) { var o = JSON.parse(raw); if (o && o.meta) S = o; } } catch (e) { }
   normalize();
@@ -464,6 +485,11 @@ function metaKeys(m) {
   var o = {};
   Object.keys(META_LISTS).forEach(function (k) { o[k] = (m && m[k] || []).map(META_LISTS[k]); });
   o.venues = Object.keys((m && m.venues) || {});
+  // scalar settings as well, so mergeMeta can tell "changed here" from "changed there"
+  Object.keys(m || {}).forEach(function (k) {
+    if (k === 'venues' || k === 'subcats' || META_LISTS[k]) return;
+    o[k] = m[k];
+  });
   return o;
 }
 function merge3(local, remote, base, key) {
@@ -478,9 +504,19 @@ function merge3(local, remote, base, key) {
 function mergeMeta(local, remote) {
   if (!remote) return local;
   var base = store.base.meta || null;
-  // settings only the other device has (say, a new device's first sync) are kept; where both
-  // have one, this device's wins. Lists, venues and subcategories are merged below.
-  var m = Object.assign(JSON.parse(JSON.stringify(remote)), JSON.parse(JSON.stringify(local)));
+  // Settings lists, venues and subcategories merge three ways below. A scalar setting (like
+  // the spending basis) comes from the other device when this one has not changed it since
+  // the last sync, so two devices editing it converge instead of overwriting each other
+  // forever; when both changed it, this device's wins, as with list items.
+  var m = JSON.parse(JSON.stringify(remote));
+  Object.keys(local).forEach(function (k) {
+    if (k === 'venues' || k === 'subcats' || META_LISTS[k]) return;
+    var lv = local[k], rv = remote[k], bv = base ? base[k] : undefined;
+    if (lv === undefined) return;                                     // only the other device has it: keep theirs
+    if (rv === undefined || bv === undefined) { m[k] = lv; return; }  // only ours, or no base record yet
+    if (JSON.stringify(lv) === JSON.stringify(bv)) m[k] = rv;         // unchanged here: their change wins
+    else m[k] = lv;                                                   // changed here (maybe both): ours wins
+  });
   Object.keys(META_LISTS).forEach(function (k) {
     m[k] = base ? merge3(local[k], remote[k], base[k], META_LISTS[k]) : mergeBy(local[k], remote[k], META_LISTS[k]);
   });
@@ -506,7 +542,39 @@ function absorb(doc, remoteBody) {
   else if (doc === 'inbox') S.inbox = merged;
   else S[doc] = merged;
 }
-function saveDirty() { try { localStorage.setItem('ledger-dirty', JSON.stringify(Object.keys(store.dirty))); } catch (e) { } }
+function saveDirty() { try { localStorage.setItem('ledger-dirty', JSON.stringify(Object.keys(store.dirty))); quotaWarn.on = false; } catch (e) { quotaWarn(); } }
+// One document: read the cloud copy, fold it into local, write the result back — but only
+// if nobody wrote since we read. A conflicting write means another device got there first:
+// read again, merge again, try again, so neither edit is lost.
+function syncDoc(k, attempt) {
+  var t = store.sb.from('ledger_docs');
+  return t.select('body,updated_at').eq('user_id', store.uid).eq('id', k).maybeSingle().then(function (r) {
+    if (r.error) throw r.error;
+    var seen = r.data ? r.data.updated_at : null;
+    if (r.data && r.data.body) { absorb(k, r.data.body); normalize(); saveLocal(); histSnap(); }
+    var body = bodyFor(k), tb = store.sb.from('ledger_docs');
+    if (!seen) {
+      // no cloud copy yet: create it. If another device created it first, read and merge instead.
+      if (!body) return { written: true, body: body };
+      return tb.insert({ user_id: store.uid, id: k, body: body, updated_at: new Date().toISOString() }).then(function (w) {
+        if (w.error && w.error.code === '23505') return syncDoc(k, attempt);
+        if (w.error) throw w.error;
+        return { written: true, body: body };
+      });
+    }
+    var q = body
+      ? tb.update({ body: body, updated_at: new Date().toISOString() }).eq('user_id', store.uid).eq('id', k).eq('updated_at', seen).select('id')
+      : tb.delete().eq('user_id', store.uid).eq('id', k).eq('updated_at', seen).select('id');
+    return q.then(function (w) {
+      if (w.error) throw w.error;
+      if (!w.data || !w.data.length) {
+        if (attempt >= 3) return { written: false, body: body };
+        return syncDoc(k, attempt + 1);
+      }
+      return { written: true, body: body };
+    });
+  });
+}
 function flush() {
   if (store.mode !== 'cloud' || store.writing) return;
   var keys = Object.keys(store.dirty); if (!keys.length) return;
@@ -516,15 +584,12 @@ function flush() {
     var k = keys.shift();
     if (!k) { store.writing = false; saveDirty(); setSync('Synced'); if (Object.keys(store.dirty).length) schedule(); return; }
     delete store.dirty[k];
-    var t = store.sb.from('ledger_docs');
-    var p = t.select('body').eq('user_id', store.uid).eq('id', k).maybeSingle().then(function (r) {
-      if (r.error) throw r.error;
-      if (r.data && r.data.body) { absorb(k, r.data.body); normalize(); saveLocal(); histSnap(); }
-      var body = bodyFor(k), tb = store.sb.from('ledger_docs');
-      return (body ? tb.upsert({ user_id: store.uid, id: k, body: body, updated_at: new Date().toISOString() }, { onConflict: 'user_id,id' })
-        : tb.delete().eq('user_id', store.uid).eq('id', k)).then(function (w) { if (w.error) throw w.error; store.base[k] = idsOf(k, body); saveBase(); });
-    });
-    p.then(function () {
+    syncDoc(k, 0).then(function (res) {
+      if (!res.written) {
+        // another device kept winning the race: keep the edit queued rather than dropping it
+        store.dirty[k] = true; store.writing = false; saveDirty(); setSync('Synced'); schedule(); return;
+      }
+      store.base[k] = idsOf(k, res.body); saveBase();
       store.err = null; next();
     }).catch(function (e) {
       store.dirty[k] = true; store.writing = false; saveDirty();
@@ -711,7 +776,7 @@ function wireLogin() {
 // ---------- calculations ----------
 function monthStats(m) {
   var tx = S.tx[m] || [];
-  var o = { spend: 0, earned: 0, other: 0, reimb: 0, person: 0, byCat: {}, byTag: {} }, PT = personTag();
+  var o = { spend: 0, earned: 0, other: 0, reimb: 0, person: 0, adj: 0, byCat: {}, byTag: {} }, PT = personTag();
   tx.forEach(function (t) {
     if (t.t === 'exp') {
       var v = ea(t);
@@ -720,9 +785,9 @@ function monthStats(m) {
       (t.tags || []).forEach(function (g) { o.byTag[g] = (o.byTag[g] || 0) + v; });
     } else if (t.t === 'inc') {
       var k = incKind(t.cat); o[k === 'earned' ? 'earned' : k === 'reimb' ? 'reimb' : 'other'] += t.amt;
-    }
+    } else if (t.t === 'adj') o.adj += t.amt; // balance-count and hand-made adjustments move your money too
   });
-  o.net = o.spend - o.reimb; o.saved = o.earned + o.other - o.net;
+  o.net = o.spend - o.reimb; o.saved = o.earned + o.other - o.net + o.adj;
   return o;
 }
 function tagSpend(m, tag) { return sum((S.tx[m] || []).filter(function (t) { return t.t === 'exp' && (t.tags || []).indexOf(tag) > -1; }), ea); }
@@ -862,6 +927,9 @@ function auditData() {
   if (badDay.length) out.push({ sev: 'fix', key: 'badday', title: badDay.length + ' transaction' + (badDay.length > 1 ? 's have' : ' has') + ' a date that doesn’t exist',
     sub: badDay.slice(0, 3).map(function (t) { return (t.note || plain(t.cat)) + ', ' + t.d; }).join('; ') + '. Fix moves each to the last real day of its month.',
     fix: function () { var touched = {}; badDay.forEach(function (t) { touched[monthOf(t.d)] = 1; t.d = clampDate(t.d); touched[monthOf(t.d)] = 1; }); normalize(); Object.keys(touched).forEach(markMonth); } });
+  if (DROPPED.length) out.push({ sev: 'look', key: 'dropped', title: DROPPED.length + ' transaction' + (DROPPED.length > 1 ? 's were' : ' was') + ' left out: the date is unreadable',
+    sub: DROPPED.slice(0, 3).map(function (t) { return (t.note || plain(t.cat || '') || 'Entry') + ' ' + money(t.amt) + ', dated "' + String(t.d) + '"'; }).join('; ') + '. From an import or a restored backup. Fix the dates in the file and bring it in again, or add the entries by hand.',
+    open: 'import' });
   var over = S.bills.filter(function (b) { return billPaid(b) - billDue(b) > 0.01; });
   if (over.length) out.push({ sev: 'fix', key: 'over', title: over.length + ' PayLater bill' + (over.length > 1 ? 's show' : ' shows') + ' more paid than owed',
     sub: over.map(function (b) { return billProv(b) + ', ' + periodLabel(b.from) + ': ' + money(r2(billPaid(b) - billDue(b))) + ' extra'; }).join('; ') + '. Usually interest or a fee. Fix records each difference as a charge on that bill.',
@@ -1627,7 +1695,7 @@ function renderHome() {
   } else h += '</div>';
   }
   h += '<div class="strip"><div data-hm="earn" role="button" tabindex="0"><b>' + money(st.earned, 0) + '</b><span>Earned \u203a</span></div><div><b>' + money(st.other, 0) +
-    '</b><span>Gifts &amp; bonuses</span></div><div><b class="' + tone(st.saved) + '">' + signed(st.saved, 0) + '</b><span>' + (st.saved >= 0 ? 'Kept' : 'Overspent') + ': earned and gifts, minus spending</span></div></div>';
+    '</b><span>Gifts &amp; bonuses</span></div><div><b class="' + tone(st.saved) + '">' + signed(st.saved, 0) + '</b><span>' + (st.saved >= 0 ? 'Kept' : 'Overspent') + ': earned and gifts, minus spending' + (st.adj ? ', plus adjustments' : '') + '</span></div></div>';
 
   // budgets
   if (S.meta.budgets.length) {
@@ -4049,7 +4117,7 @@ function convertSheet() {
   S.meta.accounts.forEach(function (a) { (a.coins || []).forEach(function (c) { var x = String(c.sym).toUpperCase(); if (opts.indexOf(x) < 0) opts.push(x); }); });
   opts = opts.filter(function (x, i) { return opts.indexOf(x) === i; });
   var body = '<div class="conv"><div class="amt-in"><span id="cvsym">S$</span><input id="cva" inputmode="decimal" placeholder="0.00" aria-label="Amount"></div>' +
-    '<label class="f" for="cvf">From</label><select class="t" id="cvf">' + opts.map(function (x) { return '<option value="' + x + '">' + (x === 'SGD' ? 'S$ Singapore dollar' : x === 'USD' ? 'US$ US dollar' : x) + '</option>'; }).join('') + '</select>' +
+    '<label class="f" for="cvf">From</label><select class="t" id="cvf">' + opts.map(function (x) { return '<option value="' + esc(x) + '">' + (x === 'SGD' ? 'S$ Singapore dollar' : x === 'USD' ? 'US$ US dollar' : esc(x)) + '</option>'; }).join('') + '</select>' +
     '<div class="panel conv-out" id="cvo"></div><p class="note" id="cvn"></p><div class="actions"><button class="btn ghost" id="cvr">Refresh rates</button></div></div>';
   openSheet('Convert', body, function (el) {
     function sgdOf(a, from) { return from === 'SGD' ? a : from === 'USD' ? (usdRate() ? a * usdRate() : null) : (coinPrice(from) != null ? a * coinPrice(from) : null); }
@@ -4057,7 +4125,7 @@ function convertSheet() {
       var a = calcVal($('#cva', el).value), from = $('#cvf', el).value, sg = a > 0 ? sgdOf(a, from) : null;
       $('#cvsym', el).textContent = from === 'SGD' ? 'S$' : from === 'USD' ? 'US$' : from;
       $('#cvo', el).innerHTML = '<div class="kv"><span>In S$</span><span><b>' + (sg == null ? '\u2013' : money(sg)) + '</b></span><span>In US$</span><span><b>' + (sg == null || !usdRate() ? '\u2013' : usd(sg / usdRate())) + '</b></span>' +
-        (from !== 'SGD' && from !== 'USD' && coinPrice(from) != null ? '<span>1 ' + from + '</span><span>' + money(coinPrice(from)) + '</span>' : '') + '</div>';
+        (from !== 'SGD' && from !== 'USD' && coinPrice(from) != null ? '<span>1 ' + esc(from) + '</span><span>' + money(coinPrice(from)) + '</span>' : '') + '</div>';
       $('#cvn', el).textContent = (coinPrice(from) == null && from !== 'SGD' && from !== 'USD') ? 'No live price for ' + from + ' yet. Try Refresh rates.' : ratesNote() + '.';
     }
     $('#cva', el).addEventListener('input', draw); $('#cvf', el).addEventListener('change', draw);
@@ -4132,7 +4200,7 @@ function gapSheet(prov, gap) {
     return '<div class="row"><div class="l"><b>' + esc(c.title) + ' <span class="gapamt">+' + money(c.amt) + '</span></b><span style="white-space:normal">' + esc(c.sub) + '</span></div><button class="chip sm" data-gap="' + ix + '">' + esc(c.act) + '</button></div>';
   }
   var body = '<div class="kv" style="margin-top:0"><span>' + esc(prov) + ' says you owe</span><span>' + money(gap + laterOwed(prov)) + '</span><span>Your ledger adds up to</span><span>' + money(laterOwed(prov)) + '</span><span><b>Unexplained</b></span><span class="neg"><b>' + money(gap) + '</b></span></div>' +
-    (G.exact ? '<div class="banner" style="margin:6px 0 14px"><b>' + G.exact.length + ' of these add up to exactly ' + money(gap) + '</b><span>' + G.exact.map(function (c) { return c.title + ' ' + money(c.amt); }).join(' + ') + '. Check these first: with many rides an exact match can be coincidence.</span></div>' : '') +
+    (G.exact ? '<div class="banner" style="margin:6px 0 14px"><b>' + G.exact.length + ' of these add up to exactly ' + money(gap) + '</b><span>' + G.exact.map(function (c) { return esc(c.title) + ' ' + money(c.amt); }).join(' + ') + '. Check these first: with many rides an exact match can be coincidence.</span></div>' : '') +
     (strong.length ? '<label class="f">Most likely</label><div class="panel">' + strong.map(row).join('') + '</div><p class="note">Together these account for ' + money(explained) + ' of the ' + money(gap) + '.' + (explained < gap - 0.01 ? ' The remaining ' + money(r2(gap - explained)) + ' is probably something not logged at all, or among the purchases below.' : '') + '</p>' : '') +
     (moved.length ? '<label class="f">Paid another way, but look like ' + esc(prov.split(' ')[0]) + '</label><div class="panel">' + moved.slice(0, 25).map(row).join('') + '</div>' : '') +
     (!G.list.length ? '<div class="empty">Nothing in the ledger explains it. Check the provider\u2019s app for a purchase, fee or late charge that was never logged, and add it here.</div>' : '') +
@@ -4849,7 +4917,8 @@ function lumpSheet(payId) {
     $('#ldel', el).addEventListener('click', function () {
       snapshot();
       parts.forEach(function (x) { x.b.payments = x.b.payments.filter(function (q) { return q.payId !== payId; }); });
-      if (fee) { parts.forEach(function (x) { x.b.fee = r2(Math.max(0, (x.b.fee || 0) - fee.amt)); x.b.feeTxs = (x.b.feeTxs || []).filter(function (id) { return id !== fee.id; }); }); removeTx(fee); }
+      // the fee sits on one bill only — the one it was recorded against — so the others keep theirs
+      if (fee) { parts.forEach(function (x) { if ((x.b.feeTxs || []).indexOf(fee.id) > -1 || x.b.feeTx === fee.id) x.b.fee = r2(Math.max(0, (x.b.fee || 0) - fee.amt)); x.b.feeTxs = (x.b.feeTxs || []).filter(function (id) { return id !== fee.id; }); }); removeTx(fee); }
       mark('bills'); closeSheet(); render(); toastUndo('Payment deleted');
     });
   });
@@ -5872,7 +5941,8 @@ function boot() {
   loadLocal();
   document.addEventListener('click', onClick);
   var q = new URLSearchParams(location.search);
-  if (q.get('tab')) UI.tab = q.get('tab');
+  // the tab from the URL ends up in markup, so only a tab the app actually has is accepted
+  var qt = q.get('tab'); if (['home', 'activity', 'insights', 'ask', 'pnl', 'more'].indexOf(qt) > -1) UI.tab = qt;
   render();
   if (q.get('add')) txSheet();
   connect();
