@@ -2,6 +2,8 @@
 
 A personal finance tracker that installs to your phone like a native app. Track everyday spending, split bills with friends, follow PayLater instalments, and see trading and poker P&L in one place. Data syncs to your own Supabase project and stays available offline.
 
+> **History:** First built in July 2026 and deployed on Netlify. Moved to GitHub in September 2026, so the commit history starts there.
+
 ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)
 ![PWA](https://img.shields.io/badge/PWA-5A0FC8?logo=pwa&logoColor=white)
 ![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=white)
