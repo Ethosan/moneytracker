@@ -653,7 +653,7 @@ document.addEventListener('keydown', function (e) {
 window.addEventListener('online', function () { if (store.mode === 'cloud') flush(); else if (store.mode === 'cloud-offline') connect(); });
 function renderLogin() {
   return '<main class=\"login\"><div class=\"hero\"><div class=\"lbl\">20bucks</div><div class=\"big\" style=\"font-size:40px\">Sign in</div><div class=\"sub\">Your data syncs to your own private account. No password needed.</div></div>' +
-    '<div class=\"panel\" style=\"padding:16px\"><label class=\"f\" for=\"em\">Email</label><input class=\"t\" id=\"em\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">' +
+    '<div class=\"panel\" style=\"padding:16px\">' + ((window.LEDGER_CONFIG || {}).googleClientId ? '<div id=\"gbtn\" class=\"gbtn\"></div><div class=\"or\"><span>or use email</span></div>' : '') + '<label class=\"f\" for=\"em\">Email</label><input class=\"t\" id=\"em\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">' +
     '<div id=\"codebox\" hidden><label class=\"f\" for=\"code\">Code from the email</label><input class=\"t\" id=\"code\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"8\" placeholder=\"123456\"></div>' +
     '<p class=\"neg\" id=\"lerr\" style=\"font-size:13px;min-height:1em;margin:10px 2px 0\"></p>' +
     '<div class=\"actions\" style=\"margin-top:8px\"><button class=\"btn ghost\" id=\"resend\" hidden>Resend code</button><button class=\"btn\" id=\"si\">Email me a code</button></div></div></main>';
@@ -703,6 +703,18 @@ function wireLogin() {
       toast('New code sent — only the newest code works.');
     }).catch(function () { say('Could not resend the code. Check your connection and try again.'); });
   });
+  // Sign in with Google: one tap, no code to type. The email code stays as the fallback.
+  var gbtn = $('#gbtn'), gid = (window.LEDGER_CONFIG || {}).googleClientId;
+  if (gbtn && gid && window.GoogleSignIn && store.sb) {
+    GoogleSignIn.mount(gbtn, gid, function (idToken, nonce) {
+      say(''); si.disabled = true;
+      store.sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: nonce }).then(function (r) {
+        if (r.error) { si.disabled = false; say(/provider is not enabled|unsupported provider/i.test(r.error.message) ? 'Google sign-in isn\'t switched on yet. Use the email code for now.' : otpErr(r.error)); return; }
+        si.textContent = 'Signing in…';
+        connect();
+      }).catch(function () { si.disabled = false; say('Could not finish Google sign-in. Check your connection and try again.'); });
+    }, { oneTap: true }).catch(function () { gbtn.hidden = true; var o = gbtn.nextElementSibling; if (o) o.hidden = true; });
+  }
   em.addEventListener('input', function () { if (sentTo && em.value.trim() !== sentTo) reset(); });
   em.addEventListener('keydown', function (e) { if (e.key === 'Enter') si.click(); });
   code.addEventListener('keydown', function (e) { if (e.key === 'Enter') si.click(); });
@@ -2260,7 +2272,7 @@ function guideRow(ic, title, sub) {
 function renderHelp() {
   var h = '<p class="note" style="margin-top:0">Everything here works offline. Your data lives in your own Supabase account, and no other account can see it.</p>';
   h += '<section class="blk"><h2>Getting started</h2><div class="panel">' +
-    guideRow('sparkles', 'Sign in with your email', 'A one-time code arrives by email — no password. Each new code replaces the previous one, so use the latest email.') +
+    ((window.LEDGER_CONFIG || {}).googleClientId ? guideRow('sparkles', 'Sign in with Google or email', 'Tap Continue with Google, or get a one-time code by email. No password either way. Each new code replaces the previous one, so use the latest email.') : guideRow('sparkles', 'Sign in with your email', 'A one-time code arrives by email — no password. Each new code replaces the previous one, so use the latest email.')) +
     guideRow('plus', 'Add your first entry', 'Tap the + button, choose income or spending, pick a category, type a short note. That is the whole habit.') +
     guideRow('wallet', 'Wallets and PayLater', 'Add each wallet (cash, bank, card) when you log an entry. PayLater providers track what you owe until you pay it back.') +
     '</div></section>';
@@ -2295,7 +2307,7 @@ function renderHelp() {
 }
 function helpSheet() { openSheet('Help and guide', renderHelp()); }
 var TOUR = [
-  { ic: 'sparkles', t: 'Welcome to 20bucks', s: 'Your money, on your own account. A one-time code emailed to you signs you in — no password. Everything you add stays yours: it is stored in your Supabase project, and no other account can see it.' },
+  { ic: 'sparkles', t: 'Welcome to 20bucks', s: 'Your money, on your own account. ' + ((window.LEDGER_CONFIG || {}).googleClientId ? 'Sign in with Google or a code sent to your email. No password.' : 'A one-time code emailed to you signs you in — no password.') + ' Everything you add stays yours: it is stored in your Supabase project, and no other account can see it.' },
   { ic: 'plus', t: 'Log every entry with +', s: 'Tap the + button for income or spending: amount, category, a short note, tags for people or projects, and the wallet it came from. Two minutes a day is enough.' },
   { ic: 'chart', t: 'Watch it add up', s: 'Month shows this month at a glance, Insights draws the trends, and Ask answers questions in plain language. Ask is off until you turn it on in Settings.' },
   { ic: 'lock', t: 'Lock the door', s: 'Settings → App lock turns on a PIN or Face ID, and Settings → Download a backup keeps a copy of everything as one file. Both take a minute.' }

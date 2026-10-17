@@ -832,3 +832,8 @@ small.cur{font-size:11px;font-weight:700;color:var(--muted);margin-left:4px;lett
 .tour h4{text-align:center;margin:12px 0 6px;font-size:17px}
 .tour .note{text-align:center;white-space:normal;margin:0 4px}
 .tour .actions{justify-content:center;margin-top:16px}
+
+/* Sign in with Google: Google draws the button; this keeps it centred with an "or use email" rule below. */
+.gbtn{display:flex;justify-content:center;min-height:44px;margin-bottom:14px}
+.or{display:flex;align-items:center;gap:10px;margin:0 0 14px;color:var(--muted);font-size:13px}
+.or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
