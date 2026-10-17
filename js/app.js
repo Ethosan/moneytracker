@@ -597,6 +597,8 @@ function connect() {
     var sess = r.data && r.data.session;
     if (!sess) { store.mode = 'auth'; render(); store.connectBusy = false; return; }
     store.uid = sess.user.id; store.email = sess.user.email;
+    var gid0 = (sess.user.identities || []).filter(function (i) { return i.provider === 'google'; })[0];
+    store.google = gid0 && gid0.identity_data && gid0.identity_data.email ? gid0.identity_data.email : null;
     // A different account signing in on this device must not inherit the previous
     // account's local copy: drop it before any merge or push can see it.
     try { var lastUid = localStorage.getItem('ledger-uid'); if (lastUid && lastUid !== store.uid) { [LS_KEY, 'ledger-dirty', BASE_KEY, HIST.KEY, RP_KEY].forEach(function (k) { localStorage.removeItem(k); }); S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [], chats: [] }; store.dirty = {}; store.base = {}; HIST.list = []; HIST.shadow = {}; HIST.ready = false; } localStorage.setItem('ledger-uid', store.uid); } catch (e) { }
@@ -2184,6 +2186,7 @@ function renderMore() {
     '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="export"><div class="l"><b>Download a backup</b><span>' + esc(backupAge()) + '</span></div><div class="r">›</div></button>' +
     '<button class="row caution" data-act="restore"><div class="l"><b>Restore a backup</b><span>Replaces everything you have now. What you have now is kept as a restore point first.</span></div><div class="r">\u203a</div></button>' +
+    (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="gsignin"><div class="l"><b>Google sign-in</b><span>' + esc(store.google || 'Email code only') + '</span></div><div class="r">›</div></button>' : '') +
     (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="signout"><div class="l"><b>Sign out</b><span>' + esc(store.email || '') + '</span></div><div class="r">›</div></button>' : '') +
     '</div></section>';
   h += '<p class="note">' + (store.mode === 'cloud' ? 'Synced to your Supabase database. A copy is kept on this phone so it works offline.' : 'Saved in this browser only. Add your Supabase keys in config.js to sync.') + '</p>';
@@ -3650,6 +3653,62 @@ function syncSheet() {
     });
   });
 }
+function googleSheet() {
+  var gid = (window.LEDGER_CONFIG || {}).googleClientId;
+  if (!gid || !store.sb) { openSheet('Google sign-in', '<p>Google sign-in isn\u2019t switched on for this app.</p>'); return; }
+  var body;
+  if (store.google) {
+    body = '<p>Connected to <b>' + esc(store.google) + '</b>. The Google button and your email code both open this same account.</p>' +
+      '<div class="actions"><button class="btn danger" id="gunlink">Disconnect Google</button></div>' +
+      '<p class="note">Disconnecting turns off one-tap sign-in. Your email code keeps working, and nothing in your data changes.</p>';
+  } else {
+    body = '<p>Optional. Connect Google to open this account with one tap on any device \u2014 the same account, the same data. Your email code keeps working too.</p>' +
+      '<div id="gconn" class="gbtn"></div>' +
+      '<p class="note">The Google account should use <b>' + esc(store.email || 'the same email as this account') + '</b>, so it connects to the right account.</p>';
+  }
+  openSheet('Google sign-in', body, function (el) {
+    var conn = $('#gconn', el);
+    if (conn) {
+      GoogleSignIn.mount(conn, gid, function (idToken, nonce) {
+        var payload = null;
+        try { payload = JSON.parse(atob(idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (e) { }
+        var gmail = payload && payload.email;
+        if (gmail && store.email && gmail.toLowerCase() !== store.email.toLowerCase()) {
+          toast('That Google account (' + gmail + ') doesn\u2019t match this account\u2019s email (' + store.email + '). Use the Google account with the same email.');
+          return;
+        }
+        store.sb.auth.linkIdentity({ provider: 'google', options: { idToken: idToken, nonce: nonce } }).then(function (r) {
+          if (r.error) {
+            if (/identity already exists|already linked|already associated/i.test(r.error.message)) { toast('Already connected. Nothing to do.'); return; }
+            if (/verified|verification/i.test(r.error.message)) { toast('Your email isn\u2019t verified yet. Verify it first, then connect Google.'); return; }
+            toast(otpErr(r.error) || r.error.message); return;
+          }
+          store.google = gmail || store.google;
+          toast('Google connected');
+          closeSheet(); render();
+        }).catch(function () { toast('Could not connect Google. Try again.'); });
+      }, {}).catch(function () { toast('Could not load Google sign-in.'); });
+    }
+    var un = $('#gunlink', el);
+    if (un) un.addEventListener('click', function () {
+      store.sb.auth.getUserIdentities().then(function (r) {
+        if (r.error) { toast(r.error.message); return; }
+        var g = (r.data.identities || []).filter(function (i) { return i.provider === 'google'; })[0];
+        if (!g) { store.google = null; closeSheet(); render(); return; }
+        var others = (r.data.identities || []).filter(function (i) { return i.provider !== 'google'; });
+        // Email-code accounts in 20bucks have no password identity, so Google
+        // being the only identity is normal: the email code still signs in,
+        // because Supabase keeps the email as a magic-link/OTP way in.
+        if (!others.length && !confirm('Google is the only identity on this account. Your email code will still work (Supabase keeps it). Disconnect anyway?')) return;
+        store.sb.auth.unlinkIdentity({ identity: g }).then(function (r2) {
+          if (r2.error) { toast(r2.error.message); return; }
+          store.google = null; toast('Google disconnected'); closeSheet(); render();
+        });
+      });
+    });
+  });
+}
+
 function basisSheet() {
   var body = '<div class="seg" id="bs"><button data-b="cash" aria-pressed="' + cashBasis() + '">Cash basis</button><button data-b="balance" aria-pressed="' + !cashBasis() + '">Count balances</button></div>' +
     '<p style="margin-top:4px"><b>Cash basis</b> treats brokers like your prop firm and poker accounts. Money you put in is money gone, money you take out is money back, and the gain or loss is the difference. Anything still in the account is paper value: shown for reference, never added to your money.</p>' +
@@ -5862,6 +5921,7 @@ function onClick(e) {
     else if (a === 'csvinv') exportCsv('inv');
     else if (a === 'cleanup') csvImportSheet();
     else if (a === 'restore') restoreSheet();
+    else if (a === 'gsignin') googleSheet();
     else if (a === 'signout') {
       var unsynced = Object.keys(store.dirty).length;
       if (unsynced && !confirm(unsynced + ' change' + (unsynced > 1 ? 's haven’t' : ' hasn’t') + ' reached the cloud yet and will be lost. Sign out anyway?')) return;
