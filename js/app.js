@@ -2337,6 +2337,8 @@ function tourSheet(i) {
 }
 // Shown once per device, after the first real screen — never over the lock or login screen.
 function maybeFirstRun() {
+  // startup draws once while still 'connecting', before we know you're signed out; wait until you're in
+  if (store.mode !== 'cloud' && store.mode !== 'cloud-offline' && store.mode !== 'local') return;
   var seen = false;
   try { seen = !!localStorage.getItem('ledger-seen-help'); } catch (e) { }
   if (seen) return;
