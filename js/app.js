@@ -656,7 +656,8 @@ function renderLogin() {
     '<div class=\"panel\" style=\"padding:16px\">' + ((window.LEDGER_CONFIG || {}).googleClientId ? '<div id=\"gbtn\" class=\"gbtn\"></div><div class=\"or\"><span>or use email</span></div>' : '') + '<label class=\"f\" for=\"em\">Email</label><input class=\"t\" id=\"em\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">' +
     '<div id=\"codebox\" hidden><label class=\"f\" for=\"code\">Code from the email</label><input class=\"t\" id=\"code\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"8\" placeholder=\"123456\"></div>' +
     '<p class=\"neg\" id=\"lerr\" style=\"font-size:13px;min-height:1em;margin:10px 2px 0\"></p>' +
-    '<div class=\"actions\" style=\"margin-top:8px\"><button class=\"btn ghost\" id=\"resend\" hidden>Resend code</button><button class=\"btn\" id=\"si\">Email me a code</button></div></div></main>';
+    '<div class=\"actions\" style=\"margin-top:8px\"><button class=\"btn ghost\" id=\"resend\" hidden>Resend code</button><button class=\"btn\" id=\"si\">Email me a code</button></div></div>' +
+    '<p style=\"text-align:center;font-size:13px;margin:14px 0 0\"><a href=\"/privacy.html\">Privacy</a> · <a href=\"/terms.html\">Terms</a></p></main>';
 }
 function wireLogin() {
   var em = $('#em'), code = $('#code'), err = $('#lerr'), si = $('#si'), resend = $('#resend'), codebox = $('#codebox');

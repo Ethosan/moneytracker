@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy · 20bucks</title>
+<meta name="color-scheme" content="light dark">
+<style>
+  :root { color-scheme: light dark; }
+  body { margin: 0; background: #F2F4F8; color: #0D1017; font: 15px/1.7 "Geist", system-ui, -apple-system, "Segoe UI", sans-serif }
+  @media (prefers-color-scheme: dark) { body { background: #0A0C11; color: #EEF1F7 } }
+  main { max-width: 640px; margin: 0 auto; padding: 48px 16px }
+  h1 { font-size: 24px; margin: 0 0 20px }
+  h2 { font-size: 16px; margin: 28px 0 6px }
+  p, li { color: #5D6472 }
+  @media (prefers-color-scheme: dark) { p, li { color: #98A1B3 } }
+  a { color: #2A55F5 }
+  @media (prefers-color-scheme: dark) { a { color: #6C8CFF } }
+</style>
+</head>
+<body>
+<main>
+  <h1>20bucks: privacy</h1>
+  <p>20bucks is a personal project by Ethan Tam. It has no server of its own: your data lives in Supabase and in your browser. It doesn't use analytics or ads.</p>
+
+  <h2>Where your money data goes</h2>
+  <ul>
+    <li><b>Your account:</b> everything you add — transactions, bill splits, PayLater plans, trades, imports — is stored in a Supabase database. Each account only sees its own rows, and sign-in is needed to read them.</li>
+    <li><b>Sign-in:</b> a one-time code emailed to you, or Google sign-in. We store your email address and, with Google sign-in, the name on your Google account. No password is ever stored.</li>
+    <li><b>This device:</b> a working copy of your data stays in your browser's local storage so the app works offline. Anyone who uses that browser can see that copy. Settings lets you delete it or sign out.</li>
+    <li><b>Photos and files:</b> anything you attach (receipts, screenshots) goes to your account's storage in Supabase.</li>
+  </ul>
+
+  <h2>The AI assistant</h2>
+  <p>If you use the optional AI assistant, the messages you send are passed to an AI model (Mistral or Anthropic Claude) through a Supabase edge function, together with any transactions you attach to the conversation. Don't put secrets in a chat. Everything else in your account stays out of the request.</p>
+
+  <h2>Google data</h2>
+  <p>Google sign-in asks only for your email address and profile name. The sign-in happens in a Google pop-up; 20bucks never sees your password. To remove access, go to <a href="https://myaccount.google.com/permissions">your Google account permissions</a>.</p>
+
+  <h2>Who else processes your data</h2>
+  <ul>
+    <li><b>Supabase:</b> database, sign-in and file storage.</li>
+    <li><b>Resend:</b> sends the sign-in emails.</li>
+    <li><b>Netlify:</b> hosts the app.</li>
+    <li><b>Mistral / Anthropic:</b> only if you use the AI assistant.</li>
+  </ul>
+
+  <h2>Keeping and deleting</h2>
+  <p>Data is kept while your account exists. You can delete items in the app any time. To remove everything, delete your data in the app and then delete your account from Supabase, or email us and we'll do it.</p>
+
+  <h2>We don't</h2>
+  <p>We don't sell your data, share it with advertisers, or track you across other sites.</p>
+
+  <h2>Changes</h2>
+  <p>If this policy changes in a way that matters, the app will say so before it takes effect.</p>
+
+  <h2>Contact</h2>
+  <p><a href="mailto:eatentam@gmail.com">eatentam@gmail.com</a></p>
+  <p><a href="/terms.html">Terms</a> · <a href="/">Back to 20bucks</a></p>
+</main>
+</body>
+</html>
