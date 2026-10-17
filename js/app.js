@@ -3677,12 +3677,18 @@ function googleSheet() {
           toast('That Google account (' + gmail + ') doesn\u2019t match this account\u2019s email (' + store.email + '). Use the Google account with the same email.');
           return;
         }
-        store.sb.auth.linkIdentity({ provider: 'google', options: { idToken: idToken, nonce: nonce } }).then(function (r) {
+        // The vendored supabase-js linkIdentity only does the redirect flow, which
+        // needs a Google client secret. With the emails matching and verified,
+        // Supabase's automatic linking attaches the identity via the same
+        // pop-up sign-in, so the account gains Google without a secret.
+        store.sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: nonce }).then(function (r) {
           if (r.error) {
-            if (/identity already exists|already linked|already associated/i.test(r.error.message)) { toast('Already connected. Nothing to do.'); return; }
+            if (/provider is not enabled|unsupported provider/i.test(r.error.message)) { toast('Google sign-in isn\u2019t switched on yet.'); return; }
             if (/verified|verification/i.test(r.error.message)) { toast('Your email isn\u2019t verified yet. Verify it first, then connect Google.'); return; }
             toast(otpErr(r.error) || r.error.message); return;
           }
+          var linked = (r.data && r.data.user && r.data.user.identities || []).some(function (i) { return i.provider === 'google'; });
+          if (!linked) { toast('Google didn\u2019t connect \u2014 the emails must match.'); return; }
           store.google = gmail || store.google;
           toast('Google connected');
           closeSheet(); render();
