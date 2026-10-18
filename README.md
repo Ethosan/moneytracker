@@ -29,16 +29,16 @@ A personal finance tracker that installs to your phone like a native app. Track 
 
 ## Features
 
-- **Spending and budgets.** Categorised transactions, a monthly view that compares each category with what you usually spend by this day, and drill-down by category.
+- **Spending and budgets.** Categorised transactions, and a monthly view that compares each category with what you usually spend by this day. Drill down by category for the detail.
 - **People and splits.** Tag who an expense was for and keep running "who owes me" balances.
 - **PayLater and subscriptions.** Instalment schedules that handle month-end dates correctly.
-- **Trading and poker P&L.** Prop firm, broker and poker results alongside regular spending.
+- **Trading and poker P&L.** Prop firm and broker results, plus poker, alongside regular spending.
 - **Multi-currency wallets.** US dollar and crypto wallets valued live, plus a converter.
 - **Imports.** Grab, bank statement CSVs and Money Manager `.xlsx` exports, with date validation and duplicate-safe re-imports.
 - **Balance checks.** Count a wallet and see exactly what is missing since the last count.
-- **Insights.** Monthly patterns, savings per month and data-health checks.
+- **Insights.** Monthly patterns and savings per month, plus data-health checks.
 - **AI assistant (optional).** A weekly review that flags likely mistakes for you to approve, and a chat that answers questions about your money, with tables and maths rendered inline.
-- **Private by default.** Email one-time-code sign-in, optional PIN or Face ID/fingerprint lock per device, and row level security so each account only sees its own data.
+- **Private by default.** Email one-time-code sign-in, and an optional PIN or Face ID/fingerprint lock per device. Row level security keeps each account to its own data.
 - **Works offline.** A service worker caches the app, and changes sync when you are back online.
 
 ## Tech stack
@@ -77,7 +77,7 @@ docs/screenshots/          demo screenshots
 npm test
 ```
 
-Needs Node 18 or newer and nothing else: no install step, no build. The tests cover the date rules that are easy to get wrong, such as instalments and renewals on the 29th to 31st, leap years, and impossible statement dates like 31 Feb.
+Needs Node 18 or newer and nothing else: no install step, no build. The tests cover the date rules that are easy to get wrong, like instalments and renewals on the 29th to 31st. They also check leap years. Impossible statement dates like 31 Feb never make it in.
 
 ## Getting started
 
@@ -111,7 +111,7 @@ A public repository only exposes the code. Your data lives in Supabase behind ro
 
 ### 3. First run
 
-1. Open the site on your phone, enter your email and tap "Email me a code", then enter the code from the email. A short welcome tour appears on your first sign-in, and ⋯ → Help reopens the full guide any time.
+1. Open the site on your phone. Enter your email and tap "Email me a code", then enter the code from the email. A short welcome tour appears on your first sign-in, and ⋯ → Help reopens the full guide any time.
 2. Optionally restore a backup (**⋯ → Restore a backup**) or import a Money Manager export.
 3. Install it: Safari → Share → Add to Home Screen, or Chrome → ⋮ → Install app.
 4. Once your account exists, turn off **Allow new users to sign up** in Supabase if the app is just for you.

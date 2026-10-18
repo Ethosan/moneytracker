@@ -2277,7 +2277,7 @@ function renderHelp() {
   var h = '<p class="note" style="margin-top:0">Everything here works offline. Your data lives in your own Supabase account, and no other account can see it.</p>';
   h += '<section class="blk"><h2>Getting started</h2><div class="panel">' +
     ((window.LEDGER_CONFIG || {}).googleClientId ? guideRow('sparkles', 'Sign in with Google or email', 'Tap Continue with Google, or get a one-time code by email. No password either way. Each new code replaces the previous one, so use the latest email.') : guideRow('sparkles', 'Sign in with your email', 'A one-time code arrives by email — no password. Each new code replaces the previous one, so use the latest email.')) +
-    guideRow('plus', 'Add your first entry', 'Tap the + button, choose income or spending, pick a category, type a short note. That is the whole habit.') +
+    guideRow('plus', 'Add your first entry', 'Tap the + button, choose income or spending, and pick a category. Type a short note if you want. That is the whole habit.') +
     guideRow('wallet', 'Wallets and PayLater', 'Add each wallet (cash, bank, card) when you log an entry. PayLater providers track what you owe until you pay it back.') +
     '</div></section>';
   h += '<section class="blk"><h2>Make it yours</h2><div class="panel">' +
@@ -2313,7 +2313,7 @@ function helpSheet() { openSheet('Help and guide', renderHelp()); }
 var TOUR = [
   { ic: 'sparkles', t: 'Welcome to 20bucks', s: 'Your money, on your own account. ' + ((window.LEDGER_CONFIG || {}).googleClientId ? 'Sign in with Google or a code sent to your email. No password.' : 'A one-time code emailed to you signs you in — no password.') + ' Everything you add stays yours: it is stored in your Supabase project, and no other account can see it.' },
   { ic: 'plus', t: 'Log every entry with +', s: 'Tap the + button for income or spending: amount, category, a short note, tags for people or projects, and the wallet it came from. Two minutes a day is enough.' },
-  { ic: 'chart', t: 'Watch it add up', s: 'Month shows this month at a glance, Insights draws the trends, and Ask answers questions in plain language. Ask is off until you turn it on in Settings.' },
+  { ic: 'chart', t: 'Watch it add up', s: 'Month shows this month at a glance and Insights draws the trends. Ask answers questions in plain language. It is off until you turn it on in Settings.' },
   { ic: 'lock', t: 'Lock the door', s: 'Settings → App lock turns on a PIN or Face ID, and Settings → Download a backup keeps a copy of everything as one file. Both take a minute.' }
 ];
 function tourSheet(i) {
