@@ -35,7 +35,7 @@ A personal finance tracker that installs to your phone like a native app. Track 
 - **Trading and poker P&L.** Prop firm and broker results, plus poker, alongside regular spending.
 - **Multi-currency wallets.** US dollar and crypto wallets valued live, plus a converter.
 - **Imports.** Grab, bank statement CSVs and Money Manager `.xlsx` exports, with date validation and duplicate-safe re-imports.
-- **Balance checks.** Count a wallet and see exactly what is missing since the last count.
+- **Balance checks.** Count a wallet and see exactly what is missing since the last count. A gap stays open after later counts until something you log explains it, and an entry dated on the wrong side of a count is spotted from the opposite gaps it leaves either side.
 - **Insights.** Monthly patterns and savings per month, plus data-health checks.
 - **AI assistant (optional).** A weekly review that flags likely mistakes for you to approve, and a chat that answers questions about your money, with tables and maths rendered inline.
 - **Private by default.** Email one-time-code sign-in, and an optional PIN or Face ID/fingerprint lock per device. Row level security keeps each account to its own data.
