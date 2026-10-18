@@ -1,7 +1,7 @@
 # Publish only the app. Without this Netlify serves the whole repo, so README.md,
 # PRODUCT.md and the supabase/ folder would be readable at your site's address.
 [build]
-  command = "rm -rf dist && mkdir dist && cp -r index.html app.css js sw.js config.js manifest.webmanifest fonts icons vendor dist/"
+  command = "rm -rf dist && mkdir dist && cp -r index.html privacy.html terms.html app.css js sw.js config.js manifest.webmanifest fonts icons vendor dist/"
   publish = "dist"
 
 # Always check for a new service worker and page, so an update reaches the phone on the next open.
@@ -24,4 +24,4 @@
     X-Frame-Options = "DENY"
     Referrer-Policy = "no-referrer"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://wqpjijgqjhzquncruvlc.supabase.co https://api.coingecko.com https://open.er-api.com; worker-src 'self' blob:; manifest-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://accounts.google.com/gsi/ https://wqpjijgqjhzquncruvlc.supabase.co https://api.coingecko.com https://open.er-api.com; worker-src 'self' blob:; frame-src https://accounts.google.com/gsi/; manifest-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'"

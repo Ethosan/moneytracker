@@ -300,16 +300,6 @@ function tagSheet(g) {
   });
 }
 
-// Rows normalize() leaves out because their date is unreadable, kept for this session so
-// Data health can say what happened to them instead of them vanishing without a word.
-var DROPPED = [];
-function noteDropped(t) {
-  var key = (t.id || '') + '|' + (t.d || '') + '|' + (t.amt || '') + '|' + (t.note || '');
-  if (DROPPED.some(function (x) { return (x.id || '') + '|' + (x.d || '') + '|' + (x.amt || '') + '|' + (x.note || '') === key; })) return;
-  DROPPED.push(t);
-  if (DROPPED.length > 100) DROPPED.shift();
-}
-
 function normalize() {
   S.meta = S.meta || freshMeta();
   ['bills', 'inbox', 'checks', 'ledger', 'debts', 'chats'].forEach(function (k) { if (!Array.isArray(S[k])) S[k] = []; });
@@ -327,9 +317,7 @@ function normalize() {
   var seen = {}, fixed = {}, moved = 0;
   Object.keys(S.tx).forEach(function (k) {
     (S.tx[k] || []).forEach(function (t) {
-      // a row whose date cannot be read at all (hand-edited backup, broken import) is left
-      // out here; it is kept aside so Data health can say what happened, not dropped in silence
-      if (!t || !t.d || !/^\d{4}-\d{2}-\d{2}$/.test(t.d)) { if (t) noteDropped(t); return; }
+      if (!t || !t.d || !/^\d{4}-\d{2}-\d{2}$/.test(t.d)) return;
       if (!t.id || seen[t.id]) t.id = uid();
       seen[t.id] = 1;
       t.amt = Math.abs(num(t.amt)); if (!t.amt) return;
@@ -411,16 +399,7 @@ function isClosed(v) { return !!(S.meta.venues[v] && S.meta.venues[v].closed); }
 function venueType(v) { return (S.meta.venues[v] && S.meta.venues[v].type) || 'broker'; }
 
 // ---------- persistence ----------
-// localStorage holds the state, the change history, the restore points and the sync
-// bookkeeping. When it fills up a failed save must be seen: an edit that lives only in
-// memory vanishes on the next reload, while the app still says it is waiting to sync.
-function quotaWarn() {
-  if (quotaWarn.on) return;
-  quotaWarn.on = true;
-  toast('This device is out of storage — changes are kept in memory only and may be lost if the app is closed. Free up space on the device, then reopen the app.');
-  HIST.label = ''; // a warning must not become the next change's undo label
-}
-function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); quotaWarn.on = false; } catch (e) { quotaWarn(); } }
+function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) { } }
 function loadLocal() {
   try { var raw = localStorage.getItem(LS_KEY); if (raw) { var o = JSON.parse(raw); if (o && o.meta) S = o; } } catch (e) { }
   normalize();
@@ -485,11 +464,6 @@ function metaKeys(m) {
   var o = {};
   Object.keys(META_LISTS).forEach(function (k) { o[k] = (m && m[k] || []).map(META_LISTS[k]); });
   o.venues = Object.keys((m && m.venues) || {});
-  // scalar settings as well, so mergeMeta can tell "changed here" from "changed there"
-  Object.keys(m || {}).forEach(function (k) {
-    if (k === 'venues' || k === 'subcats' || META_LISTS[k]) return;
-    o[k] = m[k];
-  });
   return o;
 }
 function merge3(local, remote, base, key) {
@@ -504,19 +478,9 @@ function merge3(local, remote, base, key) {
 function mergeMeta(local, remote) {
   if (!remote) return local;
   var base = store.base.meta || null;
-  // Settings lists, venues and subcategories merge three ways below. A scalar setting (like
-  // the spending basis) comes from the other device when this one has not changed it since
-  // the last sync, so two devices editing it converge instead of overwriting each other
-  // forever; when both changed it, this device's wins, as with list items.
-  var m = JSON.parse(JSON.stringify(remote));
-  Object.keys(local).forEach(function (k) {
-    if (k === 'venues' || k === 'subcats' || META_LISTS[k]) return;
-    var lv = local[k], rv = remote[k], bv = base ? base[k] : undefined;
-    if (lv === undefined) return;                                     // only the other device has it: keep theirs
-    if (rv === undefined || bv === undefined) { m[k] = lv; return; }  // only ours, or no base record yet
-    if (JSON.stringify(lv) === JSON.stringify(bv)) m[k] = rv;         // unchanged here: their change wins
-    else m[k] = lv;                                                   // changed here (maybe both): ours wins
-  });
+  // settings only the other device has (say, a new device's first sync) are kept; where both
+  // have one, this device's wins. Lists, venues and subcategories are merged below.
+  var m = Object.assign(JSON.parse(JSON.stringify(remote)), JSON.parse(JSON.stringify(local)));
   Object.keys(META_LISTS).forEach(function (k) {
     m[k] = base ? merge3(local[k], remote[k], base[k], META_LISTS[k]) : mergeBy(local[k], remote[k], META_LISTS[k]);
   });
@@ -542,39 +506,7 @@ function absorb(doc, remoteBody) {
   else if (doc === 'inbox') S.inbox = merged;
   else S[doc] = merged;
 }
-function saveDirty() { try { localStorage.setItem('ledger-dirty', JSON.stringify(Object.keys(store.dirty))); quotaWarn.on = false; } catch (e) { quotaWarn(); } }
-// One document: read the cloud copy, fold it into local, write the result back — but only
-// if nobody wrote since we read. A conflicting write means another device got there first:
-// read again, merge again, try again, so neither edit is lost.
-function syncDoc(k, attempt) {
-  var t = store.sb.from('ledger_docs');
-  return t.select('body,updated_at').eq('user_id', store.uid).eq('id', k).maybeSingle().then(function (r) {
-    if (r.error) throw r.error;
-    var seen = r.data ? r.data.updated_at : null;
-    if (r.data && r.data.body) { absorb(k, r.data.body); normalize(); saveLocal(); histSnap(); }
-    var body = bodyFor(k), tb = store.sb.from('ledger_docs');
-    if (!seen) {
-      // no cloud copy yet: create it. If another device created it first, read and merge instead.
-      if (!body) return { written: true, body: body };
-      return tb.insert({ user_id: store.uid, id: k, body: body, updated_at: new Date().toISOString() }).then(function (w) {
-        if (w.error && w.error.code === '23505') return syncDoc(k, attempt);
-        if (w.error) throw w.error;
-        return { written: true, body: body };
-      });
-    }
-    var q = body
-      ? tb.update({ body: body, updated_at: new Date().toISOString() }).eq('user_id', store.uid).eq('id', k).eq('updated_at', seen).select('id')
-      : tb.delete().eq('user_id', store.uid).eq('id', k).eq('updated_at', seen).select('id');
-    return q.then(function (w) {
-      if (w.error) throw w.error;
-      if (!w.data || !w.data.length) {
-        if (attempt >= 3) return { written: false, body: body };
-        return syncDoc(k, attempt + 1);
-      }
-      return { written: true, body: body };
-    });
-  });
-}
+function saveDirty() { try { localStorage.setItem('ledger-dirty', JSON.stringify(Object.keys(store.dirty))); } catch (e) { } }
 function flush() {
   if (store.mode !== 'cloud' || store.writing) return;
   var keys = Object.keys(store.dirty); if (!keys.length) return;
@@ -584,12 +516,15 @@ function flush() {
     var k = keys.shift();
     if (!k) { store.writing = false; saveDirty(); setSync('Synced'); if (Object.keys(store.dirty).length) schedule(); return; }
     delete store.dirty[k];
-    syncDoc(k, 0).then(function (res) {
-      if (!res.written) {
-        // another device kept winning the race: keep the edit queued rather than dropping it
-        store.dirty[k] = true; store.writing = false; saveDirty(); setSync('Synced'); schedule(); return;
-      }
-      store.base[k] = idsOf(k, res.body); saveBase();
+    var t = store.sb.from('ledger_docs');
+    var p = t.select('body').eq('user_id', store.uid).eq('id', k).maybeSingle().then(function (r) {
+      if (r.error) throw r.error;
+      if (r.data && r.data.body) { absorb(k, r.data.body); normalize(); saveLocal(); histSnap(); }
+      var body = bodyFor(k), tb = store.sb.from('ledger_docs');
+      return (body ? tb.upsert({ user_id: store.uid, id: k, body: body, updated_at: new Date().toISOString() }, { onConflict: 'user_id,id' })
+        : tb.delete().eq('user_id', store.uid).eq('id', k)).then(function (w) { if (w.error) throw w.error; store.base[k] = idsOf(k, body); saveBase(); });
+    });
+    p.then(function () {
       store.err = null; next();
     }).catch(function (e) {
       store.dirty[k] = true; store.writing = false; saveDirty();
@@ -662,6 +597,8 @@ function connect() {
     var sess = r.data && r.data.session;
     if (!sess) { store.mode = 'auth'; render(); store.connectBusy = false; return; }
     store.uid = sess.user.id; store.email = sess.user.email;
+    var gid0 = (sess.user.identities || []).filter(function (i) { return i.provider === 'google'; })[0];
+    store.google = gid0 && gid0.identity_data && gid0.identity_data.email ? gid0.identity_data.email : null;
     // A different account signing in on this device must not inherit the previous
     // account's local copy: drop it before any merge or push can see it.
     try { var lastUid = localStorage.getItem('ledger-uid'); if (lastUid && lastUid !== store.uid) { [LS_KEY, 'ledger-dirty', BASE_KEY, HIST.KEY, RP_KEY].forEach(function (k) { localStorage.removeItem(k); }); S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [], chats: [] }; store.dirty = {}; store.base = {}; HIST.list = []; HIST.shadow = {}; HIST.ready = false; } localStorage.setItem('ledger-uid', store.uid); } catch (e) { }
@@ -718,10 +655,11 @@ document.addEventListener('keydown', function (e) {
 window.addEventListener('online', function () { if (store.mode === 'cloud') flush(); else if (store.mode === 'cloud-offline') connect(); });
 function renderLogin() {
   return '<main class=\"login\"><div class=\"hero\"><div class=\"lbl\">20bucks</div><div class=\"big\" style=\"font-size:40px\">Sign in</div><div class=\"sub\">Your data syncs to your own private account. No password needed.</div></div>' +
-    '<div class=\"panel\" style=\"padding:16px\"><label class=\"f\" for=\"em\">Email</label><input class=\"t\" id=\"em\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">' +
+    '<div class=\"panel\" style=\"padding:16px\">' + ((window.LEDGER_CONFIG || {}).googleClientId ? '<div id=\"gbtn\" class=\"gbtn\"></div><div class=\"or\"><span>or use email</span></div>' : '') + '<label class=\"f\" for=\"em\">Email</label><input class=\"t\" id=\"em\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">' +
     '<div id=\"codebox\" hidden><label class=\"f\" for=\"code\">Code from the email</label><input class=\"t\" id=\"code\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"8\" placeholder=\"123456\"></div>' +
     '<p class=\"neg\" id=\"lerr\" style=\"font-size:13px;min-height:1em;margin:10px 2px 0\"></p>' +
-    '<div class=\"actions\" style=\"margin-top:8px\"><button class=\"btn ghost\" id=\"resend\" hidden>Resend code</button><button class=\"btn\" id=\"si\">Email me a code</button></div></div></main>';
+    '<div class=\"actions\" style=\"margin-top:8px\"><button class=\"btn ghost\" id=\"resend\" hidden>Resend code</button><button class=\"btn\" id=\"si\">Email me a code</button></div></div>' +
+    '<p style=\"text-align:center;font-size:13px;margin:14px 0 0\"><a href=\"/privacy.html\">Privacy</a> · <a href=\"/terms.html\">Terms</a></p></main>';
 }
 function wireLogin() {
   var em = $('#em'), code = $('#code'), err = $('#lerr'), si = $('#si'), resend = $('#resend'), codebox = $('#codebox');
@@ -768,6 +706,18 @@ function wireLogin() {
       toast('New code sent — only the newest code works.');
     }).catch(function () { say('Could not resend the code. Check your connection and try again.'); });
   });
+  // Sign in with Google: one tap, no code to type. The email code stays as the fallback.
+  var gbtn = $('#gbtn'), gid = (window.LEDGER_CONFIG || {}).googleClientId;
+  if (gbtn && gid && window.GoogleSignIn && store.sb) {
+    GoogleSignIn.mount(gbtn, gid, function (idToken, nonce) {
+      say(''); si.disabled = true;
+      store.sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: nonce }).then(function (r) {
+        if (r.error) { si.disabled = false; say(/provider is not enabled|unsupported provider/i.test(r.error.message) ? 'Google sign-in isn\'t switched on yet. Use the email code for now.' : otpErr(r.error)); return; }
+        si.textContent = 'Signing in…';
+        connect();
+      }).catch(function () { si.disabled = false; say('Could not finish Google sign-in. Check your connection and try again.'); });
+    }, { oneTap: true }).catch(function () { gbtn.hidden = true; var o = gbtn.nextElementSibling; if (o) o.hidden = true; });
+  }
   em.addEventListener('input', function () { if (sentTo && em.value.trim() !== sentTo) reset(); });
   em.addEventListener('keydown', function (e) { if (e.key === 'Enter') si.click(); });
   code.addEventListener('keydown', function (e) { if (e.key === 'Enter') si.click(); });
@@ -776,7 +726,7 @@ function wireLogin() {
 // ---------- calculations ----------
 function monthStats(m) {
   var tx = S.tx[m] || [];
-  var o = { spend: 0, earned: 0, other: 0, reimb: 0, person: 0, adj: 0, byCat: {}, byTag: {} }, PT = personTag();
+  var o = { spend: 0, earned: 0, other: 0, reimb: 0, person: 0, byCat: {}, byTag: {} }, PT = personTag();
   tx.forEach(function (t) {
     if (t.t === 'exp') {
       var v = ea(t);
@@ -785,9 +735,9 @@ function monthStats(m) {
       (t.tags || []).forEach(function (g) { o.byTag[g] = (o.byTag[g] || 0) + v; });
     } else if (t.t === 'inc') {
       var k = incKind(t.cat); o[k === 'earned' ? 'earned' : k === 'reimb' ? 'reimb' : 'other'] += t.amt;
-    } else if (t.t === 'adj') o.adj += t.amt; // balance-count and hand-made adjustments move your money too
+    }
   });
-  o.net = o.spend - o.reimb; o.saved = o.earned + o.other - o.net + o.adj;
+  o.net = o.spend - o.reimb; o.saved = o.earned + o.other - o.net;
   return o;
 }
 function tagSpend(m, tag) { return sum((S.tx[m] || []).filter(function (t) { return t.t === 'exp' && (t.tags || []).indexOf(tag) > -1; }), ea); }
@@ -927,9 +877,6 @@ function auditData() {
   if (badDay.length) out.push({ sev: 'fix', key: 'badday', title: badDay.length + ' transaction' + (badDay.length > 1 ? 's have' : ' has') + ' a date that doesn’t exist',
     sub: badDay.slice(0, 3).map(function (t) { return (t.note || plain(t.cat)) + ', ' + t.d; }).join('; ') + '. Fix moves each to the last real day of its month.',
     fix: function () { var touched = {}; badDay.forEach(function (t) { touched[monthOf(t.d)] = 1; t.d = clampDate(t.d); touched[monthOf(t.d)] = 1; }); normalize(); Object.keys(touched).forEach(markMonth); } });
-  if (DROPPED.length) out.push({ sev: 'look', key: 'dropped', title: DROPPED.length + ' transaction' + (DROPPED.length > 1 ? 's were' : ' was') + ' left out: the date is unreadable',
-    sub: DROPPED.slice(0, 3).map(function (t) { return (t.note || plain(t.cat || '') || 'Entry') + ' ' + money(t.amt) + ', dated "' + String(t.d) + '"'; }).join('; ') + '. From an import or a restored backup. Fix the dates in the file and bring it in again, or add the entries by hand.',
-    open: 'import' });
   var over = S.bills.filter(function (b) { return billPaid(b) - billDue(b) > 0.01; });
   if (over.length) out.push({ sev: 'fix', key: 'over', title: over.length + ' PayLater bill' + (over.length > 1 ? 's show' : ' shows') + ' more paid than owed',
     sub: over.map(function (b) { return billProv(b) + ', ' + periodLabel(b.from) + ': ' + money(r2(billPaid(b) - billDue(b))) + ' extra'; }).join('; ') + '. Usually interest or a fee. Fix records each difference as a charge on that bill.',
@@ -1695,7 +1642,7 @@ function renderHome() {
   } else h += '</div>';
   }
   h += '<div class="strip"><div data-hm="earn" role="button" tabindex="0"><b>' + money(st.earned, 0) + '</b><span>Earned \u203a</span></div><div><b>' + money(st.other, 0) +
-    '</b><span>Gifts &amp; bonuses</span></div><div><b class="' + tone(st.saved) + '">' + signed(st.saved, 0) + '</b><span>' + (st.saved >= 0 ? 'Kept' : 'Overspent') + ': earned and gifts, minus spending' + (st.adj ? ', plus adjustments' : '') + '</span></div></div>';
+    '</b><span>Gifts &amp; bonuses</span></div><div><b class="' + tone(st.saved) + '">' + signed(st.saved, 0) + '</b><span>' + (st.saved >= 0 ? 'Kept' : 'Overspent') + ': earned and gifts, minus spending</span></div></div>';
 
   // budgets
   if (S.meta.budgets.length) {
@@ -2239,6 +2186,7 @@ function renderMore() {
     '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="export"><div class="l"><b>Download a backup</b><span>' + esc(backupAge()) + '</span></div><div class="r">›</div></button>' +
     '<button class="row caution" data-act="restore"><div class="l"><b>Restore a backup</b><span>Replaces everything you have now. What you have now is kept as a restore point first.</span></div><div class="r">\u203a</div></button>' +
+    (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="gsignin"><div class="l"><b>Google sign-in</b><span>' + esc(store.google || 'Email code only') + '</span></div><div class="r">›</div></button>' : '') +
     (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="signout"><div class="l"><b>Sign out</b><span>' + esc(store.email || '') + '</span></div><div class="r">›</div></button>' : '') +
     '</div></section>';
   h += '<p class="note">' + (store.mode === 'cloud' ? 'Synced to your Supabase database. A copy is kept on this phone so it works offline.' : 'Saved in this browser only. Add your Supabase keys in config.js to sync.') + '</p>';
@@ -2328,7 +2276,7 @@ function guideRow(ic, title, sub) {
 function renderHelp() {
   var h = '<p class="note" style="margin-top:0">Everything here works offline. Your data lives in your own Supabase account, and no other account can see it.</p>';
   h += '<section class="blk"><h2>Getting started</h2><div class="panel">' +
-    guideRow('sparkles', 'Sign in with your email', 'A one-time code arrives by email — no password. Each new code replaces the previous one, so use the latest email.') +
+    ((window.LEDGER_CONFIG || {}).googleClientId ? guideRow('sparkles', 'Sign in with Google or email', 'Tap Continue with Google, or get a one-time code by email. No password either way. Each new code replaces the previous one, so use the latest email.') : guideRow('sparkles', 'Sign in with your email', 'A one-time code arrives by email — no password. Each new code replaces the previous one, so use the latest email.')) +
     guideRow('plus', 'Add your first entry', 'Tap the + button, choose income or spending, pick a category, type a short note. That is the whole habit.') +
     guideRow('wallet', 'Wallets and PayLater', 'Add each wallet (cash, bank, card) when you log an entry. PayLater providers track what you owe until you pay it back.') +
     '</div></section>';
@@ -2363,7 +2311,7 @@ function renderHelp() {
 }
 function helpSheet() { openSheet('Help and guide', renderHelp()); }
 var TOUR = [
-  { ic: 'sparkles', t: 'Welcome to 20bucks', s: 'Your money, on your own account. A one-time code emailed to you signs you in — no password. Everything you add stays yours: it is stored in your Supabase project, and no other account can see it.' },
+  { ic: 'sparkles', t: 'Welcome to 20bucks', s: 'Your money, on your own account. ' + ((window.LEDGER_CONFIG || {}).googleClientId ? 'Sign in with Google or a code sent to your email. No password.' : 'A one-time code emailed to you signs you in — no password.') + ' Everything you add stays yours: it is stored in your Supabase project, and no other account can see it.' },
   { ic: 'plus', t: 'Log every entry with +', s: 'Tap the + button for income or spending: amount, category, a short note, tags for people or projects, and the wallet it came from. Two minutes a day is enough.' },
   { ic: 'chart', t: 'Watch it add up', s: 'Month shows this month at a glance, Insights draws the trends, and Ask answers questions in plain language. Ask is off until you turn it on in Settings.' },
   { ic: 'lock', t: 'Lock the door', s: 'Settings → App lock turns on a PIN or Face ID, and Settings → Download a backup keeps a copy of everything as one file. Both take a minute.' }
@@ -2389,6 +2337,8 @@ function tourSheet(i) {
 }
 // Shown once per device, after the first real screen — never over the lock or login screen.
 function maybeFirstRun() {
+  // startup draws once while still 'connecting', before we know you're signed out; wait until you're in
+  if (store.mode !== 'cloud' && store.mode !== 'cloud-offline' && store.mode !== 'local') return;
   var seen = false;
   try { seen = !!localStorage.getItem('ledger-seen-help'); } catch (e) { }
   if (seen) return;
@@ -3705,6 +3655,68 @@ function syncSheet() {
     });
   });
 }
+function googleSheet() {
+  var gid = (window.LEDGER_CONFIG || {}).googleClientId;
+  if (!gid || !store.sb) { openSheet('Google sign-in', '<p>Google sign-in isn\u2019t switched on for this app.</p>'); return; }
+  var body;
+  if (store.google) {
+    body = '<p>Connected to <b>' + esc(store.google) + '</b>. The Google button and your email code both open this same account.</p>' +
+      '<div class="actions"><button class="btn danger" id="gunlink">Disconnect Google</button></div>' +
+      '<p class="note">Disconnecting turns off one-tap sign-in. Your email code keeps working, and nothing in your data changes.</p>';
+  } else {
+    body = '<p>Optional. Connect Google to open this account with one tap on any device \u2014 the same account, the same data. Your email code keeps working too.</p>' +
+      '<div id="gconn" class="gbtn"></div>' +
+      '<p class="note">The Google account should use <b>' + esc(store.email || 'the same email as this account') + '</b>, so it connects to the right account.</p>';
+  }
+  openSheet('Google sign-in', body, function (el) {
+    var conn = $('#gconn', el);
+    if (conn) {
+      GoogleSignIn.mount(conn, gid, function (idToken, nonce) {
+        var payload = null;
+        try { payload = JSON.parse(atob(idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (e) { }
+        var gmail = payload && payload.email;
+        if (gmail && store.email && gmail.toLowerCase() !== store.email.toLowerCase()) {
+          toast('That Google account (' + gmail + ') doesn\u2019t match this account\u2019s email (' + store.email + '). Use the Google account with the same email.');
+          return;
+        }
+        // The vendored supabase-js linkIdentity only does the redirect flow, which
+        // needs a Google client secret. With the emails matching and verified,
+        // Supabase's automatic linking attaches the identity via the same
+        // pop-up sign-in, so the account gains Google without a secret.
+        store.sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: nonce }).then(function (r) {
+          if (r.error) {
+            if (/provider is not enabled|unsupported provider/i.test(r.error.message)) { toast('Google sign-in isn\u2019t switched on yet.'); return; }
+            if (/verified|verification/i.test(r.error.message)) { toast('Your email isn\u2019t verified yet. Verify it first, then connect Google.'); return; }
+            toast(otpErr(r.error) || r.error.message); return;
+          }
+          var linked = (r.data && r.data.user && r.data.user.identities || []).some(function (i) { return i.provider === 'google'; });
+          if (!linked) { toast('Google didn\u2019t connect \u2014 the emails must match.'); return; }
+          store.google = gmail || store.google;
+          toast('Google connected');
+          closeSheet(); render();
+        }).catch(function () { toast('Could not connect Google. Try again.'); });
+      }, {}).catch(function () { toast('Could not load Google sign-in.'); });
+    }
+    var un = $('#gunlink', el);
+    if (un) un.addEventListener('click', function () {
+      store.sb.auth.getUserIdentities().then(function (r) {
+        if (r.error) { toast(r.error.message); return; }
+        var g = (r.data.identities || []).filter(function (i) { return i.provider === 'google'; })[0];
+        if (!g) { store.google = null; closeSheet(); render(); return; }
+        var others = (r.data.identities || []).filter(function (i) { return i.provider !== 'google'; });
+        // Email-code accounts in 20bucks have no password identity, so Google
+        // being the only identity is normal: the email code still signs in,
+        // because Supabase keeps the email as a magic-link/OTP way in.
+        if (!others.length && !confirm('Google is the only identity on this account. Your email code will still work (Supabase keeps it). Disconnect anyway?')) return;
+        store.sb.auth.unlinkIdentity({ identity: g }).then(function (r2) {
+          if (r2.error) { toast(r2.error.message); return; }
+          store.google = null; toast('Google disconnected'); closeSheet(); render();
+        });
+      });
+    });
+  });
+}
+
 function basisSheet() {
   var body = '<div class="seg" id="bs"><button data-b="cash" aria-pressed="' + cashBasis() + '">Cash basis</button><button data-b="balance" aria-pressed="' + !cashBasis() + '">Count balances</button></div>' +
     '<p style="margin-top:4px"><b>Cash basis</b> treats brokers like your prop firm and poker accounts. Money you put in is money gone, money you take out is money back, and the gain or loss is the difference. Anything still in the account is paper value: shown for reference, never added to your money.</p>' +
@@ -4117,7 +4129,7 @@ function convertSheet() {
   S.meta.accounts.forEach(function (a) { (a.coins || []).forEach(function (c) { var x = String(c.sym).toUpperCase(); if (opts.indexOf(x) < 0) opts.push(x); }); });
   opts = opts.filter(function (x, i) { return opts.indexOf(x) === i; });
   var body = '<div class="conv"><div class="amt-in"><span id="cvsym">S$</span><input id="cva" inputmode="decimal" placeholder="0.00" aria-label="Amount"></div>' +
-    '<label class="f" for="cvf">From</label><select class="t" id="cvf">' + opts.map(function (x) { return '<option value="' + esc(x) + '">' + (x === 'SGD' ? 'S$ Singapore dollar' : x === 'USD' ? 'US$ US dollar' : esc(x)) + '</option>'; }).join('') + '</select>' +
+    '<label class="f" for="cvf">From</label><select class="t" id="cvf">' + opts.map(function (x) { return '<option value="' + x + '">' + (x === 'SGD' ? 'S$ Singapore dollar' : x === 'USD' ? 'US$ US dollar' : x) + '</option>'; }).join('') + '</select>' +
     '<div class="panel conv-out" id="cvo"></div><p class="note" id="cvn"></p><div class="actions"><button class="btn ghost" id="cvr">Refresh rates</button></div></div>';
   openSheet('Convert', body, function (el) {
     function sgdOf(a, from) { return from === 'SGD' ? a : from === 'USD' ? (usdRate() ? a * usdRate() : null) : (coinPrice(from) != null ? a * coinPrice(from) : null); }
@@ -4125,7 +4137,7 @@ function convertSheet() {
       var a = calcVal($('#cva', el).value), from = $('#cvf', el).value, sg = a > 0 ? sgdOf(a, from) : null;
       $('#cvsym', el).textContent = from === 'SGD' ? 'S$' : from === 'USD' ? 'US$' : from;
       $('#cvo', el).innerHTML = '<div class="kv"><span>In S$</span><span><b>' + (sg == null ? '\u2013' : money(sg)) + '</b></span><span>In US$</span><span><b>' + (sg == null || !usdRate() ? '\u2013' : usd(sg / usdRate())) + '</b></span>' +
-        (from !== 'SGD' && from !== 'USD' && coinPrice(from) != null ? '<span>1 ' + esc(from) + '</span><span>' + money(coinPrice(from)) + '</span>' : '') + '</div>';
+        (from !== 'SGD' && from !== 'USD' && coinPrice(from) != null ? '<span>1 ' + from + '</span><span>' + money(coinPrice(from)) + '</span>' : '') + '</div>';
       $('#cvn', el).textContent = (coinPrice(from) == null && from !== 'SGD' && from !== 'USD') ? 'No live price for ' + from + ' yet. Try Refresh rates.' : ratesNote() + '.';
     }
     $('#cva', el).addEventListener('input', draw); $('#cvf', el).addEventListener('change', draw);
@@ -4200,7 +4212,7 @@ function gapSheet(prov, gap) {
     return '<div class="row"><div class="l"><b>' + esc(c.title) + ' <span class="gapamt">+' + money(c.amt) + '</span></b><span style="white-space:normal">' + esc(c.sub) + '</span></div><button class="chip sm" data-gap="' + ix + '">' + esc(c.act) + '</button></div>';
   }
   var body = '<div class="kv" style="margin-top:0"><span>' + esc(prov) + ' says you owe</span><span>' + money(gap + laterOwed(prov)) + '</span><span>Your ledger adds up to</span><span>' + money(laterOwed(prov)) + '</span><span><b>Unexplained</b></span><span class="neg"><b>' + money(gap) + '</b></span></div>' +
-    (G.exact ? '<div class="banner" style="margin:6px 0 14px"><b>' + G.exact.length + ' of these add up to exactly ' + money(gap) + '</b><span>' + G.exact.map(function (c) { return esc(c.title) + ' ' + money(c.amt); }).join(' + ') + '. Check these first: with many rides an exact match can be coincidence.</span></div>' : '') +
+    (G.exact ? '<div class="banner" style="margin:6px 0 14px"><b>' + G.exact.length + ' of these add up to exactly ' + money(gap) + '</b><span>' + G.exact.map(function (c) { return c.title + ' ' + money(c.amt); }).join(' + ') + '. Check these first: with many rides an exact match can be coincidence.</span></div>' : '') +
     (strong.length ? '<label class="f">Most likely</label><div class="panel">' + strong.map(row).join('') + '</div><p class="note">Together these account for ' + money(explained) + ' of the ' + money(gap) + '.' + (explained < gap - 0.01 ? ' The remaining ' + money(r2(gap - explained)) + ' is probably something not logged at all, or among the purchases below.' : '') + '</p>' : '') +
     (moved.length ? '<label class="f">Paid another way, but look like ' + esc(prov.split(' ')[0]) + '</label><div class="panel">' + moved.slice(0, 25).map(row).join('') + '</div>' : '') +
     (!G.list.length ? '<div class="empty">Nothing in the ledger explains it. Check the provider\u2019s app for a purchase, fee or late charge that was never logged, and add it here.</div>' : '') +
@@ -4917,8 +4929,7 @@ function lumpSheet(payId) {
     $('#ldel', el).addEventListener('click', function () {
       snapshot();
       parts.forEach(function (x) { x.b.payments = x.b.payments.filter(function (q) { return q.payId !== payId; }); });
-      // the fee sits on one bill only — the one it was recorded against — so the others keep theirs
-      if (fee) { parts.forEach(function (x) { if ((x.b.feeTxs || []).indexOf(fee.id) > -1 || x.b.feeTx === fee.id) x.b.fee = r2(Math.max(0, (x.b.fee || 0) - fee.amt)); x.b.feeTxs = (x.b.feeTxs || []).filter(function (id) { return id !== fee.id; }); }); removeTx(fee); }
+      if (fee) { parts.forEach(function (x) { x.b.fee = r2(Math.max(0, (x.b.fee || 0) - fee.amt)); x.b.feeTxs = (x.b.feeTxs || []).filter(function (id) { return id !== fee.id; }); }); removeTx(fee); }
       mark('bills'); closeSheet(); render(); toastUndo('Payment deleted');
     });
   });
@@ -5918,6 +5929,7 @@ function onClick(e) {
     else if (a === 'csvinv') exportCsv('inv');
     else if (a === 'cleanup') csvImportSheet();
     else if (a === 'restore') restoreSheet();
+    else if (a === 'gsignin') googleSheet();
     else if (a === 'signout') {
       var unsynced = Object.keys(store.dirty).length;
       if (unsynced && !confirm(unsynced + ' change' + (unsynced > 1 ? 's haven’t' : ' hasn’t') + ' reached the cloud yet and will be lost. Sign out anyway?')) return;
@@ -5941,8 +5953,7 @@ function boot() {
   loadLocal();
   document.addEventListener('click', onClick);
   var q = new URLSearchParams(location.search);
-  // the tab from the URL ends up in markup, so only a tab the app actually has is accepted
-  var qt = q.get('tab'); if (['home', 'activity', 'insights', 'ask', 'pnl', 'more'].indexOf(qt) > -1) UI.tab = qt;
+  if (q.get('tab')) UI.tab = q.get('tab');
   render();
   if (q.get('add')) txSheet();
   connect();
