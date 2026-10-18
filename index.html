@@ -22,8 +22,8 @@
 <script src="config.js"></script>
 <!-- The sign-in library is vendored so a CDN hiccup can never break the login screen. -->
 <script src="vendor/supabase-js.min.js"></script>
-<!-- Charts too: from a CDN they went missing whenever it was slow, blocked or offline. -->
-<script src="vendor/chart.umd.min.js"></script>
+<!-- Chart.js is vendored for the same reason, and loaded on first chart draw by app.js (ensureChart), not upfront. -->
+
 <script src="js/mm-import.js"></script>
 <script src="js/dates.js"></script>
 <script src="js/google-signin.js"></script>

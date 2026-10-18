@@ -3987,8 +3987,21 @@ var CROSSHAIR = {
     ctx.setLineDash([3, 3]); ctx.stroke(); ctx.restore();
   }
 };
+// Chart.js is ~200 KB and no page needs it until a chart is drawn: fetched on first use, not on load.
+var CHART_JS = { state: 'idle', queue: [] };
+function ensureChart(cb) {
+  if (window.Chart || CHART_JS.state === 'failed') return cb();
+  if (CHART_JS.state === 'loading') { CHART_JS.queue.push(cb); return; }
+  CHART_JS.state = 'loading'; CHART_JS.queue.push(cb);
+  var s = document.createElement('script');
+  s.src = 'vendor/chart.umd.min.js';
+  s.onload = function () { CHART_JS.state = 'ready'; CHART_JS.queue.splice(0).forEach(function (f) { f(); }); };
+  s.onerror = function () { CHART_JS.state = 'failed'; CHART_JS.queue.splice(0).forEach(function (f) { f(); }); };
+  document.head.appendChild(s);
+}
 function drawWalletChart(el, M, start, end, rel) {
-  var cv = $('#wch', el); if (!cv || !window.Chart) return;
+  var cv = $('#wch', el); if (!cv) return;
+  ensureChart(function () { if (!window.Chart) return;
   var days = [], d = start; while (d <= end && days.length < 800) { days.push(d); d = addDays(d, 1); }
   // every day is a point, so touching anywhere shows that exact day
   var cs = getComputedStyle(document.documentElement), ink = cs.getPropertyValue('--accent').trim() || '#2f5cff', muted = cs.getPropertyValue('--muted').trim() || '#888';
@@ -4014,6 +4027,7 @@ function drawWalletChart(el, M, start, end, rel) {
       scales: { x: { grid: { display: false }, ticks: { color: muted, maxTicksLimit: 5, maxRotation: 0, autoSkip: true } },
         y: { grid: { color: muted + '22' }, ticks: { color: muted, maxTicksLimit: 4, callback: function (v) { return '$' + Math.round(v); } } } } },
     plugins: [CROSSHAIR]
+  });
   });
 }
 function walletSheet(n) {
@@ -5471,9 +5485,11 @@ function renderInsights() {
 function drawInsights() {
   charts.forEach(function (c) { c.destroy(); }); charts = [];
   var v = UI.insView || 'trends';
-  if (!window.Chart) { document.querySelectorAll('.cw, .tr-chart').forEach(function (w) { w.innerHTML = '<p class="note">Charts need a connection to load.</p>'; }); return; }
-  Chart.defaults.font.family = '"Geist", system-ui, sans-serif'; Chart.defaults.font.size = 11; Chart.defaults.color = cssv('--muted');
-  if (v === 'overview') drawOverview(); else if (v === 'lens') drawLens(); else drawTrendChart();
+  ensureChart(function () {
+    if (!window.Chart) { document.querySelectorAll('.cw, .tr-chart').forEach(function (w) { w.innerHTML = '<p class="note">Charts need a connection to load.</p>'; }); return; }
+    Chart.defaults.font.family = '"Geist", system-ui, sans-serif'; Chart.defaults.font.size = 11; Chart.defaults.color = cssv('--muted');
+    if (v === 'overview') drawOverview(); else if (v === 'lens') drawLens(); else drawTrendChart();
+  });
 }
 var REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 var MONTHS_FULL = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -6035,6 +6051,23 @@ function boot() {
   applyTheme();
   loadLocal();
   document.addEventListener('click', onClick);
+  // Desktop shortcuts: n for a new entry, / for search. Wired only on fine pointers so phone
+  // keyboards never trigger them; a sheet is open, or a field has focus, the keys belong to it.
+  if (matchMedia('(hover: hover) and (pointer: fine)').matches) {
+    document.addEventListener('keydown', function (e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (dlg && dlg.open) return;
+      var el = e.target, tag = (el && el.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
+      if (e.key === '/') {
+        e.preventDefault();
+        if (UI.tab !== 'home') { UI.tab = 'home'; render(); }
+        var q = $('#q'); if (q) q.focus();
+      } else if (e.key === 'n' || e.key === 'N') {
+        e.preventDefault(); txSheet();
+      }
+    });
+  }
   var q = new URLSearchParams(location.search);
   if (q.get('tab')) UI.tab = q.get('tab');
   render();
