@@ -15,6 +15,18 @@ A personal finance tracker that installs to your phone like a native app. Track 
 </p>
 <p align="center"><sub>Month overview, activity feed, insights, and light mode. Shown with demo data.</sub></p>
 
+## At a glance
+
+| | |
+| --- | --- |
+| **Live** | https://20bucks.ethantam.dev |
+| **Hosting** | Netlify site `moneyet` (plain static files, no build) |
+| **Back end** | Supabase (Postgres, Auth) plus the `ledger-ai` Edge Function |
+| **Run locally** | Serve the repository root with any static server, for example `npx serve .`, then open the printed address. `npm test` runs the tests. |
+| **App settings** | `config.js`: `supabaseUrl`, `supabaseAnonKey` (public) |
+| **Edge Function secrets** | `MISTRAL_API_KEY` or `ANTHROPIC_API_KEY`, `AI_PROVIDER`, `AI_ALLOWED_IDS`, optional `MISTRAL_MODEL`, `ANTHROPIC_MODEL` |
+| **Source** | [gitlab.com/eatentam/moneytracker](https://gitlab.com/eatentam/moneytracker) (moved from GitHub on 17 Oct 2026) |
+
 ## Features
 
 - **Spending and budgets.** Categorised transactions, a monthly view that compares each category with what you usually spend by this day, and drill-down by category.
@@ -36,7 +48,7 @@ A personal finance tracker that installs to your phone like a native app. Track 
 | Front end | Single-page app in vanilla HTML, CSS and JavaScript; installable PWA with a service worker |
 | Back end | Supabase (Postgres, Auth, row level security) |
 | AI | Supabase Edge Function (`supabase/functions/ledger-ai`) calling Mistral or Anthropic Claude |
-| Hosting | Netlify (security headers and CSP in `netlify.toml`) or GitHub Pages |
+| Hosting | Netlify (security headers and CSP in `netlify.toml`), or any static host |
 | Email | Resend SMTP for sign-in codes |
 
 ## Project structure
@@ -93,7 +105,7 @@ Needs Node 18 or newer and nothing else: no install step, no build. The tests co
 
 **Netlify (recommended):** connect the repository. `netlify.toml` publishes only the app files and applies the security headers. Update the Supabase URL in the Content-Security-Policy `connect-src` to match your project.
 
-**GitHub Pages:** **Settings → Pages → Deploy from a branch → `main` / root.** The app will be at `https://<username>.github.io/<repo>/`.
+**Other static hosts:** there is no build step, so any static host (Cloudflare Pages, GitLab Pages and so on) can serve the repository root. Copy the headers from `netlify.toml` into that host's own config.
 
 A public repository only exposes the code. Your data lives in Supabase behind row level security, and `.gitignore` blocks backups and spreadsheets from being committed.
 
