@@ -1,9 +1,10 @@
 // 20bucks AI: reviews new entries for likely mistakes, answers questions about your spending,
 // and proposes changes from the Ask chat. A proposal is only data: the app shows it with an
 // Apply button and nothing in the ledger changes until the owner taps it.
-// The API key lives here as a Supabase secret, never in the app. Only accounts on the
-// AI_ALLOWED_IDS allowlist can call it — sign-in creates an account for anyone, so
-// "any signed-in user" would let a stranger spend the key.
+// The API key lives here as a Supabase secret, never in the app. While OPEN_TO_ALL is true
+// any signed-in account can use it (each capped at CALL_LIMIT calls an hour); set it to false
+// to allow only the accounts on the AI_ALLOWED_IDS allowlist, since sign-in creates an
+// account for anyone and an open function lets a stranger spend the key.
 //
 // Secrets (Supabase dashboard -> Edge Functions -> Secrets):
 //   MISTRAL_API_KEY     to use Mistral (the default when it is set)
@@ -11,9 +12,9 @@
 //   AI_PROVIDER         optional: "mistral" or "anthropic", to choose when both keys are set
 //   MISTRAL_MODEL       optional, default mistral-small-latest
 //   ANTHROPIC_MODEL     optional, default claude-opus-5-5
-//   AI_ALLOWED_IDS      comma-separated user ids allowed to call this function (Supabase
-//                       dashboard -> Authentication -> Users -> copy the UUID). Required:
-//                       until it is set, the function answers nobody.
+//   AI_ALLOWED_IDS      comma-separated user ids allowed to call this function when
+//                       OPEN_TO_ALL is false (Supabase dashboard -> Authentication -> Users
+//                       -> copy the UUID); with it unset the function then answers nobody.
 // Exact versions, each at least two weeks old when pinned: a fresh release can carry a
 // compromised package, and an unpinned import pulls whatever was published that hour.
 import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
@@ -272,6 +273,8 @@ function takeChanges(text: string, L: { ids: Set<string>; cats: Map<string, stri
 // so one account cannot hammer it. Kept in memory, so it is per isolate and resets on a cold start.
 const CALLS = new Map<string, { n: number; reset: number }>();
 const CALL_LIMIT = 120, CALL_WINDOW_MS = 3600000;
+// The owner's choice for now (2026-10-21): every signed-in account may use the assistant.
+const OPEN_TO_ALL = true;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
@@ -283,11 +286,13 @@ Deno.serve(async (req) => {
   const { data: { user } } = await sb.auth.getUser();
   if (!user) return json({ error: "Sign in first." }, 401);
 
-  // Only the owner may spend the API key: anyone can create an account on the project,
-  // so "any signed-in user" is not a gate. The allowlist is.
-  const allowed = (Deno.env.get("AI_ALLOWED_IDS") || "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (!allowed.length) return json({ error: "The AI assistant is not enabled. The owner can allow an account by setting the AI_ALLOWED_IDS secret (see the README)." }, 403);
-  if (!allowed.includes(user.id)) return json({ error: "The AI assistant is not enabled for this account." }, 403);
+  // With OPEN_TO_ALL off, only the allowlist may spend the API key: anyone can create an
+  // account on the project, so "any signed-in user" is not a gate.
+  if (!OPEN_TO_ALL) {
+    const allowed = (Deno.env.get("AI_ALLOWED_IDS") || "").split(",").map((s) => s.trim()).filter(Boolean);
+    if (!allowed.length) return json({ error: "The AI assistant is not enabled. The owner can allow an account by setting the AI_ALLOWED_IDS secret (see the README)." }, 403);
+    if (!allowed.includes(user.id)) return json({ error: "The AI assistant is not enabled for this account." }, 403);
+  }
 
   const now = Date.now();
   const rec = CALLS.get(user.id);

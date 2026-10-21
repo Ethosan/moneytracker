@@ -127,7 +127,7 @@ npx supabase login
 npx supabase functions deploy ledger-ai --project-ref <project-ref> --use-api
 ```
 
-Then in **Supabase → Edge Functions → Secrets** add `MISTRAL_API_KEY`, or `ANTHROPIC_API_KEY` with `AI_PROVIDER=anthropic`. Optional overrides: `MISTRAL_MODEL`, `ANTHROPIC_MODEL`. Also add `AI_ALLOWED_IDS`: your user id from **Authentication → Users** (the UUID), comma-separated for a small team. The function answers nobody until it is set — sign-in lets anyone create an account, so without the allowlist a stranger could spend your API key. Set a monthly spending limit with your AI provider as a safety net.
+Then in **Supabase → Edge Functions → Secrets** add `MISTRAL_API_KEY`, or `ANTHROPIC_API_KEY` with `AI_PROVIDER=anthropic`. Optional overrides: `MISTRAL_MODEL`, `ANTHROPIC_MODEL`. Right now `OPEN_TO_ALL` at the top of the function is `true`, so every signed-in account can use the assistant (up to 120 calls an hour each). Sign-in lets anyone create an account, so to keep the API key to yourself set it to `false` and add `AI_ALLOWED_IDS`: your user id from **Authentication → Users** (the UUID), comma-separated for a small team. Set a monthly spending limit with your AI provider as a safety net.
 
 ## Custom domain (optional)
 
