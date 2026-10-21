@@ -14,8 +14,10 @@
 //   AI_ALLOWED_IDS      comma-separated user ids allowed to call this function (Supabase
 //                       dashboard -> Authentication -> Users -> copy the UUID). Required:
 //                       until it is set, the function answers nobody.
-import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2";
-import Anthropic from "npm:@anthropic-ai/sdk";
+// Exact versions, each at least two weeks old when pinned: a fresh release can carry a
+// compromised package, and an unpinned import pulls whatever was published that hour.
+import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
+import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
