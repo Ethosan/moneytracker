@@ -1161,6 +1161,8 @@ function aiContext() {
 // ---------- Ask: a chat about your money, in a tab of its own ----------
 // Conversations sync like everything else (the 'chats' document). Each question sends the
 // full-history summary from aiContext() plus the last few messages of that conversation.
+// An answer can carry proposed changes (add, edit or delete a transaction). They are kept on
+// the message and shown as cards; nothing in the ledger changes until you tap Apply.
 var ASK_STARTERS = ['How much have I spent this month, and on what?', 'Why was last month more expensive?', 'Where could I cut $100 a month?', 'How much did I spend on food this month?', 'Are my subscriptions worth it?', 'How much should I save each month to reach $100k?'];
 function chatList() { return (S.chats || []).slice().sort(function (a, b) { return (b.u || b.t || '') > (a.u || a.t || '') ? 1 : -1; }); }
 function chatById(id) { return (S.chats || []).filter(function (c) { return c.id === id; })[0] || null; }
@@ -1249,7 +1251,7 @@ function renderAsk() {
   var h = '<header class="top"><h1>Ask</h1>' + hdRight() + '</header>';
   if (!aiOn() || store.mode !== 'cloud') {
     return h + '<section class="blk ask-off"><div class="panel"><div class="ask-mark" aria-hidden="true">' + ICON.ask + '</div>' +
-      '<b>Ask anything about your money</b><p>Questions like "why was last month expensive?" are answered from your full history. Nothing in your data changes from here.</p>' +
+      '<b>Ask anything about your money</b><p>Questions like "why was last month expensive?" are answered from your full history. It can log or fix entries for you too, and nothing changes until you tap Apply.</p>' +
       (store.mode !== 'cloud' ? '<p class="neg">This needs sync: sign in with your Supabase account first.</p>' : '<button class="btn" data-act="ai">Turn on the AI assistant</button>') +
       '</div></section>';
   }
@@ -1264,14 +1266,14 @@ function renderAsk() {
   var main = '<div class="ask-main">';
   if (!cur) {
     main += '<div class="ask-hello"><div class="ask-mark" aria-hidden="true">' + ICON.ask + '</div><h2>What would you like to know?</h2>' +
-      '<p>Answers come from your full history. Nothing in your data changes from here.</p>' +
+      '<p>Answers come from your full history. Ask it to log or fix an entry and it shows the change first: nothing changes until you tap Apply.</p>' +
       '<div class="ask-starters">' + ASK_STARTERS.map(function (q) { return '<button class="chip" data-askq="' + esc(q) + '">' + esc(q) + '</button>'; }).join('') + '</div></div>';
   } else {
     main += '<div class="ask-chat-hd"><button class="ask-back" data-act="chatback" aria-label="All conversations">\u2039</button><b>' + esc(cur.title || 'Conversation') + '</b></div>' +
       '<div class="ask-msgs" role="log" aria-live="polite">' + (cur.msgs || []).map(function (m, i) {
         if (m.role === 'user') return '<div class="ask-msg me"><div class="bubble">' + esc(m.content).replace(/\n/g, '<br>') + '</div><time>' + chatWhen(m.at) + '</time></div>';
         if (m.role === 'error') return '<div class="ask-msg err"><div class="bubble"><b>That didn\u2019t go through.</b> ' + esc(m.content) + ' <button class="linkbtn" data-askretry="' + i + '">Try again</button></div></div>';
-        return '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div><div class="bubble">' + mdLite(m.content) + '</div><time>' + chatWhen(m.at) + '</time></div></div>';
+        return '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div><div class="bubble">' + mdLite(m.content) + '</div>' + chgCard(m, i) + '<time>' + chatWhen(m.at) + '</time></div></div>';
       }).join('') +
       (busy ? '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div class="bubble typing" aria-label="Thinking"><i></i><i></i><i></i></div></div>' : '') + '</div>';
   }
@@ -1294,14 +1296,16 @@ function askSend(text) {
   if (!aiReady()) { toast('Turn on the AI assistant first'); return; }
   var now = new Date().toISOString(), c = UI.chatId && chatById(UI.chatId);
   if (!c) { c = { id: uid(), title: q.length > 52 ? q.slice(0, 51) + '\u2026' : q, t: now, msgs: [] }; S.chats.push(c); UI.chatId = c.id; }
-  var hist = (c.msgs || []).filter(function (m) { return m.role === 'user' || m.role === 'assistant'; }).slice(-10).map(function (m) { return { role: m.role, content: m.content }; });
+  var hist = (c.msgs || []).filter(function (m) { return m.role === 'user' || m.role === 'assistant'; }).slice(-10).map(function (m) { return { role: m.role, content: m.content + chgRecap(m) }; });
   c.msgs.push({ role: 'user', content: q, at: now }); c.u = now;
   UI.askDraft = ''; UI.askBusy = c.id;
   // keep the history bounded: 50 conversations, 60 messages each
   S.chats = chatList().slice(0, 50); S.chats.forEach(function (x) { if (x.msgs && x.msgs.length > 60) x.msgs = x.msgs.slice(-60); });
   mark('chats'); render(); askScroll();
   aiCall({ action: 'ask', question: q, context: aiContext(), history: hist }).then(function (r) {
-    c.msgs.push({ role: 'assistant', content: r.answer || '(no answer)', at: new Date().toISOString() });
+    var am = { role: 'assistant', content: r.answer || '(no answer)', at: new Date().toISOString() }, ch = chgTake(r.changes);
+    if (ch.length) am.changes = ch;
+    c.msgs.push(am);
     if (r.model) S.meta.ai.model = r.model;
   }, function (e) {
     c.msgs.push({ role: 'error', content: String(e.message || e), at: new Date().toISOString() });
@@ -1309,6 +1313,79 @@ function askSend(text) {
     UI.askBusy = null; c.u = new Date().toISOString(); mark('chats');
     if (UI.tab === 'ask') { render(); askScroll(); var t = $('#askq'); if (t && !isTouch()) t.focus(); }
   });
+}
+// Proposed changes from an answer. Each keeps what the entry looked like when it was proposed
+// (was), so Apply refuses if the entry has been edited or deleted since. st: new, done, skip, gone.
+function chgSig(t) { return { d: t.d, t: t.t, amt: t.amt, cat: t.cat || '', note: t.note || '' }; }
+function chgTake(list) {
+  return (Array.isArray(list) ? list : []).slice(0, 20).map(function (x) {
+    var c = { op: x.op, st: 'new' };
+    ['id', 'd', 't', 'amt', 'cat', 'note', 'acct', 'why'].forEach(function (k) { if (x[k] != null) c[k] = x[k]; });
+    if (c.op === 'add') { if (!c.d) c.d = today(); if (!c.t) c.t = (catObj(c.cat) || {}).type || 'exp'; }
+    else { var t = findTx(c.id); if (t) c.was = chgSig(t); else c.st = 'gone'; }
+    return c;
+  }).filter(function (c) { return c.op === 'add' || c.op === 'edit' || c.op === 'delete'; });
+}
+function chgName(w) { return w.note || plain(w.cat) || 'entry'; }
+function chgText(c) {
+  if (c.op === 'add') return 'Add ' + (c.t === 'inc' ? 'income ' : '') + '<b>' + money(c.amt) + '</b> ' + esc(c.note || '') + ' · ' + esc(plain(c.cat)) + ' · ' + sugDay(c.d) + (c.acct ? ' · ' + esc(c.acct) : '');
+  var w = c.was || {}, what = '<b>' + esc(chgName(w)) + '</b>' + (w.d ? ' on ' + sugDay(w.d) : '');
+  if (c.op === 'delete') return 'Delete ' + what + (w.amt ? ', ' + money(w.amt) : '');
+  var d = [];
+  if (c.amt != null && c.amt !== w.amt) d.push(money(w.amt) + ' → <b>' + money(c.amt) + '</b>');
+  if (c.cat != null && c.cat !== w.cat) d.push(esc(plain(w.cat) || 'no category') + ' → <b>' + esc(plain(c.cat)) + '</b>');
+  if (c.t != null && c.t !== w.t) d.push(c.t === 'inc' ? 'spending → <b>income</b>' : 'income → <b>spending</b>');
+  if (c.d != null && c.d !== w.d) d.push('date → <b>' + sugDay(c.d) + '</b>');
+  if (c.note != null && c.note !== w.note) d.push('note → <b>' + esc(c.note || 'none') + '</b>');
+  if (c.acct != null) d.push('paid with → <b>' + esc(c.acct) + '</b>');
+  return 'Change ' + what + ': ' + (d.join(', ') || 'no difference');
+}
+function chgCard(m, i) {
+  if (!m.changes || !m.changes.length) return '';
+  var open = m.changes.filter(function (c) { return c.st === 'new'; }).length;
+  return '<div class="ask-chg" role="group" aria-label="Proposed changes"><div class="ask-chg-hd"><b>' + (m.changes.length === 1 ? 'Proposed change' : m.changes.length + ' proposed changes') + '</b>' +
+    (open > 1 ? '<button class="chip sm" data-chgall="' + i + '">Apply all ' + open + '</button>' : '') + '</div>' +
+    m.changes.map(function (c, k) {
+      var st = c.st === 'done' ? '<span class="chg-st ok">Applied</span>' : c.st === 'skip' ? '<span class="chg-st">Skipped</span>'
+        : c.st === 'gone' ? '<span class="chg-st">Not applied: that entry was changed or deleted since</span>'
+        : '<button class="chip" data-chg="' + i + ':' + k + '" aria-pressed="true">Apply</button><button class="chip" data-chgskip="' + i + ':' + k + '">Skip</button>';
+      return '<div class="chg' + (c.st !== 'new' ? ' settled' : '') + '"><p>' + chgText(c) + (c.why ? '<span class="chg-why">' + esc(c.why) + '</span>' : '') + '</p><div class="chg-act">' + st + '</div></div>';
+    }).join('') + '</div>';
+}
+// One change, through the same path the Suggestions sheet uses. False when it no longer fits.
+function chgApply(c) {
+  if (c.op === 'add') {
+    var cat = catObj(c.cat); if (!cat || !(c.amt > 0)) return false;
+    var t = { id: uid(), d: c.d || today(), t: c.t || cat.type || 'exp', amt: r2(c.amt), cat: c.cat, sub: '', note: c.note || '', tags: [], src: 'app' };
+    t.acct = c.acct && wallets().indexOf(c.acct) > -1 ? c.acct : defWallet();
+    ruleTags(t).forEach(function (g) { if (t.tags.indexOf(g) < 0) t.tags.push(g); });
+    var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
+    c.tid = t.id; return true;
+  }
+  var x = findTx(c.id), w = c.was;
+  if (!x || !w || JSON.stringify(chgSig(x)) !== JSON.stringify(w)) return false;
+  if (c.op === 'delete') { applyDoubt({ t: x, fix: { remove: true } }); return true; }
+  if (c.cat != null && !catObj(c.cat)) return false;
+  applyDoubt({ t: x, fix: { apply: function (y) {
+    ['d', 't', 'amt', 'cat', 'note'].forEach(function (k) { if (c[k] != null) y[k] = c[k]; });
+    if (c.acct != null && y.pm !== 'later' && wallets().indexOf(c.acct) > -1) y.acct = c.acct;
+  } } });
+  syncInstFee(x);
+  return true;
+}
+function chgRun(mi, ks) {
+  var cur = UI.chatId && chatById(UI.chatId), m = cur && cur.msgs[mi]; if (!m || !m.changes) return;
+  var ok = 0, bad = 0;
+  ks.forEach(function (k) { var c = m.changes[k]; if (!c || c.st !== 'new') return; if (chgApply(c)) { c.st = 'done'; ok++; } else { c.st = 'gone'; bad++; } });
+  mark('chats'); render();
+  if (ok) toastUndo(ok === 1 ? 'Applied the change' : 'Applied ' + ok + ' changes');
+  else if (bad) toast('That entry was changed or deleted since, so nothing was applied');
+}
+// What happened to an answer's proposals, for the model to see on the next question.
+function chgRecap(m) {
+  if (!m.changes || !m.changes.length) return '';
+  var n = { done: 0, skip: 0, gone: 0, new: 0 }; m.changes.forEach(function (c) { n[c.st] = (n[c.st] || 0) + 1; });
+  return '\n\n[Proposed changes: ' + n.done + ' applied by the owner, ' + n.skip + ' skipped, ' + n.gone + ' could not be applied, ' + n.new + ' not decided yet]';
 }
 
 // ---------- app lock: a PIN (and Face ID / fingerprint where the device has it), per device ----------
@@ -1466,7 +1543,7 @@ function lockSheet() {
 function aiSheet() {
   var ai = S.meta.ai || {}, on = aiOn(), cloud = store.mode === 'cloud';
   var who = ai.model ? esc(ai.model) : 'the AI';
-  var body = '<p style="margin-top:0">Once a week, new entries are sent to ' + who + ' to spot likely mistakes; anything it finds waits in Suggestions for you to approve. You can also ask it about your spending in the Ask tab. Only dates, amounts, categories and notes are sent.</p>' +
+  var body = '<p style="margin-top:0">Once a week, new entries are sent to ' + who + ' to spot likely mistakes; anything it finds waits in Suggestions for you to approve. You can also ask it about your spending in the Ask tab, or ask it to log or fix entries; it shows each change and only makes it when you tap Apply. Only dates, amounts, categories and notes are sent.</p>' +
     (!cloud ? '<p class="neg">This needs sync: sign in with your Supabase account first.</p>' : '') +
     '<div class="seg" id="aion"><button data-on="1" aria-pressed="' + on + '">On</button><button data-on="0" aria-pressed="' + !on + '">Off</button></div>' +
     (on ? '<div class="kv" style="margin-top:12px"><span>Last review</span><span>' + (ai.lastRun ? dayYear(ai.lastRun) : 'Not yet') + '</span>' +
@@ -5942,6 +6019,17 @@ function onClick(e) {
   if ((b = t.closest('[data-tagsheet]'))) { tagSheet(b.dataset.tagsheet); return; }
   if ((b = t.closest('[data-askq]'))) { askSend(b.dataset.askq); return; }
   if ((b = t.closest('[data-chat]'))) { UI.chatId = b.dataset.chat; UI.askDraft = ''; render(); return; }
+  if ((b = t.closest('[data-chg]'))) { var chp = b.dataset.chg.split(':'); chgRun(+chp[0], [+chp[1]]); return; }
+  if ((b = t.closest('[data-chgall]'))) {
+    var am = UI.chatId && chatById(UI.chatId), amm = am && am.msgs[+b.dataset.chgall];
+    if (amm && amm.changes) chgRun(+b.dataset.chgall, amm.changes.map(function (c, k) { return k; }));
+    return;
+  }
+  if ((b = t.closest('[data-chgskip]'))) {
+    var sp = b.dataset.chgskip.split(':'), sc = UI.chatId && chatById(UI.chatId), sm = sc && sc.msgs[+sp[0]], sx = sm && sm.changes && sm.changes[+sp[1]];
+    if (sx && sx.st === 'new') { sx.st = 'skip'; mark('chats'); render(); }
+    return;
+  }
   if ((b = t.closest('[data-chatdel]'))) {
     var gone = chatById(b.dataset.chatdel); if (!gone) return;
     S.chats = S.chats.filter(function (c) { return c.id !== gone.id; }); if (UI.chatId === gone.id) UI.chatId = null;

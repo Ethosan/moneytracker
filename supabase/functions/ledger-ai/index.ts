@@ -1,4 +1,6 @@
-// 20bucks AI: reviews new entries for likely mistakes and answers questions about your spending.
+// 20bucks AI: reviews new entries for likely mistakes, answers questions about your spending,
+// and proposes changes from the Ask chat. A proposal is only data: the app shows it with an
+// Apply button and nothing in the ledger changes until the owner taps it.
 // The API key lives here as a Supabase secret, never in the app. Only accounts on the
 // AI_ALLOWED_IDS allowlist can call it — sign-in creates an account for anyone, so
 // "any signed-in user" would let a stranger spend the key.
@@ -53,8 +55,24 @@ figure, and add one sentence of interpretation (is it worth it, what stands out)
 rows, use a markdown table (a header row, a |---| separator row, one row per item); the app renders it. You may
 show a formula in LaTeX, but only wrapped in double dollar signs ($$...$$) or backslash parentheses, never single
 $ signs around math, because amounts are written with $ (like $500). Never use LaTeX tabular.
-If the summary does not contain what is needed, say exactly what is missing instead of guessing. You cannot change
-any data; if a change would help, say what to change and the owner will do it in the app.`;
+If the summary does not contain what is needed, say exactly what is missing instead of guessing.
+
+You can propose changes to transactions: adding one, editing one, or deleting one. Propose them when the owner asks
+you to log, fix, move, recategorise or remove something, or when they agree to a fix you suggested. Do not propose
+changes they did not ask for. Nothing changes when you propose: the app shows each change with an Apply button and
+the owner decides, so say so in one short line ("Tap Apply to make the change.") and never claim it is already done.
+Write your answer first, then put the changes at the very end in a fenced block tagged changes, holding a JSON array:
+\`\`\`changes
+[{"op":"add","d":"2026-10-21","t":"exp","amt":12.5,"cat":"<exact category>","note":"Lunch","why":"short reason"},
+ {"op":"edit","id":"<id from the ledger>","amt":15,"cat":"<exact category>","note":"...","d":"YYYY-MM-DD","t":"exp","why":"..."},
+ {"op":"delete","id":"<id from the ledger>","why":"..."}]
+\`\`\`
+For add: d, t (exp or inc), amt and cat are required; note and acct (a wallet from the WALLETS list) are optional;
+d defaults to today. For edit: id, plus only the fields that change. For delete: id. Use ids exactly as they appear in
+the id column of the transactions; rows without an id cannot be changed from here (fees, investment mirrors,
+transfers), so tell the owner to change those in the app. Categories must be written exactly as in the CATEGORIES list,
+emoji included, and match the type (spending categories for exp, income categories for inc). At most 20 changes.
+Leave the block out entirely when there is nothing to change.`;
 
 function provider() {
   const want = (Deno.env.get("AI_PROVIDER") || "").toLowerCase();
@@ -115,7 +133,7 @@ function firstJson(text: string) {
 // The whole ledger, read here with the signed-in user's own session (row level security
 // limits it to their rows), so every question can use all of it without the phone sending it.
 // Exact totals are worked out here: language models are unreliable at adding up long lists.
-type Tx = { d: string; t: string; amt: number; cat?: string; sub?: string; note?: string; acct?: string; pm?: string; plp?: string; tags?: string[]; split?: { mine: number; person: string }; from?: string; to?: string; inst?: { n: number; fee?: number } };
+type Tx = { id?: string; feeOf?: string; propOf?: string; d: string; t: string; amt: number; cat?: string; sub?: string; note?: string; acct?: string; pm?: string; plp?: string; tags?: string[]; split?: { mine: number; person: string }; from?: string; to?: string; inst?: { n: number; fee?: number } };
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const plainCat = (c = "") => c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, "");
 // Budget for the whole prompt (rows + snapshot + history), at roughly 4 characters per
@@ -131,6 +149,10 @@ async function fullLedger(sb: SupabaseClient, rowLimit: number) {
     .sort((a: Tx, b: Tx) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
   const mine = (x: Tx) => (x.t === "exp" && x.split && x.split.mine >= 0 ? x.split.mine : x.amt);
   const meta = doc.meta || {}, out: string[] = [];
+  // what a proposed change may refer to: editable rows, the owner's categories and wallets
+  const ids = new Set(tx.filter((x) => x.id && !x.feeOf && !x.propOf && (x.t === "exp" || x.t === "inc")).map((x) => x.id as string));
+  const cats = new Map<string, string>(((meta.cats || []) as any[]).filter((c) => c && c.name).map((c) => [String(c.name), c.type === "inc" ? "inc" : "exp"]));
+  const accts = new Set<string>(((meta.accounts || []) as any[]).filter((a) => a && a.name && !a.liability).map((a) => String(a.name)));
 
   // exact totals
   const byMonth: Record<string, Record<string, number>> = {}, inMonth: Record<string, Record<string, number>> = {}, byYear: Record<string, { spent: number; income: number }> = {}, notes: Record<string, { n: number; s: number; cat: string }> = {};
@@ -193,15 +215,55 @@ async function fullLedger(sb: SupabaseClient, rowLimit: number) {
   }
   if ((meta.subs || []).length) rows.push("\nSUBSCRIPTIONS: " + meta.subs.map((s: any) => `${s.name} ${s.amt} every ${s.cycle || 1} month(s), next ${s.next || "?"}${s.active === false ? " (stopped)" : ""}`).join("; "));
   if ((meta.budgets || []).length) rows.push("BUDGETS (monthly): " + meta.budgets.map((b: any) => `${String(b.key).slice(4)} ${b.amt}`).join(", "));
-  rows.push("\nTRANSACTIONS, oldest first: date | type (exp spending, inc income, xfer transfer, adj adjustment) | amount | my share if split | category | subcategory | note | paid with | tags");
+  if (cats.size) rows.push("\nCATEGORIES (write them exactly like this in changes): " + [...cats].map(([n, t]) => `${n} (${t === "inc" ? "income" : "spending"})`).join(", "));
+  if (accts.size) rows.push("WALLETS: " + [...accts].join(", "));
+  rows.push("\nTRANSACTIONS, oldest first: date | type (exp spending, inc income, xfer transfer, adj adjustment) | amount | my share if split | category | subcategory | note | paid with | tags | id (blank: cannot be changed from the chat)");
   const txRows = tx.map((x) => [x.d, x.t, r2(x.amt), x.split ? `${r2(x.split.mine)} (rest owed by ${x.split.person})` : "", plainCat(x.cat), x.sub || "", x.note || "",
-    x.t === "xfer" ? `${x.from || "?"} -> ${x.to || "?"}` : x.pm === "later" ? `PayLater ${x.plp || "GrabPay Later"}${x.inst && x.inst.n > 1 ? " in " + x.inst.n + " instalments" : ""}` : x.acct || "", (x.tags || []).join("/")].join(" | "));
+    x.t === "xfer" ? `${x.from || "?"} -> ${x.to || "?"}` : x.pm === "later" ? `PayLater ${x.plp || "GrabPay Later"}${x.inst && x.inst.n > 1 ? " in " + x.inst.n + " instalments" : ""}` : x.acct || "", (x.tags || []).join("/"), x.id && ids.has(x.id) ? x.id : ""].join(" | "));
   // keep the newest rows when it's too much to send
   let used = out.join("\n").length + rows.join("\n").length, keepFrom = 0;
   for (let i = txRows.length - 1; i >= 0; i--) { used += txRows[i].length + 1; if (used > rowLimit) { keepFrom = i + 1; break; } }
   if (keepFrom > 0) rows.push(`(${keepFrom} older transactions before ${tx[keepFrom].d} are left out to fit; the totals above still include them)`);
   rows.push(...txRows.slice(keepFrom));
-  return out.join("\n") + "\n" + rows.join("\n");
+  return { text: out.join("\n") + "\n" + rows.join("\n"), ids, cats, accts };
+}
+
+// The changes block at the end of an answer, checked against the ledger: unknown ids, made-up
+// categories, impossible dates and amounts are dropped, so the app only ever shows real proposals.
+type Change = { op: "add" | "edit" | "delete"; id?: string; d?: string; t?: "exp" | "inc"; amt?: number; cat?: string; note?: string; acct?: string; why?: string };
+function takeChanges(text: string, L: { ids: Set<string>; cats: Map<string, string>; accts: Set<string> }) {
+  const m = text.match(/```changes\s*([\s\S]*?)```\s*$/) || text.match(/```changes\s*([\s\S]*)$/);
+  if (!m) return { answer: text.trim(), changes: [] as Change[] };
+  const answer = text.slice(0, m.index).trim();
+  let raw: unknown;
+  try { raw = JSON.parse(m[1].trim()); } catch { return { answer, changes: [] as Change[] }; }
+  const okDate = (d: unknown) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d + "T00:00:00Z")) && new Date(d + "T00:00:00Z").toISOString().slice(0, 10) === d;
+  const okAmt = (a: unknown) => typeof a === "number" && isFinite(a) && a > 0 && a < 1e7;
+  const str = (v: unknown, n: number) => String(v).replace(/\s+/g, " ").trim().slice(0, n);
+  const changes: Change[] = [];
+  for (const c of (Array.isArray(raw) ? raw : []).slice(0, 20) as any[]) {
+    if (!c || typeof c !== "object") continue;
+    const why = typeof c.why === "string" ? str(c.why, 200) : undefined;
+    if (c.op === "delete") { if (L.ids.has(c.id)) changes.push({ op: "delete", id: c.id, why }); continue; }
+    if (c.op !== "add" && c.op !== "edit") continue;
+    const o: Change = { op: c.op, why };
+    if (c.op === "edit") { if (!L.ids.has(c.id)) continue; o.id = c.id; }
+    if (c.t === "exp" || c.t === "inc") o.t = c.t;
+    if (c.d != null) { if (!okDate(c.d)) continue; o.d = c.d; }
+    if (c.amt != null) { if (!okAmt(c.amt)) continue; o.amt = Math.round(c.amt * 100) / 100; }
+    if (c.cat != null) { if (!L.cats.has(c.cat)) continue; o.cat = c.cat; }
+    if (typeof c.note === "string") o.note = str(c.note, 120);
+    if (typeof c.acct === "string" && L.accts.has(c.acct)) o.acct = c.acct;
+    if (o.op === "add") {
+      if (!o.amt || !o.cat) continue;
+      o.t = o.t || (L.cats.get(o.cat) as "exp" | "inc");
+    }
+    // a category of the other type would file spending as income or the reverse
+    if (o.cat && o.t && L.cats.get(o.cat) !== o.t) continue;
+    if (o.op === "edit" && o.t == null && o.d == null && o.amt == null && o.cat == null && o.note == null && o.acct == null) continue;
+    changes.push(o);
+  }
+  return { answer, changes };
 }
 
 // Best-effort per-user usage cap: the AI spends the owner's API credits and the app is shared,
@@ -289,13 +351,14 @@ Deno.serve(async (req) => {
       // rows get whatever is left of the prompt budget after the snapshot and history
       const ledger = await fullLedger(sb, Math.max(150000, PROMPT_BUDGET - context.length - history.reduce((a, m) => a + m.content.length, 0)));
       const messages: Turn[] = [
-        { role: "user", content: `My finances. Amounts in SGD.\n\nCURRENT SNAPSHOT (live balances and recent months, from the app):\n${context}\n\nFULL LEDGER:\n${ledger}` },
+        { role: "user", content: `My finances. Amounts in SGD.\n\nCURRENT SNAPSHOT (live balances and recent months, from the app):\n${context}\n\nFULL LEDGER:\n${ledger.text}` },
         { role: "assistant", content: "Got it. What would you like to know?" },
         ...history,
         { role: "user", content: question },
       ];
       const out = await complete(ASK_SYSTEM, messages, false);
-      return json({ answer: out.text.trim(), provider: provider(), model: out.model });
+      const { answer, changes } = takeChanges(out.text, ledger);
+      return json({ answer, changes, provider: provider(), model: out.model });
     }
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
