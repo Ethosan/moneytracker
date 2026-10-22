@@ -998,3 +998,13 @@ nav.tabs {
   box-shadow: none;
   border: 1px solid var(--line);
 }
+
+/* Google sign-in loading overlay: instant feedback on tap, before the popup appears */
+.gbtn{position:relative}
+.gbtn-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:10px;
+  background:var(--surface);border-radius:999px;font-size:14px;font-weight:600;color:var(--muted);
+  z-index:2;pointer-events:auto;animation:fadeIn 150ms var(--ease-out)}
+.gbtn-loading .spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--accent);
+  border-radius:50%;animation:spin 0.7s linear infinite;flex:none}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.gbtn-loading .spin{animation:spin 1.4s linear infinite}}

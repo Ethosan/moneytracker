@@ -653,6 +653,22 @@ document.addEventListener('keydown', function (e) {
   e.preventDefault(); if (e.shiftKey) redoLast(); else undoLast();
 });
 window.addEventListener('online', function () { if (store.mode === 'cloud') flush(); else if (store.mode === 'cloud-offline') connect(); });
+// Google sign-in button: instant loading overlay on tap, before the popup appears.
+// Google renders its button as an iframe, so the tap-to-popup gap feels like nothing happened.
+function gbtnLoading(container, initialText) {
+  var overlay = document.createElement('div');
+  overlay.className = 'gbtn-loading';
+  overlay.innerHTML = '<span class="spin"></span><span></span>';
+  overlay.lastChild.textContent = initialText;
+  container.appendChild(overlay);
+  var textEl = overlay.lastChild;
+  var dismissed = false;
+  var timer = setTimeout(dismiss, 15000); // safety: popup blocked or cancelled
+  function setText(t) { if (!dismissed) textEl.textContent = t; }
+  function dismiss() { if (dismissed) return; dismissed = true; clearTimeout(timer); overlay.remove(); }
+  return { setText: setText, dismiss: dismiss };
+}
+
 function renderLogin() {
   return '<main class=\"login\"><div class=\"hero\"><div class=\"lbl\">20bucks</div><div class=\"big\" style=\"font-size:40px\">Sign in</div><div class=\"sub\">Your data syncs to your own private account. No password needed.</div></div>' +
     '<div class=\"panel\" style=\"padding:16px\">' + ((window.LEDGER_CONFIG || {}).googleClientId ? '<div id=\"gbtn\" class=\"gbtn\"></div><div class=\"or\"><span>or use email</span></div>' : '') + '<label class=\"f\" for=\"em\">Email</label><input class=\"t\" id=\"em\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">' +
@@ -709,13 +725,19 @@ function wireLogin() {
   // Sign in with Google: one tap, no code to type. The email code stays as the fallback.
   var gbtn = $('#gbtn'), gid = (window.LEDGER_CONFIG || {}).googleClientId;
   if (gbtn && gid && window.GoogleSignIn && store.sb) {
+    var gLoad = null;
+    gbtn.addEventListener('pointerdown', function () {
+      if (gLoad) return;
+      gLoad = gbtnLoading(gbtn, 'Opening Google…');
+    });
     GoogleSignIn.mount(gbtn, gid, function (idToken, nonce) {
+      if (gLoad) gLoad.setText('Signing in…');
       say(''); si.disabled = true;
       store.sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: nonce }).then(function (r) {
-        if (r.error) { si.disabled = false; say(/provider is not enabled|unsupported provider/i.test(r.error.message) ? 'Google sign-in isn\'t switched on yet. Use the email code for now.' : otpErr(r.error)); return; }
+        if (r.error) { if (gLoad) { gLoad.dismiss(); gLoad = null; } si.disabled = false; say(/provider is not enabled|unsupported provider/i.test(r.error.message) ? 'Google sign-in isn\'t switched on yet. Use the email code for now.' : otpErr(r.error)); return; }
         si.textContent = 'Signing in…';
         connect();
-      }).catch(function () { si.disabled = false; say('Could not finish Google sign-in. Check your connection and try again.'); });
+      }).catch(function () { if (gLoad) { gLoad.dismiss(); gLoad = null; } si.disabled = false; say('Could not finish Google sign-in. Check your connection and try again.'); });
     }, { oneTap: true }).catch(function () { gbtn.hidden = true; var o = gbtn.nextElementSibling; if (o) o.hidden = true; });
   }
   em.addEventListener('input', function () { if (sentTo && em.value.trim() !== sentTo) reset(); });
@@ -3752,11 +3774,18 @@ function googleSheet() {
   openSheet('Google sign-in', body, function (el) {
     var conn = $('#gconn', el);
     if (conn) {
+      var gLoad2 = null;
+      conn.addEventListener('pointerdown', function () {
+        if (gLoad2) return;
+        gLoad2 = gbtnLoading(conn, 'Opening Google…');
+      });
       GoogleSignIn.mount(conn, gid, function (idToken, nonce) {
+        if (gLoad2) gLoad2.setText('Connecting…');
         var payload = null;
         try { payload = JSON.parse(atob(idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (e) { }
         var gmail = payload && payload.email;
         if (gmail && store.email && gmail.toLowerCase() !== store.email.toLowerCase()) {
+          if (gLoad2) { gLoad2.dismiss(); gLoad2 = null; }
           toast('That Google account (' + gmail + ') doesn\u2019t match this account\u2019s email (' + store.email + '). Use the Google account with the same email.');
           return;
         }
@@ -3766,16 +3795,17 @@ function googleSheet() {
         // pop-up sign-in, so the account gains Google without a secret.
         store.sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: nonce }).then(function (r) {
           if (r.error) {
+            if (gLoad2) { gLoad2.dismiss(); gLoad2 = null; }
             if (/provider is not enabled|unsupported provider/i.test(r.error.message)) { toast('Google sign-in isn\u2019t switched on yet.'); return; }
             if (/verified|verification/i.test(r.error.message)) { toast('Your email isn\u2019t verified yet. Verify it first, then connect Google.'); return; }
             toast(otpErr(r.error) || r.error.message); return;
           }
           var linked = (r.data && r.data.user && r.data.user.identities || []).some(function (i) { return i.provider === 'google'; });
-          if (!linked) { toast('Google didn\u2019t connect \u2014 the emails must match.'); return; }
+          if (!linked) { if (gLoad2) { gLoad2.dismiss(); gLoad2 = null; } toast('Google didn\u2019t connect \u2014 the emails must match.'); return; }
           store.google = gmail || store.google;
           toast('Google connected');
           closeSheet(); render();
-        }).catch(function () { toast('Could not connect Google. Try again.'); });
+        }).catch(function () { if (gLoad2) { gLoad2.dismiss(); gLoad2 = null; } toast('Could not connect Google. Try again.'); });
       }, {}).catch(function () { toast('Could not load Google sign-in.'); });
     }
     var un = $('#gunlink', el);
