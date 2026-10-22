@@ -4,7 +4,7 @@
   command = "rm -rf dist && mkdir dist && cp -r index.html privacy.html terms.html app.css js sw.js config.js manifest.webmanifest fonts icons vendor dist/"
   publish = "dist"
 
-# Always check for a new service worker and page, so an update reaches the phone on the next open.
+# Always check for a new service worker, page and styles, so an update reaches the phone on the next open.
 [[headers]]
   for = "/sw.js"
   [headers.values]
@@ -12,6 +12,11 @@
 
 [[headers]]
   for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache"
+
+[[headers]]
+  for = "/app.css"
   [headers.values]
     Cache-Control = "no-cache"
 
