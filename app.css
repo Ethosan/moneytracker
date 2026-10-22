@@ -5,7 +5,7 @@
   --gain:#08784F;--gain-soft:#E1F6EE;--loss:#C42A37;--loss-soft:#FDE8EA;--warn:#C27C0E;--rose:#E3337A;--rose-soft:#FDE6EF;
   --hero:#0D1017;--hero-ink:#FFFFFF;--hero-muted:#9AA3B5;
   --seg1:#2A55F5;--seg2:#6E8CFF;--seg3:#A9BBFF;--seg4:#CDD5E4;--seg5:#E1E6EF;
-  --shadow:0 1px 2px rgba(22,34,70,.05),0 8px 24px rgba(22,34,70,.06);
+  --shadow:0 1px 2px rgba(22,34,70,.04);
   box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
@@ -14,7 +14,7 @@
   --gain:#34D399;--gain-soft:#10281F;--loss:#FF6B75;--loss-soft:#33161A;--warn:#F5B547;--rose:#FF6FA8;--rose-soft:#351725;
   --hero:#1A2033;--hero-ink:#FFFFFF;--hero-muted:#A3ACC0;
   --seg1:#6C8CFF;--seg2:#4F6AD0;--seg3:#3A4D94;--seg4:#4A5571;--seg5:#3A4359;
-  --shadow:0 1px 2px rgba(0,0,0,.3);color-scheme:dark;}}
+  --shadow:0 1px 2px rgba(0,0,0,.2);color-scheme:dark;}}
 :root[data-theme="dark"]{
   --bg:#0A0C11;--surface:#141821;--sunk:#1C212C;--ink:#EEF1F7;--muted:#98A1B3;--line:#252B37;
   --accent:#6C8CFF;--accent-soft:#1B2447;--accent-ink:#0A0C11;--raised:#2C3446;
@@ -28,7 +28,7 @@ body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font:15px/1.
 .num,.big{font-variant-numeric:tabular-nums}
 button,input,select,textarea{font:inherit;color:inherit}
 button{cursor:pointer;-webkit-tap-highlight-color:transparent}
-button:active{transform:scale(.98)}
+button:active{transform:scale(.97)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 :focus:not(:focus-visible){outline:none}
 /* the parts the browser draws still belong to the app */
@@ -64,7 +64,7 @@ button.icon{background:var(--surface);border:0;width:38px;height:38px;border-rad
 button.icon .ms{font-size:22px}
 /* hero: the one bold moment */
 .hero{background:var(--hero);color:var(--hero-ink);border-radius:22px;padding:20px 20px 18px;margin:0 0 12px;position:relative;overflow:hidden;
-  background-image:radial-gradient(120% 90% at 100% 0%,color-mix(in srgb,var(--accent) 45%,transparent) 0%,transparent 55%)}
+}
 .hero .lbl{color:var(--hero-muted);font-size:14px}
 .hero .big{font-size:54px;line-height:1.05;font-weight:700;letter-spacing:-.045em;margin:6px 0 4px;color:var(--hero-ink)}
 .hero .big small{font-size:26px;font-weight:600;color:var(--hero-muted);margin-right:3px;letter-spacing:0;vertical-align:.55em}
@@ -168,7 +168,7 @@ input.t,select.t,textarea.t{width:100%;padding:12px 14px;border:1px solid var(--
 .btn.ghost{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
 .btn.danger{background:var(--loss-soft);color:var(--loss);flex:0 0 auto;padding:15px 18px}
 .btn.sm{flex:0 0 auto;padding:10px 18px;font-size:14px}
-.toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:999px;font-size:14px;font-weight:600;z-index:20;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none}
+.toast{position:fixed;left:50%;bottom:calc(96px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 18px;border-radius:999px;font-size:14px;font-weight:600;z-index:20;opacity:0;transition:opacity 200ms cubic-bezier(0.23,1,0.32,1),transform 200ms cubic-bezier(0.23,1,0.32,1);pointer-events:none}
 .toast.on{opacity:1;transform:translateX(-50%) translateY(-4px)}
 .kv{display:grid;grid-template-columns:1fr auto;gap:6px 12px;font-size:14px;margin:8px 0}
 .kv span:nth-child(odd){color:var(--muted)}
@@ -216,7 +216,7 @@ section.blk:has(.cw){background:var(--surface);border-radius:22px;padding:16px;b
 .match{color:var(--accent)!important}
 .csel{margin-top:5px;max-width:100%;font-size:12.5px;padding:4px 8px;border:1px solid var(--line);border-radius:10px;background:var(--bg)}
 .legend-wrap{margin:0 0 12px}
-@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 
 .row .l b .tag{display:inline-block;font-size:11px;color:var(--rose)}
 details.fold{border-top:1px solid var(--line)}
@@ -259,8 +259,8 @@ input[type="checkbox"]{width:22px;height:22px}
   .row+.row,.row+button.row,button.row+.row,button.row+button.row{border-top:0;background-image:linear-gradient(var(--line),var(--line));background-size:calc(100% - 20px) 1px;background-position:10px 0;background-repeat:no-repeat}
   .chip:hover{background:var(--sunk)}
   .chip[aria-pressed="true"]:hover{background:var(--ink)}
-  .btn:hover{filter:brightness(1.07)}
-  .btn:active{filter:brightness(.95)}
+  .btn:hover{background:color-mix(in srgb,var(--accent) 88%,var(--ink))}
+  .btn:active{background:color-mix(in srgb,var(--accent) 82%,var(--ink))}
   nav.tabs button:hover{background:var(--sunk)}
   .kpis div,.panel,.strip div{transition:box-shadow .2s,transform .2s}
   .tbl .tr:hover{background:var(--sunk)}
@@ -470,7 +470,7 @@ dialog.tall{max-height:94vh}
 .hero-tog{display:inline-flex;gap:2px;padding:3px;border-radius:999px;background:rgba(255,255,255,.1);margin:0 0 12px}
 .hero-tog button{border:0;background:transparent;color:var(--hero-muted);font:600 13px "Geist",sans-serif;padding:7px 14px;border-radius:999px;min-height:34px}
 .hero-tog button[aria-selected="true"]{background:var(--hero-ink);color:#0e1116}
-.hero.earn{background:radial-gradient(120% 90% at 100% 0%,#0f5c43 0%,transparent 55%),#0c1210}
+.hero.earn{background:#0c1210}
 .strip [data-hm]{cursor:pointer}
 .actions.wrap-btns{flex-wrap:wrap;justify-content:flex-start}.actions.wrap-btns .btn{flex:0 1 auto}
 
@@ -544,7 +544,7 @@ dialog.tall{max-height:94vh}
   @keyframes lnGrow{from{transform:scaleX(0)}to{transform:none}}
   @keyframes lnRise{from{transform:scaleY(0)}to{transform:none}}
 }
-@media (hover:hover){.tr-item:hover{background:var(--sunk);border-radius:12px}}
+@media (hover:hover) and (pointer:fine){.tr-item:hover{background:var(--sunk);border-radius:12px}}
 @media (min-width:1024px){.ln-stats{grid-template-columns:1.4fr 1fr 1fr}.ln-hero{grid-row:auto}}
 
 /* Phosphor icons: sized by the same font-size rules the icon font used */
@@ -647,21 +647,21 @@ details.more>summary .note{font-weight:400;margin:0}
    month card. Rows of amounts stay on solid cards so they read in sunlight. The blur needs
    something to blur, so the page carries a soft wash of the app's own blue and pink. */
 :root{
-  --glass:color-mix(in srgb,var(--surface) 58%,transparent);
+  --glass:color-mix(in srgb,var(--surface) 72%,transparent);
   --glass-sheet:color-mix(in srgb,var(--bg) 82%,transparent);
   --glass-edge:rgba(255,255,255,.7);
   --glass-hi:inset 0 1px 0 rgba(255,255,255,.75);
-  --glass-blur:blur(22px) saturate(180%);
+  --glass-blur:blur(16px) saturate(160%);
   --hero-glass:97%;
-  --lift:0 1px 2px rgba(22,34,70,.06),0 14px 34px -14px rgba(22,34,70,.22);
+  --lift:0 1px 2px rgba(22,34,70,.04),0 6px 16px -8px rgba(22,34,70,.12);
   --wash-a:color-mix(in srgb,var(--accent) 17%,transparent);
   --wash-b:color-mix(in srgb,var(--rose) 11%,transparent);
   --wash-c:color-mix(in srgb,var(--accent) 9%,transparent);
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --glass:color-mix(in srgb,var(--surface) 55%,transparent);--glass-sheet:color-mix(in srgb,var(--bg) 78%,transparent);
+  --glass:color-mix(in srgb,var(--surface) 68%,transparent);--glass-sheet:color-mix(in srgb,var(--bg) 78%,transparent);
   --glass-edge:rgba(255,255,255,.09);--glass-hi:inset 0 1px 0 rgba(255,255,255,.07);--hero-glass:84%;
-  --lift:0 1px 2px rgba(0,0,0,.4),0 16px 36px -14px rgba(0,0,0,.7);
+  --lift:0 1px 2px rgba(0,0,0,.3),0 6px 16px -8px rgba(0,0,0,.4);
   --wash-a:color-mix(in srgb,var(--accent) 22%,transparent);--wash-b:color-mix(in srgb,var(--rose) 12%,transparent);--wash-c:color-mix(in srgb,var(--accent) 12%,transparent);}}
 :root[data-theme="dark"]{
   --glass:color-mix(in srgb,var(--surface) 55%,transparent);--glass-sheet:color-mix(in srgb,var(--bg) 78%,transparent);
@@ -670,24 +670,23 @@ details.more>summary .note{font-weight:400;margin:0}
   --wash-a:color-mix(in srgb,var(--accent) 22%,transparent);--wash-b:color-mix(in srgb,var(--rose) 12%,transparent);--wash-c:color-mix(in srgb,var(--accent) 12%,transparent);}
 
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
-  background:radial-gradient(70% 42% at 88% -6%,var(--wash-a),transparent 70%),
-    radial-gradient(55% 38% at -12% 38%,var(--wash-b),transparent 72%),
-    radial-gradient(65% 45% at 105% 96%,var(--wash-c),transparent 70%)}
+  background:radial-gradient(50% 30% at 88% -6%,var(--wash-a),transparent 70%),
+    radial-gradient(40% 28% at -12% 38%,var(--wash-b),transparent 72%)}
 
 nav.tabs,.monthsw,header.top button.icon,.hr button.icon{
   background:var(--glass);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);
   border:1px solid var(--glass-edge);box-shadow:var(--glass-hi),var(--lift)}
-nav.tabs{box-shadow:var(--glass-hi),0 18px 40px -16px rgba(15,25,60,.35)}
+nav.tabs{box-shadow:var(--glass-hi),0 8px 24px -12px rgba(15,25,60,.25)}
 
 /* the month card: smoked glass, so the wash glows through its edges */
-.hero{background-color:color-mix(in srgb,var(--hero) var(--hero-glass),transparent);-webkit-backdrop-filter:blur(26px) saturate(150%);backdrop-filter:blur(26px) saturate(150%);
+.hero{background-color:color-mix(in srgb,var(--hero) var(--hero-glass),transparent);-webkit-backdrop-filter:blur(18px) saturate(140%);backdrop-filter:blur(18px) saturate(140%);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.12),inset 0 0 0 1px rgba(255,255,255,.05),0 22px 44px -22px rgba(13,16,40,.55)}
 
 /* solid cards keep the numbers crisp, with a deeper lift */
 .panel,.strip>div,.banner.quiet{box-shadow:var(--lift)}
 
 /* sheets: frosted, over a lighter scrim so the glass stays clean */
-dialog.sheet{background:var(--glass-sheet);-webkit-backdrop-filter:blur(30px) saturate(170%);backdrop-filter:blur(30px) saturate(170%);
+dialog.sheet{background:var(--glass-sheet);-webkit-backdrop-filter:blur(20px) saturate(160%);backdrop-filter:blur(20px) saturate(160%);
   box-shadow:var(--glass-hi),0 -12px 40px -12px rgba(8,12,30,.35)}
 dialog.sheet::backdrop{background:rgba(8,12,24,.32);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
 .sheet .hd,.actions.sticky{background:var(--glass-sheet);-webkit-backdrop-filter:blur(24px) saturate(170%);backdrop-filter:blur(24px) saturate(170%)}
@@ -859,3 +858,143 @@ small.cur{font-size:11px;font-weight:700;color:var(--muted);margin-left:4px;lett
 .gbtn{display:flex;justify-content:center;min-height:44px;margin-bottom:14px}
 .or{display:flex;align-items:center;gap:10px;margin:0 0 14px;color:var(--muted);font-size:13px}
 .or::before,.or::after{content:"";flex:1;height:1px;background:var(--line)}
+
+
+/* ============================================================
+   UI POLISH PASS — mobile-native + Emil Kowalski animation rules
+   ============================================================ */
+
+/* Mobile-native baseline: kill tap delay, pull-to-refresh hijack, text selection on controls */
+html {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+}
+button, a, [role="button"], .chip, .tab, nav.tabs button, .tr-item, .tr-chip, .legend li.catrow {
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Custom easing tokens */
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Press feedback on all interactive elements that lack it */
+.chip, .tr-chip, nav.tabs button, .seg button, .ins-tabs button, .hero-tog button,
+.linkbtn, .monthsw button, button.icon, .ck, .ask-open, .ask-del,
+.tr-item, .ln-m, .gbtn, .or button {
+  transition: transform 120ms var(--ease-out), background-color 120ms var(--ease-out), color 120ms var(--ease-out), opacity 120ms var(--ease-out);
+}
+.chip:active, .tr-chip:active, nav.tabs button:active, .seg button:active,
+.ins-tabs button:active, .hero-tog button:active, .linkbtn:active,
+.monthsw button:active, button.icon:active, .ck:active, .ask-open:active,
+.tr-item:active, .ln-m:active {
+  transform: scale(0.97);
+}
+
+/* Buttons get a transition for the global :active rule */
+button {
+  transition: transform 120ms var(--ease-out), background-color 160ms var(--ease-out), opacity 160ms var(--ease-out);
+}
+
+/* Sheet entrance: use ease-out */
+dialog.sheet {
+  animation: up 240ms var(--ease-out);
+}
+
+/* Toast: proper enter/exit timing */
+.toast {
+  transition: opacity 200ms var(--ease-out), transform 200ms var(--ease-out);
+}
+
+/* Row press feedback on touch */
+button.row:active, .row:active {
+  opacity: 0.6;
+  transition: opacity 100ms var(--ease-out);
+}
+
+/* Card hover lift only on pointer devices — subtle */
+@media (hover: hover) and (pointer: fine) {
+  .kpis div, .panel, .strip div, .trend, .heat, .ln-stat, .wal-stats > div {
+    transition: transform 200ms var(--ease-out), box-shadow 200ms var(--ease-out);
+  }
+  .kpis div:hover, .strip div:hover, .ln-stat:hover, .wal-stats > div:hover {
+    transform: translateY(-1px);
+  }
+}
+
+/* Segmented control transitions */
+.seg button, .ins-tabs button, .hero-tog button {
+  transition: background-color 180ms var(--ease-out), color 180ms var(--ease-out), transform 120ms var(--ease-out);
+}
+
+/* Sheet backdrop fade */
+dialog.sheet::backdrop {
+  animation: fadeIn 200ms var(--ease-out);
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* Reduced motion: preserve opacity/color transitions, kill movement */
+@media (prefers-reduced-motion: reduce) {
+  main.arrive, main.arrive .panel > .row, main.arrive .panel > button.row, main.arrive .legend li,
+  main.arrive .tape, .tick, .tick::after,
+  main.arrive .ln-bar i, main.arrive .ln-day i {
+    animation: none !important;
+  }
+  dialog.sheet {
+    animation: fadeIn 150ms ease !important;
+  }
+  .toast {
+    transition: opacity 150ms ease !important;
+  }
+}
+
+/* Desktop: cards get a subtle border instead of shadow at rest */
+@media (min-width: 768px) {
+  .panel, .strip > div, .kpis div, .trend, .heat, .ln-stat, .wal-stats > div,
+  .banner.quiet, .calcpad, .wal-chart {
+    box-shadow: none;
+    border: 1px solid var(--line);
+  }
+  .kpis div:first-child, .strip div:last-child, .kpis div:nth-child(3) {
+    border: none;
+  }
+}
+
+/* Reduce border radius on cards from 22px to 18px for a tighter feel */
+.panel, .strip > div, .kpis div, .trend, .heat, .banner.quiet,
+.calcpad, .wal-chart, .amt-in, .ln-hero, .ln-stat, .wal-stats > div {
+  border-radius: 18px;
+}
+.hero { border-radius: 20px; }
+
+/* Nav pill: reduce shadow */
+nav.tabs {
+  box-shadow: 0 4px 16px -8px rgba(15, 25, 60, 0.18), var(--glass-hi);
+}
+
+/* Ask chat bubbles: flat at rest */
+.ask-msg.ai .bubble {
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+.ask-item, .ask-chg {
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+.ask-item.on {
+  border: none;
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.ask-starters .chip {
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
+.pad button {
+  box-shadow: none;
+  border: 1px solid var(--line);
+}
