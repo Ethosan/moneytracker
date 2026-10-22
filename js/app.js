@@ -595,7 +595,7 @@ function connect() {
   });
   store.sb.auth.getSession().then(function (r) {
     var sess = r.data && r.data.session;
-    if (!sess) { store.mode = 'auth'; render(); store.connectBusy = false; return; }
+    if (!sess) { if (store.mode === 'connecting') { store.mode = 'auth'; render(); } store.connectBusy = false; return; }
     store.uid = sess.user.id; store.email = sess.user.email;
     var gid0 = (sess.user.identities || []).filter(function (i) { return i.provider === 'google'; })[0];
     store.google = gid0 && gid0.identity_data && gid0.identity_data.email ? gid0.identity_data.email : null;
@@ -619,6 +619,7 @@ function connect() {
   }).catch(function (e) {
     store.connectBusy = false;
     store.err = errText(e);
+    if (store.mode === 'connecting') { store.mode = 'auth'; render(); }
     if (isNetworkErr(e)) {
       // genuinely offline: keep working from the local copy and try again shortly
       store.mode = 'cloud-offline'; setSync('Offline, will sync'); render();
@@ -669,6 +670,14 @@ function gbtnLoading(container, initialText) {
   return { setText: setText, dismiss: dismiss };
 }
 
+// Full-screen loading state between sign-in and the app: the gap while
+// Supabase checks the session and fetches your data is not the login page.
+function renderConnecting() {
+  return '<main class="login"><div style="display:grid;place-items:center;min-height:60vh;text-align:center">' +
+    '<div><div class="spin" style="width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite;margin:0 auto 16px"></div>' +
+    '<p style="font-size:15px;font-weight:600;color:var(--muted)">Loading your ledger…</p></div></div></main>';
+}
+
 function renderLogin() {
   return '<main class=\"login\"><div class=\"hero\"><div class=\"lbl\">20bucks</div><div class=\"big\" style=\"font-size:40px\">Sign in</div><div class=\"sub\">Your data syncs to your own private account. No password needed.</div></div>' +
     '<div class=\"panel\" style=\"padding:16px\">' + ((window.LEDGER_CONFIG || {}).googleClientId ? '<div id=\"gbtn\" class=\"gbtn\"></div><div class=\"or\"><span>or use email</span></div>' : '') + '<label class=\"f\" for=\"em\">Email</label><input class=\"t\" id=\"em\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">' +
@@ -705,7 +714,7 @@ function wireLogin() {
     store.sb.auth.verifyOtp({ email: sentTo, token: tok, type: 'email' }).then(function (r) {
       if (r.error) { si.disabled = false; si.textContent = 'Verify code'; say(/expired|invalid/i.test(r.error.message) ? 'That code is wrong or expired. Request a new code and use the newest email — each new code replaces the previous one.' : otpErr(r.error)); return; }
       // a successful verify consumes the code: hold the button so a second press cannot reuse it
-      si.textContent = 'Signing in…';
+      store.mode = 'connecting'; render();
       connect();
       setTimeout(function () {
         if (store.mode === 'auth') { si.disabled = false; si.textContent = 'Verify code'; say('Sign-in succeeded but the app could not open your account. Close and reopen the app — you are already signed in.'); }
@@ -735,9 +744,9 @@ function wireLogin() {
       say(''); si.disabled = true;
       store.sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: nonce }).then(function (r) {
         if (r.error) { if (gLoad) { gLoad.dismiss(); gLoad = null; } si.disabled = false; say(/provider is not enabled|unsupported provider/i.test(r.error.message) ? 'Google sign-in isn\'t switched on yet. Use the email code for now.' : otpErr(r.error)); return; }
-        si.textContent = 'Signing in…';
+        store.mode = 'connecting'; render();
         connect();
-      }).catch(function () { if (gLoad) { gLoad.dismiss(); gLoad = null; } si.disabled = false; say('Could not finish Google sign-in. Check your connection and try again.'); });
+      }).catch(function () { if (gLoad) { gLoad.dismiss(); gLoad = null; } si.disabled = false; store.mode = 'auth'; render(); say('Could not finish Google sign-in. Check your connection and try again.'); });
     }, { oneTap: true }).catch(function () { gbtn.hidden = true; var o = gbtn.nextElementSibling; if (o) o.hidden = true; });
   }
   em.addEventListener('input', function () { if (sentTo && em.value.trim() !== sentTo) reset(); });
@@ -2312,6 +2321,7 @@ function applyTheme() { var t = localTheme(); if (t) document.documentElement.se
 function render() {
   if (isLocked()) { renderLock(); return; }
   if (!HIST.ready) { histSnap(); HIST.ready = true; }
+  if (store.mode === 'connecting') { $('#app').innerHTML = renderConnecting(); return; }
   if (store.mode === 'auth') { $('#app').innerHTML = renderLogin(); wireLogin(); return; }
   var v, failed = null;
   try {
