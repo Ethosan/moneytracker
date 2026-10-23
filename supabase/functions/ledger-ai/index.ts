@@ -301,8 +301,11 @@ const DAILY_LIMIT = Number(Deno.env.get("AI_DAILY_LIMIT")) || 300;
 // Fallback cap kept in memory, used only if the database function can't be reached.
 const CALLS = new Map<string, { n: number; reset: number }>();
 const CALL_WINDOW_MS = 3600000;
-// The owner's choice for now (2026-10-21): every signed-in account may use the assistant.
-const OPEN_TO_ALL = true;
+// The owner's choice (2026-10-23): only the accounts on the AI_ALLOWED_IDS allowlist may use the
+// assistant. Sign-in lets anyone create an account (an external account already exists), and API
+// calls are billed per use with no default spending limit at the provider, so an open function is
+// an open spigot on the key.
+const OPEN_TO_ALL = false;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
