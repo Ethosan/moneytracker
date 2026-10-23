@@ -7,7 +7,10 @@
  *     data-supabase-url="https://wqpjijgqjhzquncruvlc.supabase.co"
  *     data-supabase-key="eyJhbGciOi..."
  *     data-button-label="Send feedback"
- *     data-accent="#6366f1"></script>
+ *     data-accent="#6366f1"
+ *     data-bottom="calc(88px + env(safe-area-inset-bottom, 0px))"></script>
+ *
+ * data-bottom (optional, default 20px) lifts the button above a site's bottom tab bar.
  *
  * Self-contained: injects its own CSS, no external dependencies.
  * Submits via Supabase REST API (PostgREST) using fetch().
@@ -24,7 +27,10 @@
     supabaseKey: script.getAttribute("data-supabase-key") || "",
     buttonLabel: script.getAttribute("data-button-label") || "Feedback",
     accent: script.getAttribute("data-accent") || "#6366f1",
+    bottom: script.getAttribute("data-bottom") || "20px",
   };
+  // Only lengths and calc()/env() expressions, so the attribute can't inject other CSS.
+  if (!/^[\w\s().,+*\/%-]+$/.test(cfg.bottom)) cfg.bottom = "20px";
 
   if (!cfg.supabaseUrl || !cfg.supabaseKey) {
     console.warn("[feedback-widget] Missing data-supabase-url or data-supabase-key");
@@ -35,7 +41,7 @@
   var css = [
     ":root{--fbw-accent:" + cfg.accent + "}",
     ".fbw-reset{all:initial;box-sizing:border-box;font-family:inherit}",
-    "#fbw-root{position:fixed;bottom:20px;right:20px;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}",
+    "#fbw-root{position:fixed;bottom:" + cfg.bottom + ";right:20px;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}",
     ":where(#fbw-root) *{box-sizing:border-box;margin:0;padding:0}",
     ".fbw-btn{display:flex;align-items:center;justify-content:center;gap:6px;height:48px;min-width:48px;padding:0 14px;border:none;border-radius:24px;background:var(--fbw-accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22),0 1px 3px rgba(0,0,0,.14);transition:transform .15s ease-out,box-shadow .15s ease-out;user-select:none;-webkit-tap-highlight-color:transparent}",
     ".fbw-btn:hover{box-shadow:0 6px 20px rgba(0,0,0,.28),0 2px 6px rgba(0,0,0,.16)}",
