@@ -19,7 +19,15 @@
    | Root directory | `/` (leave as default) |
    | Build command | `rm -rf dist && mkdir dist && cp -r index.html privacy.html terms.html app.css js sw.js config.js feedback-widget.js _headers manifest.webmanifest fonts icons vendor dist/` |
    | Build output directory | `dist` |
-4. **Environment variables**: None needed (config is hardcoded in `config.js`).
+
+4. **Environment variables** — 1 total (not secret, copy-paste):
+
+   | Variable | Value |
+   |---|---|
+   | `GOOGLE_CLIENT_ID` | `1014449170509-0pt7ar3hpm2n3nsddi2d449bbn9pcpvf.apps.googleusercontent.com` |
+
+   > Note: This var exists in Netlify but the site's Google sign-in uses a hardcoded client ID in `config.js`. Set it anyway for safety — it won't hurt.
+
 5. **Compatibility flags**: None needed.
 6. Click **Save and Deploy**
 
