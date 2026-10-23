@@ -1,0 +1,17 @@
+# Security headers (from netlify.toml)
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), microphone=(), geolocation=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://accounts.google.com/gsi/ https://wqpjijgqjhzquncruvlc.supabase.co https://api.coingecko.com https://open.er-api.com; worker-src 'self' blob:; frame-src https://accounts.google.com/gsi/; manifest-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
+# Always check for a new service worker, page and styles
+/sw.js
+  Cache-Control: no-cache
+
+/index.html
+  Cache-Control: no-cache
+
+/app.css
+  Cache-Control: no-cache

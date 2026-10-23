@@ -1,7 +1,7 @@
 # Publish only the app. Without this Netlify serves the whole repo, so README.md,
 # PRODUCT.md and the supabase/ folder would be readable at your site's address.
 [build]
-  command = "rm -rf dist && mkdir dist && cp -r index.html privacy.html terms.html app.css js sw.js config.js feedback-widget.js manifest.webmanifest fonts icons vendor dist/"
+  command = "rm -rf dist && mkdir dist && cp -r index.html privacy.html terms.html app.css js sw.js config.js feedback-widget.js _headers manifest.webmanifest fonts icons vendor dist/"
   publish = "dist"
 
 # Always check for a new service worker, page and styles, so an update reaches the phone on the next open.
