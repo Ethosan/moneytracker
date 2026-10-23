@@ -36,7 +36,7 @@
     ":root{--fbw-accent:" + cfg.accent + "}",
     ".fbw-reset{all:initial;box-sizing:border-box;font-family:inherit}",
     "#fbw-root{position:fixed;bottom:20px;right:20px;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}",
-    "#fbw-root *{box-sizing:border-box;margin:0;padding:0}",
+    ":where(#fbw-root) *{box-sizing:border-box;margin:0;padding:0}",
     ".fbw-btn{display:flex;align-items:center;justify-content:center;gap:6px;height:48px;min-width:48px;padding:0 14px;border:none;border-radius:24px;background:var(--fbw-accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22),0 1px 3px rgba(0,0,0,.14);transition:transform .15s ease-out,box-shadow .15s ease-out;user-select:none;-webkit-tap-highlight-color:transparent}",
     ".fbw-btn:hover{box-shadow:0 6px 20px rgba(0,0,0,.28),0 2px 6px rgba(0,0,0,.16)}",
     ".fbw-btn:active{transform:scale(.94)}",
@@ -123,4 +123,171 @@
   var closeBtn = document.createElement("button");
   closeBtn.className = "fbw-close";
   closeBtn.type = "button";
-  closeBtn.setAttribute("aria-label",
+  closeBtn.setAttribute("aria-label", "Close");
+  closeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+
+  head.appendChild(title);
+  head.appendChild(closeBtn);
+
+  var form = document.createElement("form");
+  form.className = "fbw-body";
+  form.noValidate = true;
+  form.innerHTML =
+    '<div class="fbw-field"><label class="fbw-label" for="fbw-message">What’s on your mind?</label>' +
+    '<textarea class="fbw-textarea" id="fbw-message" maxlength="4000" placeholder="A bug, an idea, anything"></textarea></div>' +
+    '<div class="fbw-field"><label class="fbw-label" for="fbw-email">Email <span class="fbw-opt">(optional, if you want a reply)</span></label>' +
+    '<input class="fbw-input" id="fbw-email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com"></div>' +
+    '<div class="fbw-actions"><button class="fbw-cancel" type="button">Cancel</button><button class="fbw-submit" type="submit">Send</button></div>' +
+    '<p class="fbw-status" role="status" aria-live="polite"></p>';
+
+  modal.appendChild(head);
+  modal.appendChild(form);
+  modal.inert = true;
+
+  btn.setAttribute("aria-haspopup", "dialog");
+  btn.setAttribute("aria-expanded", "false");
+
+  var textarea = form.querySelector("#fbw-message");
+  var emailInput = form.querySelector("#fbw-email");
+  var cancelBtn = form.querySelector(".fbw-cancel");
+  var submitBtn = form.querySelector(".fbw-submit");
+  var statusEl = form.querySelector(".fbw-status");
+  var sending = false;
+  var closeTimer = null;
+
+  function setStatus(text, kind) {
+    statusEl.textContent = text;
+    statusEl.className = "fbw-status" + (kind ? " fbw-" + kind : "");
+  }
+
+  function open() {
+    if (isOpen) return;
+    isOpen = true;
+    lastFocus = document.activeElement;
+    modal.inert = false;
+    backdrop.classList.add("fbw-open");
+    modal.classList.add("fbw-open");
+    btn.setAttribute("aria-expanded", "true");
+    setTimeout(function () { textarea.focus(); }, 50);
+  }
+
+  function close() {
+    if (!isOpen) return;
+    isOpen = false;
+    clearTimeout(closeTimer);
+    modal.inert = true;
+    backdrop.classList.remove("fbw-open");
+    modal.classList.remove("fbw-open");
+    btn.setAttribute("aria-expanded", "false");
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+
+  function focusables() {
+    return Array.prototype.filter.call(
+      modal.querySelectorAll("button, textarea, input"),
+      function (el) { return !el.disabled; }
+    );
+  }
+
+  btn.addEventListener("click", open);
+  closeBtn.addEventListener("click", close);
+  cancelBtn.addEventListener("click", close);
+  backdrop.addEventListener("click", close);
+
+  document.addEventListener("keydown", function (e) {
+    if (!isOpen) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      close();
+    } else if (e.key === "Tab") {
+      var els = focusables();
+      var first = els[0];
+      var last = els[els.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  });
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    if (sending) return;
+
+    var message = textarea.value.trim();
+    var email = emailInput.value.trim();
+    if (!message) {
+      setStatus("Write a message first.", "err");
+      textarea.focus();
+      return;
+    }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setStatus("That email doesn’t look right.", "err");
+      emailInput.focus();
+      return;
+    }
+
+    sending = true;
+    submitBtn.disabled = true;
+    setStatus("Sending…");
+
+    var headers = {
+      apikey: cfg.supabaseKey,
+      "Content-Type": "application/json",
+      // The anon role can insert but not read rows back, so ask for no body.
+      Prefer: "return=minimal",
+    };
+    // Legacy anon keys are JWTs and go in Authorization too; publishable keys must not.
+    if (/^eyJ/.test(cfg.supabaseKey)) headers.Authorization = "Bearer " + cfg.supabaseKey;
+
+    fetch(cfg.supabaseUrl + "/rest/v1/feedback", {
+      method: "POST",
+      headers: headers,
+      body: JSON.stringify({
+        project: cfg.project,
+        message: message.slice(0, 4000),
+        email: email || null,
+        // Origin and path only: query strings and hashes can carry sign-in tokens.
+        page_url: location.origin + location.pathname,
+        user_agent: (navigator.userAgent || "").slice(0, 500),
+      }),
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        textarea.value = "";
+        emailInput.value = "";
+        setStatus("Thanks, it’s sent.", "ok");
+        closeTimer = setTimeout(function () {
+          close();
+          setStatus("");
+        }, 1600);
+      })
+      .catch(function (err) {
+        console.warn("[feedback-widget] Send failed:", err);
+        setStatus("Couldn’t send. Check your connection and try again.", "err");
+      })
+      .then(function () {
+        sending = false;
+        submitBtn.disabled = false;
+      });
+  });
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function mount() {
+    root.appendChild(backdrop);
+    root.appendChild(modal);
+    root.appendChild(btn);
+    document.body.appendChild(root);
+  }
+
+  if (document.body) mount();
+  else document.addEventListener("DOMContentLoaded", mount);
+})();
