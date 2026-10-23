@@ -12,6 +12,7 @@
 //   AI_PROVIDER         optional: "mistral" or "anthropic", to choose when both keys are set
 //   MISTRAL_MODEL       optional, default mistral-small-latest
 //   ANTHROPIC_MODEL     optional, default claude-opus-5-5
+//   AI_DAILY_LIMIT      optional, AI calls per day for all accounts together (default 300)
 //   AI_ALLOWED_IDS      comma-separated user ids allowed to call this function when
 //                       OPEN_TO_ALL is false (Supabase dashboard -> Authentication -> Users
 //                       -> copy the UUID); with it unset the function then answers nobody.
@@ -100,7 +101,7 @@ async function mistral(system: string, messages: Turn[], asJson: boolean) {
   });
   if (!r.ok) throw new Error(`Mistral ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const data = await r.json();
-  return { text: String(data.choices?.[0]?.message?.content ?? ""), model };
+  return { text: String(data.choices?.[0]?.message?.content ?? ""), model, cut: data.choices?.[0]?.finish_reason === "length" };
 }
 
 async function claude(system: string, messages: Turn[]) {
@@ -119,7 +120,7 @@ async function claude(system: string, messages: Turn[]) {
   } as Anthropic.Beta.Messages.MessageCreateParamsNonStreaming);
   if (response.stop_reason === "refusal") throw new Error("The model declined this request.");
   const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("");
-  return { text, model: response.model };
+  return { text, model: response.model, cut: response.stop_reason === "max_tokens" };
 }
 
 async function complete(system: string, messages: Turn[], asJson: boolean) {
@@ -139,9 +140,10 @@ function firstJson(text: string) {
 type Tx = { id?: string; feeOf?: string; propOf?: string; d: string; t: string; amt: number; cat?: string; sub?: string; note?: string; acct?: string; pm?: string; plp?: string; tags?: string[]; split?: { mine: number; person: string }; from?: string; to?: string; inst?: { n: number; fee?: number } };
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const plainCat = (c = "") => c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, "");
-// Budget for the whole prompt (rows + snapshot + history), at roughly 4 characters per
-// token: comfortably inside the 128k-token context of mistral-small, with room to spare.
-const PROMPT_BUDGET = 400000;
+// Budget for the whole prompt (rows + snapshot + history), in characters. The rows are
+// mostly dates, amounts and ids, which come to about 2.5 characters per token, so this keeps
+// a full prompt near 100k tokens: inside mistral-small's 128k context with room for the answer.
+const PROMPT_BUDGET = 250000;
 
 async function fullLedger(sb: SupabaseClient, rowLimit: number) {
   const { data, error } = await sb.from("ledger_docs").select("id,body");
@@ -154,6 +156,9 @@ async function fullLedger(sb: SupabaseClient, rowLimit: number) {
   const meta = doc.meta || {}, out: string[] = [];
   // what a proposed change may refer to: editable rows, the owner's categories and wallets
   const ids = new Set(tx.filter((x) => x.id && !x.feeOf && !x.propOf && (x.t === "exp" || x.t === "inc")).map((x) => x.id as string));
+  // each editable row's current type and category, so an edit that changes only one of them
+  // can still be checked against the other
+  const byId = new Map<string, { t: string; cat: string }>(tx.filter((x) => x.id && ids.has(x.id as string)).map((x) => [x.id as string, { t: x.t, cat: x.cat || "" }]));
   const cats = new Map<string, string>(((meta.cats || []) as any[]).filter((c) => c && c.name).map((c) => [String(c.name), c.type === "inc" ? "inc" : "exp"]));
   const accts = new Set<string>(((meta.accounts || []) as any[]).filter((a) => a && a.name && !a.liability).map((a) => String(a.name)));
 
@@ -200,11 +205,18 @@ async function fullLedger(sb: SupabaseClient, rowLimit: number) {
   // the rows themselves
   const rows: string[] = [];
   rows.push("\nINVESTMENT, PROP FIRM AND POKER ENTRIES: date | account | in (money paid in / fee / buy-in) or out (money taken out / payout / win) or bal (balance) | amount | note");
-  led.slice().sort((a: any, b: any) => (a.d < b.d ? -1 : 1)).forEach((e: any) => rows.push(`${e.d} | ${e.venue} | ${e.f} | ${r2(e.amt)} | ${e.note || ""}`));
+  // these sections are capped too, newest kept, so they can never crowd out every transaction
+  const newest = (list: any[], n: number, what: string) => {
+    if (list.length > n) rows.push(`(${list.length - n} older ${what} left out to fit; the totals above still include them)`);
+    return list.slice(-n);
+  };
+  newest(led.slice().sort((a: any, b: any) => (a.d < b.d ? -1 : 1)), 400, "entries")
+    .forEach((e: any) => rows.push(`${e.d} | ${e.venue} | ${e.f} | ${r2(e.amt)} | ${e.note || ""}`));
   const debts = (doc.debts && doc.debts.entries) || [];
   if (debts.length) {
     rows.push("\nMONEY BETWEEN PEOPLE: date | person | amount (positive: they owe me) | note");
-    debts.forEach((x: any) => rows.push(`${x.d} | ${x.person} | ${r2(x.amt)} | ${x.note || ""}`));
+    newest(debts.slice().sort((a: any, b: any) => (a.d < b.d ? -1 : 1)), 300, "entries")
+      .forEach((x: any) => rows.push(`${x.d} | ${x.person} | ${r2(x.amt)} | ${x.note || ""}`));
   }
   const bills = (doc.bills && doc.bills.entries) || [];
   if (bills.length) {
@@ -214,7 +226,7 @@ async function fullLedger(sb: SupabaseClient, rowLimit: number) {
   const checks = ((doc.checks && doc.checks.entries) || []).slice().sort((a: any, b: any) => (a.d < b.d ? -1 : 1));
   if (checks.length) {
     rows.push("\nBALANCE COUNTS (real balances I counted; between two counts each wallet should move by exactly what I logged on it): date | wallet amounts | what my logs said at the time");
-    checks.forEach((c: any) => rows.push(`${c.d} | ${Object.keys(c.lines || {}).map((k) => `${k} ${r2(+c.lines[k])}`).join(", ")} | ${c.exp ? Object.keys(c.exp).map((k) => `${k} ${r2(+c.exp[k])}`).join(", ") : ""}`));
+    newest(checks, 200, "counts").forEach((c: any) => rows.push(`${c.d} | ${Object.keys(c.lines || {}).map((k) => `${k} ${r2(+c.lines[k])}`).join(", ")} | ${c.exp ? Object.keys(c.exp).map((k) => `${k} ${r2(+c.exp[k])}`).join(", ") : ""}`));
   }
   if ((meta.subs || []).length) rows.push("\nSUBSCRIPTIONS: " + meta.subs.map((s: any) => `${s.name} ${s.amt} every ${s.cycle || 1} month(s), next ${s.next || "?"}${s.active === false ? " (stopped)" : ""}`).join("; "));
   if ((meta.budgets || []).length) rows.push("BUDGETS (monthly): " + meta.budgets.map((b: any) => `${String(b.key).slice(4)} ${b.amt}`).join(", "));
@@ -226,20 +238,27 @@ async function fullLedger(sb: SupabaseClient, rowLimit: number) {
   // keep the newest rows when it's too much to send
   let used = out.join("\n").length + rows.join("\n").length, keepFrom = 0;
   for (let i = txRows.length - 1; i >= 0; i--) { used += txRows[i].length + 1; if (used > rowLimit) { keepFrom = i + 1; break; } }
-  if (keepFrom > 0) rows.push(`(${keepFrom} older transactions before ${tx[keepFrom].d} are left out to fit; the totals above still include them)`);
+  if (keepFrom >= txRows.length && txRows.length) rows.push(`(all ${txRows.length} transactions are left out to fit; the totals above still include them)`);
+  else if (keepFrom > 0) rows.push(`(${keepFrom} older transactions before ${tx[keepFrom].d} are left out to fit; the totals above still include them)`);
   rows.push(...txRows.slice(keepFrom));
-  return { text: out.join("\n") + "\n" + rows.join("\n"), ids, cats, accts };
+  return { text: out.join("\n") + "\n" + rows.join("\n"), ids, byId, cats, accts };
 }
 
 // The changes block at the end of an answer, checked against the ledger: unknown ids, made-up
 // categories, impossible dates and amounts are dropped, so the app only ever shows real proposals.
 type Change = { op: "add" | "edit" | "delete"; id?: string; d?: string; t?: "exp" | "inc"; amt?: number; cat?: string; note?: string; acct?: string; why?: string };
-function takeChanges(text: string, L: { ids: Set<string>; cats: Map<string, string>; accts: Set<string> }) {
-  const m = text.match(/```changes\s*([\s\S]*?)```\s*$/) || text.match(/```changes\s*([\s\S]*)$/);
+function takeChanges(text: string, L: { ids: Set<string>; byId: Map<string, { t: string; cat: string }>; cats: Map<string, string>; accts: Set<string> }) {
+  // the block can sit anywhere (models often add a line after it), or be cut off at the end
+  const m = text.match(/```changes\s*([\s\S]*?)```/) || text.match(/```changes\s*([\s\S]*)$/);
   if (!m) return { answer: text.trim(), changes: [] as Change[] };
-  const answer = text.slice(0, m.index).trim();
+  const answer = (text.slice(0, m.index) + text.slice((m.index || 0) + m[0].length)).trim();
+  const none = (why: string) => ({ answer: (answer ? answer + "\n\n" : "") + "*" + why + "*", changes: [] as Change[] });
   let raw: unknown;
-  try { raw = JSON.parse(m[1].trim()); } catch { return { answer, changes: [] as Change[] }; }
+  try { raw = JSON.parse(m[1].trim()); } catch { return none("The proposed changes didn't come through in full, so none are shown. Ask again to get them."); }
+  // categories as the model writes them often lose or gain the emoji; match on the name
+  const catKey = (c: string) => plainCat(c).replace(/️/g, "").trim().toLowerCase();
+  const catByKey = new Map<string, string>([...L.cats.keys()].map((n) => [catKey(n), n]));
+  const findCat = (c: unknown) => typeof c !== "string" ? undefined : L.cats.has(c) ? c : catByKey.get(catKey(c));
   const okDate = (d: unknown) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d + "T00:00:00Z")) && new Date(d + "T00:00:00Z").toISOString().slice(0, 10) === d;
   const okAmt = (a: unknown) => typeof a === "number" && isFinite(a) && a > 0 && a < 1e7;
   const str = (v: unknown, n: number) => String(v).replace(/\s+/g, " ").trim().slice(0, n);
@@ -254,25 +273,34 @@ function takeChanges(text: string, L: { ids: Set<string>; cats: Map<string, stri
     if (c.t === "exp" || c.t === "inc") o.t = c.t;
     if (c.d != null) { if (!okDate(c.d)) continue; o.d = c.d; }
     if (c.amt != null) { if (!okAmt(c.amt)) continue; o.amt = Math.round(c.amt * 100) / 100; }
-    if (c.cat != null) { if (!L.cats.has(c.cat)) continue; o.cat = c.cat; }
+    if (c.cat != null) { const cat = findCat(c.cat); if (!cat) continue; o.cat = cat; }
     if (typeof c.note === "string") o.note = str(c.note, 120);
     if (typeof c.acct === "string" && L.accts.has(c.acct)) o.acct = c.acct;
     if (o.op === "add") {
       if (!o.amt || !o.cat) continue;
       o.t = o.t || (L.cats.get(o.cat) as "exp" | "inc");
     }
-    // a category of the other type would file spending as income or the reverse
-    if (o.cat && o.t && L.cats.get(o.cat) !== o.t) continue;
+    // a category of the other type would file spending as income or the reverse; for an edit
+    // that changes only one of the two, check against what the entry has now
+    const cur = o.op === "edit" ? L.byId.get(o.id as string) : undefined;
+    const effT = o.t ?? cur?.t, effCat = o.cat ?? cur?.cat;
+    if (effCat && effT && L.cats.has(effCat) && L.cats.get(effCat) !== effT) continue;
     if (o.op === "edit" && o.t == null && o.d == null && o.amt == null && o.cat == null && o.note == null && o.acct == null) continue;
     changes.push(o);
   }
+  if (!changes.length && Array.isArray(raw) && raw.length) return none("None of the proposed changes matched your ledger, so nothing is shown.");
   return { answer, changes };
 }
 
-// Best-effort per-user usage cap: the AI spends the owner's API credits and the app is shared,
-// so one account cannot hammer it. Kept in memory, so it is per isolate and resets on a cold start.
+// Usage caps: the AI spends the owner's API credits and the app is shared. Each call is recorded
+// by the ai_take_call() database function, so the caps hold across cold starts and copies of this
+// function: CALL_LIMIT per account per hour, and DAILY_LIMIT for all accounts together (the
+// AI_DAILY_LIMIT secret overrides it). A monthly spending limit in the Mistral console is the backstop.
+const CALL_LIMIT = 120;
+const DAILY_LIMIT = Number(Deno.env.get("AI_DAILY_LIMIT")) || 300;
+// Fallback cap kept in memory, used only if the database function can't be reached.
 const CALLS = new Map<string, { n: number; reset: number }>();
-const CALL_LIMIT = 120, CALL_WINDOW_MS = 3600000;
+const CALL_WINDOW_MS = 3600000;
 // The owner's choice for now (2026-10-21): every signed-in account may use the assistant.
 const OPEN_TO_ALL = true;
 
@@ -294,18 +322,30 @@ Deno.serve(async (req) => {
     if (!allowed.includes(user.id)) return json({ error: "The AI assistant is not enabled for this account." }, 403);
   }
 
-  const now = Date.now();
-  const rec = CALLS.get(user.id);
-  if (rec && rec.reset > now) { if (rec.n >= CALL_LIMIT) return json({ error: "Too many AI requests. Try again in a little while." }, 429); rec.n++; }
-  else CALLS.set(user.id, { n: 1, reset: now + CALL_WINDOW_MS });
-  if (CALLS.size > 1000) { for (const [k, v] of CALLS) { if (v.reset <= now) CALLS.delete(k); } }
+  const { data: slot, error: slotErr } = await sb.rpc("ai_take_call", { per_user_hour: CALL_LIMIT, all_users_day: DAILY_LIMIT });
+  if (slotErr) {
+    console.error("ai_take_call failed, using the in-memory cap:", slotErr.message);
+    const now = Date.now();
+    const rec = CALLS.get(user.id);
+    if (rec && rec.reset > now) { if (rec.n >= CALL_LIMIT) return json({ error: "Too many AI requests. Try again in a little while." }, 429); rec.n++; }
+    else CALLS.set(user.id, { n: 1, reset: now + CALL_WINDOW_MS });
+    if (CALLS.size > 1000) { for (const [k, v] of CALLS) { if (v.reset <= now) CALLS.delete(k); } }
+  } else if (slot === "user") {
+    return json({ error: "Too many AI requests from this account. Try again in a little while." }, 429);
+  } else if (slot === "all") {
+    return json({ error: "The AI assistant has reached today's limit. Try again tomorrow." }, 429);
+  }
 
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return json({ error: "Bad request" }, 400); }
 
   try {
     if (body.action === "review") {
-      const items = (Array.isArray(body.items) ? body.items : []).slice(0, 200) as Item[];
+      // capped field by field, so a request can't pad the prompt with huge notes
+      const items: Item[] = (Array.isArray(body.items) ? body.items : []).slice(0, 200).map((x: any) => ({
+        i: Number(x && x.i), d: String((x && x.d) || "").slice(0, 10), t: x && x.t === "inc" ? "inc" : "exp",
+        amt: Math.round((Number(x && x.amt) || 0) * 100) / 100, cat: String((x && x.cat) || "").slice(0, 80), note: String((x && x.note) || "").slice(0, 200),
+      }));
       // Categories arrive as {name, type} so the model knows which are income and which are
       // spending; plain strings (older app versions) are still accepted.
       const catsRaw = (Array.isArray(body.cats) ? body.cats : []).slice(0, 100).map((c: any) =>
@@ -336,6 +376,9 @@ Deno.serve(async (req) => {
       const prompt = `Allowed categories: ${JSON.stringify(cats)}${catTypes ? `\nCategory types (income or spending, as the owner set them): ${catTypes}` : ""}\nEntries:\n${items.map((x) => JSON.stringify(x)).join("\n")}${histBlock}`;
       const out = await complete(REVIEW_SYSTEM, [{ role: "user", content: prompt }], true);
       const parsed = firstJson(out.text);
+      // An unreadable or cut-off reply is an error, not "nothing found": the app then keeps these
+      // entries for the next review instead of marking them as checked.
+      if (out.cut || !parsed || !Array.isArray(parsed.findings)) throw new Error("The review's reply was cut off or couldn't be read, so these entries will be checked next time.");
       const valid = new Set(items.map((x) => x.i)), catSet = new Set(cats);
       const findings = (Array.isArray(parsed?.findings) ? parsed.findings : [])
         .filter((f: { i: unknown; issue: unknown }) => valid.has(Number(f.i)) && typeof f.issue === "string")
@@ -356,7 +399,7 @@ Deno.serve(async (req) => {
         .map((m: Turn) => ({ role: m.role, content: m.content.slice(0, 2000) }));
       if (!question) return json({ error: "Ask a question." }, 400);
       // rows get whatever is left of the prompt budget after the snapshot and history
-      const ledger = await fullLedger(sb, Math.max(150000, PROMPT_BUDGET - context.length - history.reduce((a, m) => a + m.content.length, 0)));
+      const ledger = await fullLedger(sb, Math.max(20000, PROMPT_BUDGET - context.length - history.reduce((a, m) => a + m.content.length, 0)));
       const messages: Turn[] = [
         { role: "user", content: `My finances. Amounts in SGD.\n\nCURRENT SNAPSHOT (live balances and recent months, from the app):\n${context}\n\nFULL LEDGER:\n${ledger.text}` },
         { role: "assistant", content: "Got it. What would you like to know?" },
@@ -364,7 +407,8 @@ Deno.serve(async (req) => {
         { role: "user", content: question },
       ];
       const out = await complete(ASK_SYSTEM, messages, false);
-      const { answer, changes } = takeChanges(out.text, ledger);
+      const taken = takeChanges(out.text, ledger), changes = taken.changes;
+      const answer = out.cut ? taken.answer + "\n\n*The answer hit the length limit and was cut off. Ask for less at once, or ask it to continue.*" : taken.answer;
       return json({ answer, changes, provider: provider(), model: out.model });
     }
     return json({ error: "Unknown action" }, 400);

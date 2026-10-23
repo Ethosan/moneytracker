@@ -32,7 +32,12 @@
   </ul>
 
   <h2>The AI assistant</h2>
-  <p>If you use the optional AI assistant, the messages you send are passed to an AI model (Mistral or Anthropic Claude) through a Supabase edge function, together with any transactions you attach to the conversation. Don't put secrets in a chat. Everything else in your account stays out of the request.</p>
+  <p>The AI assistant is off until you turn it on in Settings. When it's on, requests go to an AI model (Mistral AI by default, or Anthropic Claude) through a Supabase edge function that holds the API key; your email address isn't sent.</p>
+  <ul>
+    <li><b>Weekly review:</b> the entries added since the last review (date, type, amount, category and note), your category list, and your usual amount, type and category for those notes, worked out from your other entries.</li>
+    <li><b>Ask:</b> your question, the last ten messages of that conversation, and your whole history so the answer has context: every transaction with its notes, wallets and tags, the names of people you split bills with and what they owe, investment, prop firm and poker entries, PayLater bills, balance counts, subscriptions, budgets and wallet balances.</li>
+  </ul>
+  <p>Don't put secrets in a chat.</p>
 
   <h2>Google data</h2>
   <p>Google sign-in asks only for your email address and profile name. The sign-in happens in a Google pop-up; 20bucks never sees your password. To remove access, go to <a href="https://myaccount.google.com/permissions">your Google account permissions</a>.</p>
@@ -41,7 +46,7 @@
   <ul>
     <li><b>Supabase:</b> database, sign-in and file storage.</li>
     <li><b>Resend:</b> sends the sign-in emails.</li>
-    <li><b>Netlify:</b> hosts the app.</li>
+    <li><b>Cloudflare:</b> hosts the app.</li>
     <li><b>Mistral / Anthropic:</b> only if you use the AI assistant.</li>
   </ul>
 

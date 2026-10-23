@@ -12,18 +12,20 @@
 
 We don't sell your data, show ads, or track you across other sites.
 
-## How AI categorisation works
+## The AI assistant
 
-When you add a transaction, we send **only the merchant name and amount** to:
+The AI assistant is off until you turn it on in **Settings → AI assistant**. When it's on, requests go to **Mistral AI** (or **Anthropic**, if the owner switches provider) through a Supabase Edge Function that holds the API key. Your email address isn't sent.
 
-- **Mistral AI** (through a Supabase Edge Function), which suggests a category.
+- **Weekly review:** the entries added since the last review (date, type, amount, category and note), your category list, and your usual amount, type and category for those notes, worked out from your other entries.
+- **Ask:** your question, the last ten messages of that conversation, and your whole history so the answer has context: every transaction with its notes, wallets and tags, the names of people you split bills with and what they owe, investment, prop firm and poker entries, PayLater bills, balance counts, subscriptions, budgets and wallet balances.
 
-Your email, account balance, and other transactions are never sent. The suggestion is AI-generated and can be wrong — always check it.
+Answers and suggested changes are AI-generated and can be wrong. Nothing in your ledger changes until you tap Apply.
 
 ## Who else processes your data
 
 - **Supabase:** database, sign-in, and receipt photo storage. Data lives in your own Supabase project.
-- **Netlify** and **Cloudflare:** hosting.
+- **Cloudflare:** hosting.
+- **Mistral AI** or **Anthropic:** only if you turn on the AI assistant.
 - **Google:** only if you sign in with Google.
 - **Google Fonts:** the page's typefaces load from Google.
 

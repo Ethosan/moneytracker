@@ -91,7 +91,25 @@ function histApply(e, kind) {
   Object.keys(e.docs).forEach(function (d) { setBody(d, JSON.parse(e.docs[d])); });
   e.undone = kind !== 'redo';
   if (kind === 'redo') { var orig = HIST.list.filter(function (x) { return x.id === e.of; })[0]; if (orig) orig.undone = false; }
-  normalize(); histCommit(); render();
+  normalize(); histCommit(); chgReconcile(); render();
+}
+// Chats aren't part of undo history, so after an undo or redo, set each applied Ask card back
+// to what the ledger now shows: undone means Apply is offered again, redone means Applied.
+function chgReconcile() {
+  var changed = false;
+  (S.chats || []).forEach(function (ch) {
+    (ch.msgs || []).forEach(function (m) {
+      (m.changes || []).forEach(function (c) {
+        if (!c.ap || (c.st !== 'done' && c.st !== 'new')) return;
+        var x = c.op === 'add' ? (c.tid && findTx(c.tid)) : findTx(c.id), st;
+        if (c.op === 'add') st = x ? 'done' : 'new';
+        else if (c.op === 'delete') st = x ? 'new' : 'done';
+        else st = x && JSON.stringify(chgSig(x)) === JSON.stringify(c.was) ? 'new' : 'done';
+        if (st !== c.st) { c.st = st; changed = true; }
+      });
+    });
+  });
+  if (changed) mark('chats');
 }
 // the newest change that has not been undone (skipping the undo records themselves)
 function histLast() { return HIST.list.filter(function (e) { return !e.undone && e.kind !== 'undo' && e.kind !== 'redo'; })[0] || null; }
@@ -1009,13 +1027,16 @@ function noteHabits() {
 // sounds like an expense) from a real slip. Everything comes from the owner's own
 // entries; nothing is fixed in advance.
 function usualPatterns(entries) {
-  var wantN = {}, wantC = {}, gn = {}, gc = {};
+  var wantN = {}, wantC = {}, gn = {}, gc = {}, skip = {};
   entries.forEach(function (t) {
     if (t.note) { var k = noteKey(t.note); if (!(k in wantN)) wantN[k] = t.note.trim(); }
     if (t.cat && !(t.cat in wantC)) wantC[t.cat] = 1;
+    if (t.id) skip[t.id] = 1;
   });
+  // only the other entries count as "usual": a new mistake mustn't vouch for itself
   allTx().forEach(function (t) {
     if (t.t !== 'exp' && t.t !== 'inc') return;
+    if (skip[t.id]) return;
     if (t.note) {
       var k = noteKey(t.note);
       if (k in wantN) {
@@ -1133,14 +1154,29 @@ function aiCall(body) {
     });
   });
 }
-// Entries since the last look (the last 30 days the first time), at most 200, sent with
-// only date, type, amount, category and note.
+// Entries not looked at yet (the last 30 days the first time), oldest first, at most 200 a run,
+// sent with only date, type, amount, category and note. The ids looked at in the last 60 days
+// are kept (ai.seen, [id, date] pairs), so an entry logged late with an earlier date still gets
+// reviewed; when more than 200 are waiting, the rest go on the next open.
 function aiReview() {
   if (!aiReady()) return Promise.resolve(null);
-  var ai = S.meta.ai, since = ai.reviewedTo || addDays(today(), -30);
-  var pick = allTx().filter(function (t) { return (t.t === 'exp' || t.t === 'inc') && !t.feeOf && !t.propOf && t.d > since && t.d <= today(); })
-    .sort(function (a, b) { return a.d < b.d ? -1 : 1; }).slice(-200);
-  var done = function (notes, model) { ai.lastRun = today(); ai.reviewedTo = addDays(today(), -1); if (model) ai.model = model; delete ai.err; mark('meta'); render(); return notes; };
+  var ai0 = S.meta.ai, since = ai0.reviewedTo || addDays(today(), -30), floor = addDays(today(), -60);
+  var useSeen = Array.isArray(ai0.seen), seen = {};
+  (ai0.seen || []).forEach(function (s) { seen[s[0]] = 1; });
+  var waiting = allTx().filter(function (t) { return (t.t === 'exp' || t.t === 'inc') && !t.feeOf && !t.propOf && t.d <= today() && (useSeen ? t.d > floor && !seen[t.id] : t.d > since); })
+    .sort(function (a, b) { return a.d < b.d ? -1 : 1; });
+  var pick = waiting.slice(0, 200), more = waiting.length > pick.length;
+  // S.meta.ai is read again when the answer lands: a sync during the request replaces S.meta
+  var done = function (notes, model) {
+    var ai = S.meta.ai || (S.meta.ai = {});
+    var keep = Array.isArray(ai.seen) ? ai.seen.filter(function (s) { return s[1] > floor; })
+      // first run with this list: what the old date-based review already covered counts as seen
+      : allTx().filter(function (t) { return t.id && t.d > floor && t.d <= since; }).map(function (t) { return [t.id, t.d]; });
+    pick.forEach(function (t) { if (t.id) keep.push([t.id, t.d]); });
+    ai.seen = keep;
+    if (!more) ai.lastRun = today();
+    ai.reviewedTo = addDays(today(), -1); if (model) ai.model = model; delete ai.err; mark('meta'); render(); return notes;
+  };
   if (!pick.length) return Promise.resolve(done(0));
   var items = pick.map(function (t, i) { return { i: i, d: t.d, t: t.t, amt: t.amt, cat: t.cat || '', note: t.note || '' }; });
   return aiCall({ action: 'review', items: items, cats: S.meta.cats.map(function (c) { return { name: c.name, t: c.type || '' }; }), history: usualPatterns(pick) }).then(function (res) {
@@ -1151,7 +1187,7 @@ function aiReview() {
     }).filter(function (n) { return n && n.issue && !have[n.key]; });
     S.meta.aiNotes = (S.meta.aiNotes || []).concat(notes).slice(-100);
     return done(notes.length, res.model);
-  }, function (e) { ai.err = String(e.message || e); mark('meta'); throw e; });
+  }, function (e) { (S.meta.ai || (S.meta.ai = {})).err = String(e.message || e); mark('meta'); throw e; });
 }
 // The passive part: at most once a week, a few seconds after the app opens and syncs.
 function aiMaybe() {
@@ -1237,7 +1273,7 @@ function mdLite(text) {
   text = String(text || '');
   function grab(re, disp) { text = text.replace(re, function (all, src) { maths.push({ src: src, disp: disp }); return '\u0001' + (maths.length - 1) + '\u0001'; }); }
   grab(/\$\$([\s\S]+?)\$\$/g, true);
-  grab(/\[([\s\S]+?)\\]/g, true);
+  grab(/\\\[([\s\S]+?)\\\]/g, true);
   grab(/\\\(([\s\S]+?)\\\)/g, false);
   var out = [], list = null;
   function close() { if (list) { out.push('</' + list + '>'); list = null; } }
@@ -1357,7 +1393,8 @@ function askSend(text) {
   // keep the history bounded: 50 conversations, 60 messages each
   S.chats = chatList().slice(0, 50); S.chats.forEach(function (x) { if (x.msgs && x.msgs.length > 60) x.msgs = x.msgs.slice(-60); });
   mark('chats'); render(); askScroll();
-  aiCall({ action: 'ask', question: q, context: aiContext(), history: hist }).then(function (r) {
+  // aiContext() runs inside the chain, so if it throws the error lands in the chat and Ask isn't left busy
+  Promise.resolve().then(function () { return aiCall({ action: 'ask', question: q, context: aiContext(), history: hist }); }).then(function (r) {
     var am = { role: 'assistant', content: r.answer || '(no answer)', at: new Date().toISOString() }, ch = chgTake(r.changes);
     if (ch.length) am.changes = ch;
     c.msgs.push(am);
@@ -1431,7 +1468,7 @@ function chgApply(c) {
 function chgRun(mi, ks) {
   var cur = UI.chatId && chatById(UI.chatId), m = cur && cur.msgs[mi]; if (!m || !m.changes) return;
   var ok = 0, bad = 0;
-  ks.forEach(function (k) { var c = m.changes[k]; if (!c || c.st !== 'new') return; if (chgApply(c)) { c.st = 'done'; ok++; } else { c.st = 'gone'; bad++; } });
+  ks.forEach(function (k) { var c = m.changes[k]; if (!c || c.st !== 'new') return; if (chgApply(c)) { c.st = 'done'; c.ap = 1; ok++; } else { c.st = 'gone'; bad++; } });
   mark('chats'); render();
   if (ok) toastUndo(ok === 1 ? 'Applied the change' : 'Applied ' + ok + ' changes');
   else if (bad) toast('That entry was changed or deleted since, so nothing was applied');
@@ -1598,7 +1635,8 @@ function lockSheet() {
 function aiSheet() {
   var ai = S.meta.ai || {}, on = aiOn(), cloud = store.mode === 'cloud';
   var who = ai.model ? esc(ai.model) : 'the AI';
-  var body = '<p style="margin-top:0">Once a week, new entries are sent to ' + who + ' to spot likely mistakes; anything it finds waits in Suggestions for you to approve. You can also ask it about your spending in the Ask tab, or ask it to log or fix entries; it shows each change and only makes it when you tap Apply. Only dates, amounts, categories and notes are sent.</p>' +
+  var body = '<p style="margin-top:0">Once a week, new entries are sent to ' + who + ' to spot likely mistakes; anything it finds waits in Suggestions for you to approve. You can also ask it about your spending in the Ask tab, or ask it to log or fix entries; it shows each change and only makes it when you tap Apply.</p>' +
+    '<p>What it sees: the weekly review sends only the new entries’ dates, amounts, categories and notes. A question in Ask sends your whole history so the answer has context: every transaction with its notes, wallets and tags, who you split bills with, people balances, investment and poker entries, PayLater bills and balance counts. Your email isn’t sent. It goes to ' + (ai.model && /claude/i.test(ai.model) ? 'Anthropic' : 'Mistral AI') + ' through a Supabase function that holds the API key.</p>' +
     (!cloud ? '<p class="neg">This needs sync: sign in with your Supabase account first.</p>' : '') +
     '<div class="seg" id="aion"><button data-on="1" aria-pressed="' + on + '">On</button><button data-on="0" aria-pressed="' + !on + '">Off</button></div>' +
     (on ? '<div class="kv" style="margin-top:12px"><span>Last review</span><span>' + (ai.lastRun ? dayYear(ai.lastRun) : 'Not yet') + '</span>' +
@@ -6100,8 +6138,11 @@ function onClick(e) {
   }
   if ((b = t.closest('[data-askretry]'))) {
     var cc = chatById(UI.chatId); if (!cc) return;
-    var i = +b.dataset.askretry, lastQ = cc.msgs[i - 1];
-    cc.msgs.splice(i - 1, 2); if (lastQ && lastQ.role === 'user') askSend(lastQ.content); return;
+    if (UI.askBusy) { toast('Wait for the current answer first'); return; }
+    var i = +b.dataset.askretry, lastQ = i > 0 ? cc.msgs[i - 1] : null;
+    if (lastQ && lastQ.role === 'user') { cc.msgs.splice(i - 1, 2); askSend(lastQ.content); }
+    else { cc.msgs.splice(i, 1); mark('chats'); render(); } // the question was trimmed away: just drop the error
+    return;
   }
   if ((b = t.closest('[data-catgo]'))) { // a category on Month opens its entries for that month
     UI.tab = 'activity'; UI.fcat = b.dataset.catgo; UI.fsub = ''; UI.filter = 'all'; UI.q = ''; UI.all = false; render(); window.scrollTo(0, 0); return;

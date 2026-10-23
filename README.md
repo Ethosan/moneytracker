@@ -31,7 +31,7 @@ A personal finance tracker that installs to your phone like a native app. Track 
 Settings (names only; the values live in `config.js` and Supabase secrets):
 
 - **App (`config.js`, public):** `supabaseUrl`, `supabaseAnonKey`, `googleClientId`
-- **Edge Function secrets:** `MISTRAL_API_KEY` or `ANTHROPIC_API_KEY`, `AI_PROVIDER`, `AI_ALLOWED_IDS`; optional `MISTRAL_MODEL`, `ANTHROPIC_MODEL`
+- **Edge Function secrets:** `MISTRAL_API_KEY` or `ANTHROPIC_API_KEY`, `AI_PROVIDER`, `AI_ALLOWED_IDS`; optional `MISTRAL_MODEL`, `ANTHROPIC_MODEL`, `AI_DAILY_LIMIT`
 
 ## Features
 
@@ -131,7 +131,7 @@ npx supabase login
 npx supabase functions deploy ledger-ai --project-ref <project-ref> --use-api
 ```
 
-Then in **Supabase → Edge Functions → Secrets** add `MISTRAL_API_KEY`, or `ANTHROPIC_API_KEY` with `AI_PROVIDER=anthropic`. Optional overrides: `MISTRAL_MODEL`, `ANTHROPIC_MODEL`. Right now `OPEN_TO_ALL` at the top of the function is `true`, so every signed-in account can use the assistant (up to 120 calls an hour each). Sign-in lets anyone create an account, so to keep the API key to yourself set it to `false` and add `AI_ALLOWED_IDS`: your user id from **Authentication → Users** (the UUID), comma-separated for a small team. Set a monthly spending limit with your AI provider as a safety net.
+Then in **Supabase → Edge Functions → Secrets** add `MISTRAL_API_KEY`, or `ANTHROPIC_API_KEY` with `AI_PROVIDER=anthropic`. Optional overrides: `MISTRAL_MODEL`, `ANTHROPIC_MODEL`. Right now `OPEN_TO_ALL` at the top of the function is `true`, so every signed-in account can use the assistant: up to 120 calls an hour each, and 300 a day for all accounts together (change it with the `AI_DAILY_LIMIT` secret). The caps are counted in the database by `ai_take_call()` (in `supabase/schema.sql`), so they hold across restarts. Sign-in lets anyone create an account, so to keep the API key to yourself set it to `false` and add `AI_ALLOWED_IDS`: your user id from **Authentication → Users** (the UUID), comma-separated for a small team. Set a monthly spending limit with your AI provider as a safety net: for Mistral, **Admin → Administration → Workspaces →** your workspace **→ Settings → Monthly spending limit** (there is none by default).
 
 ## Custom domain (optional)
 
