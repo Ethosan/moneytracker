@@ -1,5 +1,7 @@
 # Cloudflare Pages Migration — moneytracker (20bucks)
 
+> **Account**: Log into Cloudflare Dashboard as **ethantam0206@gmail.com** (not eatentam@gmail.com).
+
 ## What changed
 
 - **`_headers`** (new): Security + cache headers moved from `netlify.toml` to `_headers` at the repo root. Cloudflare Pages reads this from the build output directory.
