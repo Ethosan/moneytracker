@@ -1,31 +1,37 @@
+<img src="icons/icon-512.png" width="88" alt="20bucks logo: a pink coin above two stacked rings">
+
 # 20bucks
 
-A personal finance tracker that installs to your phone like a native app. Track everyday spending, split bills with friends, follow PayLater instalments, and see trading and poker P&L in one place. Data syncs to your own Supabase project and stays available offline.
+A personal finance tracker that installs to your phone like a native app. Track everyday spending, split bills with friends, follow PayLater instalments, and see trading and poker P&L in one place. An optional AI assistant answers questions about your money and flags entries that look wrong. Data syncs to your own Supabase project and stays available offline.
 
 ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)
 ![PWA](https://img.shields.io/badge/PWA-5A0FC8?logo=pwa&logoColor=white)
 ![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=white)
-![Netlify](https://img.shields.io/badge/Netlify-00C7B7?logo=netlify&logoColor=white)
+![Cloudflare Pages](https://img.shields.io/badge/Cloudflare_Pages-F38020?logo=cloudflarepages&logoColor=white)
+![Mistral AI](https://img.shields.io/badge/Mistral_AI-FA520F?logo=mistralai&logoColor=white)
 
 <p align="center">
-  <img src="docs/screenshots/month.png" width="24%" alt="Month overview">
-  <img src="docs/screenshots/activity.png" width="24%" alt="Activity feed">
-  <img src="docs/screenshots/insights.png" width="24%" alt="Spending insights">
-  <img src="docs/screenshots/month-light.png" width="24%" alt="Month overview in light mode">
+  <img src="docs/screenshots/month.png" width="24%" alt="Month overview: $966 spent so far in October, on pace for $1,302 against a usual $1,498, and spending by category">
+  <img src="docs/screenshots/activity.png" width="24%" alt="Activity feed: the day's transactions grouped by date, with category and wallet">
+  <img src="docs/screenshots/insights.png" width="24%" alt="Insights: food spending per month from May to October against the average">
+  <img src="docs/screenshots/ask.png" width="24%" alt="Ask: an answer comparing September with August in a table, then a proposed change card to log lunch, with Apply and Skip">
 </p>
-<p align="center"><sub>Month overview, activity feed, insights, and light mode. Shown with demo data.</sub></p>
+<p align="center"><sub>Month overview, activity feed, insights, and the Ask chat proposing a change. Shown with demo data.</sub></p>
 
 ## At a glance
 
 | | |
 | --- | --- |
 | **Live** | https://20bucks.ethantam.dev |
-| **Hosting** | Netlify site `moneyet` (plain static files, no build) |
-| **Back end** | Supabase (Postgres, Auth) plus the `ledger-ai` Edge Function |
+| **Hosting** | Cloudflare Pages, connected to this repository; every push to `main` deploys. No build step: the build command copies the app files into `dist/` (see `MIGRATION.md`) |
+| **Data** | Supabase (Postgres, Auth, row level security) plus the `ledger-ai` Edge Function |
 | **Run locally** | Serve the repository root with any static server, for example `npx serve .`, then open the printed address. `npm test` runs the tests. |
-| **App settings** | `config.js`: `supabaseUrl`, `supabaseAnonKey` (public) |
-| **Edge Function secrets** | `MISTRAL_API_KEY` or `ANTHROPIC_API_KEY`, `AI_PROVIDER`, `AI_ALLOWED_IDS`, optional `MISTRAL_MODEL`, `ANTHROPIC_MODEL` |
 | **Source** | [gitlab.com/eatentam/moneytracker](https://gitlab.com/eatentam/moneytracker) (moved from GitHub on 17 Oct 2026) |
+
+Settings (names only; the values live in `config.js` and Supabase secrets):
+
+- **App (`config.js`, public):** `supabaseUrl`, `supabaseAnonKey`, `googleClientId`
+- **Edge Function secrets:** `MISTRAL_API_KEY` or `ANTHROPIC_API_KEY`, `AI_PROVIDER`, `AI_ALLOWED_IDS`; optional `MISTRAL_MODEL`, `ANTHROPIC_MODEL`
 
 ## Features
 
@@ -38,46 +44,36 @@ A personal finance tracker that installs to your phone like a native app. Track 
 - **Balance checks.** Count a wallet and see exactly what is missing since the last count. A gap stays open after later counts until something you log explains it, and an entry dated on the wrong side of a count is spotted from the opposite gaps it leaves either side.
 - **Insights.** Monthly patterns and savings per month, plus data-health checks.
 - **AI assistant (optional).** A weekly review that flags likely mistakes for you to approve, and a chat that answers questions about your money, with tables and maths rendered inline. Ask it to log, fix or delete an entry and it proposes the change as a card: nothing changes until you tap Apply (and Undo takes it back).
-- **Private by default.** Email one-time-code sign-in, and an optional PIN or Face ID/fingerprint lock per device. Row level security keeps each account to its own data.
+- **Private by default.** Email one-time-code or Google sign-in, and an optional PIN or Face ID/fingerprint lock per device. Row level security keeps each account to its own data.
 - **Works offline.** A service worker caches the app, and changes sync when you are back online.
 
-## Tech stack
+## Architecture
 
-| Layer | Technology |
+```
+Phone / browser ── static files (Cloudflare Pages) ── service worker keeps it working offline
+      │
+      ├──▶ Supabase Auth       email code or Google sign-in
+      ├──▶ Supabase Postgres   ledger_docs: one JSON document per month and per list, row level security
+      └──▶ Edge Function       ledger-ai ──▶ Mistral (or Anthropic Claude)   only when the assistant is on
+```
+
+| Path | Purpose |
 | --- | --- |
-| Front end | Single-page app in vanilla HTML, CSS and JavaScript; installable PWA with a service worker |
-| Back end | Supabase (Postgres, Auth, row level security) |
-| AI | Supabase Edge Function (`supabase/functions/ledger-ai`) calling Mistral or Anthropic Claude |
-| Hosting | Netlify (security headers and CSP in `netlify.toml`), or any static host |
-| Email | Resend SMTP for sign-in codes |
+| `index.html`, `app.css` | Page shell and styles |
+| `js/app.js` | The app |
+| `js/dates.js` | Date helpers (month-end rules, statement date parsing) |
+| `js/mm-import.js` | Money Manager import mapper |
+| `js/google-signin.js` | Google sign-in button |
+| `supabase/schema.sql` | Tables and row level security policies |
+| `supabase/functions/ledger-ai/` | The AI assistant's Edge Function; it holds the API key |
+| `sw.js` | Offline cache |
+| `config.js` | Supabase URL and public anon key |
+| `_headers`, `netlify.toml` | Security headers and CSP for Cloudflare Pages, and the older Netlify config |
+| `vendor/` | Third-party libraries, served locally: sign-in, charts, spreadsheet and PDF import, maths |
+| `tests/` | Unit tests (`npm test`) |
+| `docs/screenshots/` | The screenshots above |
 
-## Project structure
-
-```
-index.html                 page shell
-app.css                    styles
-js/app.js                  the app
-js/dates.js                date helpers (month-end rules, statement date parsing)
-js/mm-import.js            Money Manager import mapper
-tests/                     unit tests (npm test)
-sw.js                      offline cache
-config.js                  Supabase URL and public anon key
-manifest.webmanifest       install metadata
-supabase/schema.sql        tables and row level security policies
-supabase/functions/        AI assistant Edge Function
-netlify.toml               build, cache and security headers
-vendor/                    third-party libraries, served locally: sign-in, charts, spreadsheet and PDF import, maths
-icons/                     app icons
-docs/screenshots/          demo screenshots
-```
-
-## Running tests
-
-```bash
-npm test
-```
-
-Needs Node 18 or newer and nothing else: no install step, no build. The tests cover the date rules that are easy to get wrong, like instalments and renewals on the 29th to 31st. They also check leap years. Impossible statement dates like 31 Feb never make it in.
+The browser only ever holds the public anon key. Every row is locked to its owner by row level security, and the AI provider's key lives in Supabase as a secret, never in this repository.
 
 ## Getting started
 
@@ -103,9 +99,9 @@ Needs Node 18 or newer and nothing else: no install step, no build. The tests co
 
 ### 2. Deploy
 
-**Netlify (recommended):** connect the repository. `netlify.toml` publishes only the app files and applies the security headers. Update the Supabase URL in the Content-Security-Policy `connect-src` to match your project.
+**Cloudflare Pages (what the live site uses):** connect the repository, set the build output directory to `dist` and the build command from `MIGRATION.md`. `_headers` applies the security headers. Update the Supabase URL in the Content-Security-Policy `connect-src` to match your project.
 
-**Other static hosts:** there is no build step, so any static host (Cloudflare Pages, GitLab Pages and so on) can serve the repository root. Copy the headers from `netlify.toml` into that host's own config.
+**Other static hosts:** there is no build step, so any static host (Netlify, GitLab Pages and so on) can serve the repository root. `netlify.toml` has the same headers for Netlify.
 
 A public repository only exposes the code. Your data lives in Supabase behind row level security, and `.gitignore` blocks backups and spreadsheets from being committed.
 
@@ -116,9 +112,17 @@ A public repository only exposes the code. Your data lives in Supabase behind ro
 3. Install it: Safari → Share → Add to Home Screen, or Chrome → ⋮ → Install app.
 4. Once your account exists, turn off **Allow new users to sign up** in Supabase if the app is just for you.
 
+### Tests
+
+```bash
+npm test
+```
+
+Needs Node 18 or newer and nothing else: no install step, no build. The tests cover the date rules that are easy to get wrong, like instalments and renewals on the 29th to 31st. They also check leap years. Impossible statement dates like 31 Feb never make it in.
+
 ## AI assistant (optional)
 
-Off until enabled in **Settings → AI assistant**. Once a week it sends entries added since its last review (date, type, amount, category and note), plus the type of each category and your usual patterns for those notes and categories, worked out from your older entries, and puts anything it flags in Suggestions for you to approve. Questions you ask send your full history so the answer has context.
+Off until enabled in **Settings → AI assistant**. Once a week it sends entries added since its last review (date, type, amount, category and note), plus the type of each category and your usual patterns for those notes and categories, worked out from your older entries, and puts anything it flags in Suggestions for you to approve. Questions you ask in the **Ask** tab send your full history so the answer has context.
 
 The API key never lives in this repository; it is stored as a Supabase secret:
 
@@ -133,7 +137,7 @@ Then in **Supabase → Edge Functions → Secrets** add `MISTRAL_API_KEY`, or `A
 
 1. Buy a domain from Cloudflare, Porkbun or Namecheap. Avoid free TLDs such as `.tk`, which browsers and email providers distrust.
 2. Use a subdomain per project, for example `20bucks.yourname.com`. Avoid brand names (`ledger`, `wallet`, `bank`, `paypal`) in the subdomain: Google Safe Browsing can flag a sign-in page that uses one as deceptive.
-3. In Netlify, add the custom domain; HTTPS is issued automatically. In your DNS, add a CNAME pointing to `<your-site>.netlify.app`.
+3. Add the custom domain to the Pages project (**Custom domains**); HTTPS is issued automatically.
 4. Update the Site URL and Redirect URLs in Supabase.
 5. In Resend, verify the domain and change the sender to `code@yourname.com`.
 
@@ -146,3 +150,7 @@ Then in **Supabase → Edge Functions → Secrets** add `MISTRAL_API_KEY`, or `A
 | 504 errors in the console | A temporary server error. Reload; the app keeps working from cache. |
 | Second "Verify" says the code is wrong | The first press worked and used the code. Wait a few seconds or reopen the app. |
 | Phone shows an old version | Close and reopen the app twice; the cache refreshes in the background. |
+
+## Legal
+
+See the [privacy policy](PRIVACY.md) and [terms](TERMS.md). Released under the [MIT License](LICENSE).
