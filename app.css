@@ -999,12 +999,28 @@ nav.tabs {
   border: 1px solid var(--line);
 }
 
-/* Google sign-in loading overlay: instant feedback on tap, before the popup appears */
+/* Full-screen splash: shown from the moment Google sign-in starts (tap) through
+   auth and data fetch. Covers the whole viewport so the login page is never visible
+   during the gap. Lives on <body> as #splash, or inside #app as .splash-static. */
 .gbtn{position:relative}
-.gbtn-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:10px;
-  background:var(--surface);border-radius:999px;font-size:14px;font-weight:600;color:var(--muted);
-  z-index:2;pointer-events:auto;animation:fadeIn 150ms var(--ease-out)}
-.gbtn-loading .spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--accent);
-  border-radius:50%;animation:spin 0.7s linear infinite;flex:none}
+#splash,.splash-static{position:fixed;inset:0;z-index:9999;display:grid;place-items:center;
+  background:var(--bg);animation:splashIn 200ms var(--ease-out)}
+.splash-static{position:fixed}
+#splash.splash-hide{animation:splashOut 350ms var(--ease-out) forwards}
+.splash-inner{display:grid;place-items:center;gap:0;text-align:center}
+.splash-logo{font-size:28px;font-weight:700;letter-spacing:-.03em;color:var(--ink);
+  margin-bottom:28px;animation:splashRise 400ms var(--ease-out) both}
+.splash-spin{width:32px;height:32px;border:3px solid var(--line);border-top-color:var(--accent);
+  border-radius:50%;animation:spin 0.7s linear infinite;margin-bottom:16px}
+.splash-text{font-size:14px;font-weight:600;color:var(--muted);
+  animation:splashRise 400ms var(--ease-out) 80ms both}
 @keyframes spin{to{transform:rotate(360deg)}}
-@media (prefers-reduced-motion:reduce){.gbtn-loading .spin{animation:spin 1.4s linear infinite}}
+@keyframes splashIn{from{opacity:0}to{opacity:1}}
+@keyframes splashOut{from{opacity:1}to{opacity:0}}
+@keyframes splashRise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){
+  #splash,.splash-static{animation:none}
+  #splash.splash-hide{animation:splashOut 200ms ease forwards}
+  .splash-logo,.splash-text{animation:none}
+  .splash-spin{animation:spin 1.4s linear infinite}
+}

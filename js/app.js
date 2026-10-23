@@ -591,11 +591,11 @@ function connect() {
   if (!store.authSub) store.authSub = store.sb.auth.onAuthStateChange(function (ev) {
     // an email link landing on this page completes sign-in through the URL; pick it up here
     if (ev === 'SIGNED_IN' && store.mode !== 'cloud' && store.mode !== 'cloud-offline') connect();
-    if (ev === 'SIGNED_OUT') { store.mode = 'auth'; render(); }
+    if (ev === 'SIGNED_OUT') { store.mode = 'auth'; render(); hideSplash(); }
   });
   store.sb.auth.getSession().then(function (r) {
     var sess = r.data && r.data.session;
-    if (!sess) { if (store.mode === 'connecting') { store.mode = 'auth'; render(); } store.connectBusy = false; return; }
+    if (!sess) { if (store.mode === 'connecting') { store.mode = 'auth'; render(); } store.connectBusy = false; hideSplash(); return; }
     store.uid = sess.user.id; store.email = sess.user.email;
     var gid0 = (sess.user.identities || []).filter(function (i) { return i.provider === 'google'; })[0];
     store.google = gid0 && gid0.identity_data && gid0.identity_data.email ? gid0.identity_data.email : null;
@@ -614,19 +614,19 @@ function connect() {
         res.data.forEach(function (d) { absorb(d.id, d.body); }); histSnap();
         normalize(); saveLocal(); markAll();
       } else if (allTx().length || S.ledger.length) markAll();
-      store.mode = 'cloud'; setSync('Synced'); render(); flush(); aiMaybe(); ratesMaybe(); store.connectBusy = false;
+      store.mode = 'cloud'; setSync('Synced'); render(); hideSplash(); flush(); aiMaybe(); ratesMaybe(); store.connectBusy = false;
     });
   }).catch(function (e) {
     store.connectBusy = false;
     store.err = errText(e);
-    if (store.mode === 'connecting') { store.mode = 'auth'; render(); }
+    if (store.mode === 'connecting') { store.mode = 'auth'; render(); } hideSplash();
     if (isNetworkErr(e)) {
       // genuinely offline: keep working from the local copy and try again shortly
-      store.mode = 'cloud-offline'; setSync('Offline, will sync'); render();
+      store.mode = 'cloud-offline'; setSync('Offline, will sync'); render(); hideSplash();
       clearTimeout(connect.t); connect.t = setTimeout(connect, 15000);
     } else {
       // something is wrong at the other end; retrying forever would just hide it
-      store.mode = 'error'; setSync('Sync problem'); render();
+      store.mode = 'error'; setSync('Sync problem'); render(); hideSplash();
     }
   });
 }
@@ -654,28 +654,50 @@ document.addEventListener('keydown', function (e) {
   e.preventDefault(); if (e.shiftKey) redoLast(); else undoLast();
 });
 window.addEventListener('online', function () { if (store.mode === 'cloud') flush(); else if (store.mode === 'cloud-offline') connect(); });
-// Google sign-in button: instant loading overlay on tap, before the popup appears.
-// Google renders its button as an iframe, so the tap-to-popup gap feels like nothing happened.
-function gbtnLoading(container, initialText) {
-  var overlay = document.createElement('div');
-  overlay.className = 'gbtn-loading';
-  overlay.innerHTML = '<span class="spin"></span><span></span>';
-  overlay.lastChild.textContent = initialText;
-  container.appendChild(overlay);
-  var textEl = overlay.lastChild;
-  var dismissed = false;
-  var timer = setTimeout(dismiss, 15000); // safety: popup blocked or cancelled
-  function setText(t) { if (!dismissed) textEl.textContent = t; }
-  function dismiss() { if (dismissed) return; dismissed = true; clearTimeout(timer); overlay.remove(); }
-  return { setText: setText, dismiss: dismiss };
+// Full-screen splash shown from the moment Google sign-in starts (tap on the button)
+// through auth and data fetch, until the app is ready. Lives on <body> so render()
+// calls that replace #app innerHTML don't remove it.
+function showSplash(text) {
+  clearTimeout(showSplash.timer);
+  var el = document.getElementById('splash');
+  if (el) { el.querySelector('.splash-text').textContent = text || 'Loading…'; el.classList.remove('splash-hide'); return; }
+  el = document.createElement('div');
+  el.id = 'splash';
+  el.innerHTML = '<div class="splash-inner">' +
+    '<div class="splash-logo">20bucks</div>' +
+    '<div class="splash-spin"></div>' +
+    '<div class="splash-text">' + (text || 'Loading…') + '</div>' +
+    '</div>';
+  document.body.appendChild(el);
+  // Safety: if the Google popup is blocked and never opens, don't leave the user stuck
+  showSplash.timer = setTimeout(function () {
+    var s = document.getElementById('splash');
+    if (s && !s.classList.contains('splash-hide')) {
+      hideSplash();
+      if (typeof toast === 'function') toast('Sign-in was cancelled. Tap the Google button to try again.');
+    }
+  }, 15000);
+}
+function setSplashText(t) {
+  clearTimeout(showSplash.timer);
+  var el = document.getElementById('splash'); if (el) el.querySelector('.splash-text').textContent = t;
+}
+function hideSplash() {
+  clearTimeout(showSplash.timer);
+  var el = document.getElementById('splash');
+  if (!el) return;
+  el.classList.add('splash-hide');
+  setTimeout(function () { el.remove(); }, 350);
 }
 
 // Full-screen loading state between sign-in and the app: the gap while
 // Supabase checks the session and fetches your data is not the login page.
 function renderConnecting() {
-  return '<main class="login"><div style="display:grid;place-items:center;min-height:60vh;text-align:center">' +
-    '<div><div class="spin" style="width:28px;height:28px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:spin 0.7s linear infinite;margin:0 auto 16px"></div>' +
-    '<p style="font-size:15px;font-weight:600;color:var(--muted)">Loading your ledger…</p></div></div></main>';
+  return '<div class="splash-static"><div class="splash-inner">' +
+    '<div class="splash-logo">20bucks</div>' +
+    '<div class="splash-spin"></div>' +
+    '<div class="splash-text">Loading your ledger…</div>' +
+    '</div></div>';
 }
 
 function renderLogin() {
@@ -734,20 +756,22 @@ function wireLogin() {
   // Sign in with Google: one tap, no code to type. The email code stays as the fallback.
   var gbtn = $('#gbtn'), gid = (window.LEDGER_CONFIG || {}).googleClientId;
   if (gbtn && gid && window.GoogleSignIn && store.sb) {
-    var gLoad = null;
     gbtn.addEventListener('pointerdown', function () {
-      if (gLoad) return;
-      gLoad = gbtnLoading(gbtn, 'Opening Google…');
+      // Full-screen splash from the moment of tap: the Google popup takes a moment to
+      // appear, and once it closes the auth + data fetch takes a few seconds. Neither
+      // gap should show the login page.
+      showSplash('Opening Google…');
     });
     GoogleSignIn.mount(gbtn, gid, function (idToken, nonce) {
-      if (gLoad) gLoad.setText('Signing in…');
+      setSplashText('Signing in…');
       say(''); si.disabled = true;
       store.sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: nonce }).then(function (r) {
-        if (r.error) { if (gLoad) { gLoad.dismiss(); gLoad = null; } si.disabled = false; say(/provider is not enabled|unsupported provider/i.test(r.error.message) ? 'Google sign-in isn\'t switched on yet. Use the email code for now.' : otpErr(r.error)); return; }
+        if (r.error) { hideSplash(); si.disabled = false; say(/provider is not enabled|unsupported provider/i.test(r.error.message) ? 'Google sign-in isn\'t switched on yet. Use the email code for now.' : otpErr(r.error)); return; }
+        setSplashText('Loading your ledger…');
         store.mode = 'connecting'; render();
         connect();
-      }).catch(function () { if (gLoad) { gLoad.dismiss(); gLoad = null; } si.disabled = false; store.mode = 'auth'; render(); say('Could not finish Google sign-in. Check your connection and try again.'); });
-    }, { oneTap: true }).catch(function () { gbtn.hidden = true; var o = gbtn.nextElementSibling; if (o) o.hidden = true; });
+      }).catch(function () { hideSplash(); si.disabled = false; store.mode = 'auth'; render(); say('Could not finish Google sign-in. Check your connection and try again.'); });
+    }, { oneTap: true }).catch(function () { hideSplash(); gbtn.hidden = true; var o = gbtn.nextElementSibling; if (o) o.hidden = true; });
   }
   em.addEventListener('input', function () { if (sentTo && em.value.trim() !== sentTo) reset(); });
   em.addEventListener('keydown', function (e) { if (e.key === 'Enter') si.click(); });
@@ -3784,18 +3808,16 @@ function googleSheet() {
   openSheet('Google sign-in', body, function (el) {
     var conn = $('#gconn', el);
     if (conn) {
-      var gLoad2 = null;
       conn.addEventListener('pointerdown', function () {
-        if (gLoad2) return;
-        gLoad2 = gbtnLoading(conn, 'Opening Google…');
+        showSplash('Opening Google…');
       });
       GoogleSignIn.mount(conn, gid, function (idToken, nonce) {
-        if (gLoad2) gLoad2.setText('Connecting…');
+        setSplashText('Connecting…');
         var payload = null;
         try { payload = JSON.parse(atob(idToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (e) { }
         var gmail = payload && payload.email;
         if (gmail && store.email && gmail.toLowerCase() !== store.email.toLowerCase()) {
-          if (gLoad2) { gLoad2.dismiss(); gLoad2 = null; }
+          hideSplash();
           toast('That Google account (' + gmail + ') doesn\u2019t match this account\u2019s email (' + store.email + '). Use the Google account with the same email.');
           return;
         }
@@ -3805,18 +3827,19 @@ function googleSheet() {
         // pop-up sign-in, so the account gains Google without a secret.
         store.sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: nonce }).then(function (r) {
           if (r.error) {
-            if (gLoad2) { gLoad2.dismiss(); gLoad2 = null; }
+            hideSplash();
             if (/provider is not enabled|unsupported provider/i.test(r.error.message)) { toast('Google sign-in isn\u2019t switched on yet.'); return; }
             if (/verified|verification/i.test(r.error.message)) { toast('Your email isn\u2019t verified yet. Verify it first, then connect Google.'); return; }
             toast(otpErr(r.error) || r.error.message); return;
           }
           var linked = (r.data && r.data.user && r.data.user.identities || []).some(function (i) { return i.provider === 'google'; });
-          if (!linked) { if (gLoad2) { gLoad2.dismiss(); gLoad2 = null; } toast('Google didn\u2019t connect \u2014 the emails must match.'); return; }
+          if (!linked) { hideSplash(); toast('Google didn\u2019t connect \u2014 the emails must match.'); return; }
           store.google = gmail || store.google;
+          hideSplash();
           toast('Google connected');
           closeSheet(); render();
-        }).catch(function () { if (gLoad2) { gLoad2.dismiss(); gLoad2 = null; } toast('Could not connect Google. Try again.'); });
-      }, {}).catch(function () { toast('Could not load Google sign-in.'); });
+        }).catch(function () { hideSplash(); toast('Could not connect Google. Try again.'); });
+      }, {}).catch(function () { hideSplash(); toast('Could not load Google sign-in.'); });
     }
     var un = $('#gunlink', el);
     if (un) un.addEventListener('click', function () {
