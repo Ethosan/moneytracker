@@ -11,6 +11,8 @@
  *     data-bottom="calc(88px + env(safe-area-inset-bottom, 0px))"></script>
  *
  * data-bottom (optional, default 20px) lifts the button above a site's bottom tab bar.
+ * The button is a small muted icon that takes the accent on hover; data-button-label is
+ * its tooltip and accessible name.
  *
  * Self-contained: injects its own CSS, no external dependencies.
  * Submits via Supabase REST API (PostgREST) using fetch().
@@ -30,7 +32,7 @@
     bottom: script.getAttribute("data-bottom") || "20px",
   };
   // Only lengths and calc()/env() expressions, so the attribute can't inject other CSS.
-  if (!/^[\w\s().,+*\/%-]+$/.test(cfg.bottom)) cfg.bottom = "20px";
+  if (!/^[\w\s().,+*%-]+$/.test(cfg.bottom)) cfg.bottom = "20px";
 
   if (!cfg.supabaseUrl || !cfg.supabaseKey) {
     console.warn("[feedback-widget] Missing data-supabase-url or data-supabase-key");
@@ -41,14 +43,17 @@
   var css = [
     ":root{--fbw-accent:" + cfg.accent + "}",
     ".fbw-reset{all:initial;box-sizing:border-box;font-family:inherit}",
-    "#fbw-root{position:fixed;bottom:" + cfg.bottom + ";right:20px;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}",
+    "#fbw-root{position:fixed;bottom:" + cfg.bottom + ";right:16px;z-index:2147483647;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}",
     ":where(#fbw-root) *{box-sizing:border-box;margin:0;padding:0}",
-    ".fbw-btn{display:flex;align-items:center;justify-content:center;gap:6px;height:48px;min-width:48px;padding:0 14px;border:none;border-radius:24px;background:var(--fbw-accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;box-shadow:0 4px 14px rgba(0,0,0,.22),0 1px 3px rgba(0,0,0,.14);transition:transform .15s ease-out,box-shadow .15s ease-out;user-select:none;-webkit-tap-highlight-color:transparent}",
-    ".fbw-btn:hover{box-shadow:0 6px 20px rgba(0,0,0,.28),0 2px 6px rgba(0,0,0,.16)}",
+    // Small and muted so it stays out of the way; the accent shows only on hover
+    ".fbw-btn{position:relative;display:flex;align-items:center;justify-content:center;width:36px;height:36px;border:1px solid rgba(0,0,0,.08);border-radius:18px;background:rgba(255,255,255,.82);-webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px);color:#6b6b6b;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.12);transition:transform .15s ease-out,color .15s ease-out,box-shadow .15s ease-out;user-select:none;-webkit-tap-highlight-color:transparent}",
+    // a 46px tap target around the 36px button
+    ".fbw-btn::before{content:'';position:absolute;inset:-5px;border-radius:50%}",
+    "@media (hover:hover){.fbw-btn:hover{color:var(--fbw-accent);box-shadow:0 2px 8px rgba(0,0,0,.16)}}",
+    ".fbw-btn:focus-visible{outline:2px solid var(--fbw-accent);outline-offset:2px}",
     ".fbw-btn:active{transform:scale(.94)}",
-    ".fbw-btn svg{width:20px;height:20px;flex:none}",
-    ".fbw-btn span{white-space:nowrap}",
-    "@media (max-width:480px){.fbw-btn span{display:none}.fbw-btn{width:48px;padding:0}}",
+    ".fbw-btn svg{width:16px;height:16px;flex:none}",
+    "@media (prefers-color-scheme:dark){.fbw-btn{background:rgba(44,44,46,.82);border-color:rgba(255,255,255,.1);color:#a1a1a6}}",
     ".fbw-backdrop{position:fixed;inset:0;z-index:2147483646;background:rgba(0,0,0,.4);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:opacity .2s ease-out}",
     ".fbw-backdrop.fbw-open{opacity:1;pointer-events:auto}",
     ".fbw-modal{position:fixed;z-index:2147483647;top:50%;left:50%;width:calc(100% - 32px);max-width:440px;max-height:calc(100% - 48px);overflow-y:auto;background:#fff;color:#1a1a1a;border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.15);transform:translate(-50%,-50%) scale(.92);opacity:0;pointer-events:none;transition:transform .22s cubic-bezier(.16,1,.3,1),opacity .18s ease-out}",
@@ -116,7 +121,8 @@
   btn.className = "fbw-btn";
   btn.type = "button";
   btn.setAttribute("aria-label", cfg.buttonLabel);
-  btn.innerHTML = iconSvg + "<span>" + escapeHtml(cfg.buttonLabel) + "</span>";
+  btn.title = cfg.buttonLabel;
+  btn.innerHTML = iconSvg;
 
   var head = document.createElement("div");
   head.className = "fbw-head";
@@ -280,12 +286,6 @@
         submitBtn.disabled = false;
       });
   });
-
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, function (c) {
-      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
-    });
-  }
 
   function mount() {
     root.appendChild(backdrop);
