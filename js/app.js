@@ -1364,7 +1364,7 @@ function renderAsk() {
       '<p>Answers come from your full history. Ask it to log or fix an entry and it shows the change first: nothing changes until you tap Apply.</p>' +
       '<div class="ask-starters">' + ASK_STARTERS.map(function (q) { return '<button class="chip" data-askq="' + esc(q) + '">' + esc(q) + '</button>'; }).join('') + '</div></div>';
   } else {
-    main += '<div class="ask-chat-hd"><button class="ask-back" data-act="chatback" aria-label="All conversations">\u2039</button><b>' + esc(cur.title || 'Conversation') + '</b></div>' +
+    main += '<div class="ask-chat-hd"><button class="ask-back" data-act="chatback" aria-label="All conversations">\u2039</button><b>' + esc(cur.title || 'Conversation') + '</b><button class="chip sm ask-newchat" data-act="chatnew">New</button></div>' +
       '<div class="ask-msgs" role="log" aria-live="polite">' + (cur.msgs || []).map(function (m, i) {
         if (m.role === 'user') return '<div class="ask-msg me"><div class="bubble">' + esc(m.content).replace(/\n/g, '<br>') + '</div><time>' + chatWhen(m.at) + '</time></div>';
         if (m.role === 'error') return '<div class="ask-msg err"><div class="bubble"><b>That didn\u2019t go through.</b> ' + esc(m.content) + ' <button class="linkbtn" data-askretry="' + i + '">Try again</button></div></div>';
@@ -1374,7 +1374,7 @@ function renderAsk() {
   }
   main += '<form class="ask-compose" id="askform"><textarea id="askq" rows="1" placeholder="' + (cur ? 'Ask a follow-up' : 'Ask about your money') + '" aria-label="Your question" enterkeyhint="send">' + esc(UI.askDraft || '') + '</textarea>' +
     '<button class="ask-send" type="submit" aria-label="Send"' + (UI.askBusy ? ' disabled' : '') + '><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button></form></div>';
-  return h + '<div class="ask">' + side + main + '</div>';
+  return h + '<div class="ask' + (cur ? ' in-chat' : '') + '">' + side + main + '</div>';
 }
 function wireAsk() {
   var q = $('#askq'), f = $('#askform'); if (!q || !f) return;
@@ -1384,8 +1384,22 @@ function wireAsk() {
   q.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); askSend(q.value); } });
   f.addEventListener('submit', function (e) { e.preventDefault(); askSend(q.value); });
   if (UI.chatId) askScroll();
+  // Mobile keyboard: shrink the chat area when the on-screen keyboard opens so the
+  // compose bar and the latest message stay visible above the keyboard.
+  if (window.visualViewport && isTouch()) {
+    var vv = window.visualViewport, askEl = document.querySelector('.ask.in-chat');
+    if (askEl) {
+      var onKbResize = function () {
+        var kb = window.innerHeight - vv.height;
+        if (kb > 80) { askEl.style.setProperty('--kb', kb + 'px'); askEl.classList.add('kb-open'); askScroll(); }
+        else { askEl.style.removeProperty('--kb'); askEl.classList.remove('kb-open'); }
+      };
+      vv.addEventListener('resize', onKbResize);
+      q.addEventListener('blur', function () { setTimeout(function () { var el = document.querySelector('.ask.in-chat'); if (el) { el.style.removeProperty('--kb'); el.classList.remove('kb-open'); } }, 100); });
+    }
+  }
 }
-function askScroll() { requestAnimationFrame(function () { window.scrollTo(0, document.documentElement.scrollHeight); }); }
+function askScroll() { requestAnimationFrame(function () { var msgs = document.querySelector('.ask-msgs'); if (msgs) { msgs.scrollTop = msgs.scrollHeight; } else { window.scrollTo(0, document.documentElement.scrollHeight); } }); }
 function askSend(text) {
   var q = String(text || '').trim(); if (!q || UI.askBusy) return;
   if (!aiReady()) { toast('Turn on the AI assistant first'); return; }

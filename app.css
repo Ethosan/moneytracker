@@ -805,6 +805,117 @@ details.morepat>summary span{flex-basis:100%;font-size:13px;font-weight:400;colo
 .ask-side{order:2} /* phone: say hello first, past conversations underneath */
 .ask-main{order:1}
 .ask-main{min-width:0;display:flex;flex-direction:column}
+/* ===== Mobile AI chat: app-like layout (max-width:1023px) ===== */
+@media (max-width:1023px){
+  /* Make the main a flex column on the Ask tab so the chat can fill the space
+     between the header and the nav tabs. */
+  /* When in a chat: make the main a fixed-height flex column so the messages
+     area can scroll independently between the header and the nav tabs. */
+  main.tab-ask:has(.ask.in-chat){
+    display:flex;flex-direction:column;
+    height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));
+    height:calc(100svh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));
+    padding-bottom:calc(82px + env(safe-area-inset-bottom,0px));
+    overflow:hidden;
+  }
+  main.tab-ask:has(.ask.in-chat) > header.top{flex:none}
+  .ask.in-chat{
+    flex:1;min-height:0;overflow:hidden;
+    display:flex;flex-direction:column;gap:0;
+  }
+  /* When the on-screen keyboard is open, shrink the main to the visible area. */
+  main.tab-ask:has(.ask.in-chat.kb-open){
+    height:calc(100dvh - var(--kb,0px) - env(safe-area-inset-top,0px));
+    height:calc(100svh - var(--kb,0px) - env(safe-area-inset-top,0px));
+    padding-bottom:8px;
+  }
+  .ask.in-chat .ask-side{display:none}
+  .ask.in-chat .ask-main{order:0;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+  /* Chat header: sticky at the top of the messages area */
+  .ask.in-chat .ask-chat-hd{
+    position:sticky;top:0;z-index:5;
+    background:var(--bg);
+    padding:8px 0 10px;margin:0;
+    border-bottom:1px solid var(--line);
+    flex:none;
+  }
+  .ask.in-chat .ask-chat-hd .ask-newchat{margin-left:auto;flex:none}
+  /* Messages: independent scroll */
+  .ask.in-chat .ask-msgs{
+    flex:1;min-height:0;overflow-y:auto;
+    -webkit-overflow-scrolling:touch;
+    overscroll-behavior:contain;
+    padding:12px 0 8px;
+    scroll-behavior:smooth;
+    /* Fade at the top edge to hint there is more above */
+    mask-image:linear-gradient(180deg,transparent 0,#000 8px,#000 calc(100% - 4px),#000);
+    -webkit-mask-image:linear-gradient(180deg,transparent 0,#000 8px,#000 calc(100% - 4px),#000);
+  }
+  /* Compose bar: sits at the bottom of the chat area, not sticky to the window */
+  .ask.in-chat .ask-compose{
+    position:static;flex:none;margin-top:0;
+    padding:10px 0 calc(8px + env(safe-area-inset-bottom,0px));
+    border-radius:0;border:none;border-top:1px solid var(--line);
+    background:var(--bg);
+    box-shadow:none;
+    -webkit-backdrop-filter:none;backdrop-filter:none;
+  }
+  /* Larger touch targets on mobile */
+  .ask.in-chat .ask-msg .bubble{padding:12px 16px;font-size:16px;border-radius:18px}
+  .ask.in-chat .ask-msg.me .bubble{border-bottom-right-radius:4px}
+  .ask.in-chat .ask-msg.ai .bubble{border-top-left-radius:4px}
+  .ask.in-chat .ask-send{width:44px;height:44px}
+  .ask.in-chat .ask-compose textarea{font-size:16px;padding:10px 0} /* 16px prevents iOS zoom */
+  .ask.in-chat .ask-back{width:40px;height:40px;font-size:24px}
+  .ask.in-chat .ask-av{width:34px;height:34px;border-radius:12px}
+  .ask.in-chat .ask-av .ms{font-size:19px}
+  /* Change cards: full-width, larger touch targets */
+  .ask.in-chat .ask-chg{border-radius:14px;padding:12px 16px 6px}
+  .ask.in-chat .chg-act .chip{min-height:40px;padding:8px 16px}
+  /* Typing indicator: slightly bigger dots */
+  .ask.in-chat .bubble.typing{padding:16px 18px}
+  .ask.in-chat .bubble.typing i{width:8px;height:8px}
+
+  /* When NOT in a chat (hello screen): starter questions scroll horizontally */
+  .ask:not(.in-chat) .ask-starters{
+    flex-direction:row;flex-wrap:nowrap;
+    overflow-x:auto;max-width:none;
+    padding:4px 2px 12px;margin:0 -16px;padding-left:16px;padding-right:16px;
+    scroll-snap-type:x proximity;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  .ask:not(.in-chat) .ask-starters::-webkit-scrollbar{display:none}
+  .ask:not(.in-chat) .ask-starters .chip{
+    flex:none;white-space:nowrap;height:44px;padding:10px 18px;
+    scroll-snap-align:start;
+    font-size:14px;
+  }
+  /* Conversation list: larger touch targets */
+  .ask:not(.in-chat) .ask-item{border-radius:14px}
+  .ask:not(.in-chat) .ask-open{padding:14px 16px}
+  .ask:not(.in-chat) .ask-open b{font-size:15px}
+  .ask:not(.in-chat) .ask-open span{font-size:13px}
+  .ask:not(.in-chat) .ask-del{width:48px;font-size:16px}
+  .ask:not(.in-chat) .ask-side-hd .chip.sm{min-height:40px;padding:8px 14px}
+  /* Hello screen: tighter on mobile */
+  .ask:not(.in-chat) .ask-hello{padding:12px 4px 4px}
+  .ask:not(.in-chat) .ask-hello h2{font-size:22px}
+  /* Compose bar on the hello screen keeps the base floating-pill style */
+  .ask:not(.in-chat) .ask-compose{margin-top:12px}
+}
+
+/* Touch feedback: scale down on press for chat elements */
+@media (pointer:coarse){
+  .ask .chip:active,.ask .ask-send:active,.ask .ask-back:active,.ask .ask-open:active,.ask .ask-del:active{
+    transform:scale(0.96);
+    transition:transform 80ms ease-out;
+  }
+  .ask .chip,.ask .ask-send,.ask .ask-back,.ask .ask-open,.ask .ask-del{
+    transition:transform 120ms ease-out;
+  }
+}
+
 @media (min-width:1024px){
   .ask{grid-template-columns:300px minmax(0,1fr);align-items:start;gap:26px}
   .ask-side,.ask-side.in-chat{display:block;position:sticky;top:96px;max-height:calc(100vh - 120px);overflow:auto;padding:2px}

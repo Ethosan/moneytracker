@@ -1,10 +1,10 @@
 // 20bucks AI: reviews new entries for likely mistakes, answers questions about your spending,
 // and proposes changes from the Ask chat. A proposal is only data: the app shows it with an
 // Apply button and nothing in the ledger changes until the owner taps it.
-// The API key lives here as a Supabase secret, never in the app. While OPEN_TO_ALL is true
-// any signed-in account can use it (each capped at CALL_LIMIT calls an hour); set it to false
-// to allow only the accounts on the AI_ALLOWED_IDS allowlist, since sign-in creates an
-// account for anyone and an open function lets a stranger spend the key.
+// The API key lives here as a Supabase secret, never in the app. OPEN_TO_ALL is true:
+// any signed-in account can use it (each capped at CALL_LIMIT calls an hour); set it to
+// false to allow only the accounts on the AI_ALLOWED_IDS allowlist, since sign-in creates
+// an account for anyone and an open function lets a stranger spend the key.
 //
 // Secrets (Supabase dashboard -> Edge Functions -> Secrets):
 //   MISTRAL_API_KEY     to use Mistral (the default when it is set)
@@ -301,11 +301,11 @@ const DAILY_LIMIT = Number(Deno.env.get("AI_DAILY_LIMIT")) || 300;
 // Fallback cap kept in memory, used only if the database function can't be reached.
 const CALLS = new Map<string, { n: number; reset: number }>();
 const CALL_WINDOW_MS = 3600000;
-// The owner's choice (2026-10-23): only the accounts on the AI_ALLOWED_IDS allowlist may use the
-// assistant. Sign-in lets anyone create an account (an external account already exists), and API
-// calls are billed per use with no default spending limit at the provider, so an open function is
-// an open spigot on the key.
-const OPEN_TO_ALL = false;
+// Open to every signed-in account (2026-10-24): the app is a personal money tracker, so the
+// owner wants all accounts to work without an allowlist. Rate caps below still apply per account
+// and per day, and a monthly spending limit at the provider is the backstop.
+
+const OPEN_TO_ALL = true;
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
