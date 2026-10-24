@@ -651,7 +651,9 @@ function connect() {
   });
 }
 document.addEventListener('visibilitychange', function () {
-  if (document.visibilityState === 'visible' && store.mode === 'cloud' && !store.writing && !Object.keys(store.dirty).length) pull();
+  if (document.visibilityState !== 'visible') return;
+  ratesMaybe(); // throttled to 30 minutes inside refreshRates; keeps US$/crypto balances live
+  if (store.mode === 'cloud' && !store.writing && !Object.keys(store.dirty).length) pull();
 });
 function pull() {
   store.sb.from('ledger_docs').select('id,body').then(function (res) {
@@ -1762,6 +1764,27 @@ function earnHero(m, quick) {
   } else h += '<div class="panel"><div class="empty" style="padding:14px">No income logged in ' + monthLabel(m) + ' yet.</div></div>';
   return h;
 }
+// The one number that answers "how much do I have": your wallets minus what you owe,
+// moved by everything logged since your last count and revalued at live rates. It is
+// recomputed on every render, so it moves as you log. Until the first count there is
+// no honest total, so the card asks for the count instead.
+function haveCard() {
+  var A = accountBalances();
+  if (A.expected == null) {
+    return '<section class="blk"><div class="panel" style="padding:14px 16px">' +
+      '<p style="margin:0 0 6px"><b>How much do I have?</b></p>' +
+      '<p class="note" style="margin:0 0 12px">Count your balances once — banks, cash, wallets, and what you owe on PayLater. This then shows your total, live as you log.</p>' +
+      '<button class="btn sm" data-act="check">Count my balances</button></div></section>';
+  }
+  var owed = r2(sum(A.liabs, function (l) { return l.now; }));
+  var sub = 'Across ' + A.accs.length + ' wallet' + (A.accs.length === 1 ? '' : 's') +
+    (owed > 0.005 ? ', minus ' + money(owed) + ' owed on PayLater' : '');
+  if (hasForeign() && RATES.at) sub += ' · US$ & crypto at live rates (' + agoLabel(Date.parse(RATES.at)) + ')';
+  return '<section class="blk"><div class="panel"><button class="row" data-tab="pnl" data-acct="bal">' +
+    '<div class="l"><b>You have now</b><span>' + esc(sub) + '</span></div>' +
+    '<div class="r have-r">' + money(A.expected, 0) + '</div>' +
+    '</button></div></section>';
+}
 function renderHome() {
   var m = UI.month, st = monthStats(m), avg = priorAvg(m);
   var freq = m === monthOf(today()) ? frequentNotes() : [];
@@ -1781,6 +1804,7 @@ function renderHome() {
   if (S.inbox.length) h += '<button class="banner" data-act="inbox"><b>' + S.inbox.length + ' statement rows to review</b><span>Tag shared rides and add them</span></button>';
   var sgN = allDoubts().length;
   if (sgN) h += '<button class="banner" data-act="suggest"><b>' + (sgN === 1 ? '1 entry looks' : sgN + ' entries look') + ' like a slip</b><span>Review the suggestions. Nothing changes until you approve.</span></button>';
+  h += haveCard();
   if (UI.homeMode === 'earn') h += earnHero(m, quick);
   else {
   h += '<div class="hero">' + heroToggle() + '<div class="lbl">Spent in ' + monthLabel(m, true) + ', after paybacks</div>' +
@@ -6271,6 +6295,9 @@ function boot() {
   render();
   if (q.get('add')) txSheet();
   connect();
+  // Keep rates (and with them US$/crypto balances) live while the app sits open. The
+  // refresh itself is throttled to 30 minutes, so this interval is nearly free.
+  setInterval(ratesMaybe, 15 * 60e3);
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     // Check for a new version on every open, and when one takes over, reload once so the
     // page you see is the version just installed rather than the copy kept for offline use.
