@@ -32,4 +32,4 @@ You can delete your account any time in the app. We may suspend accounts that br
 
 ## Contact
 
-[eatentam@gmail.com](mailto:eatentam@gmail.com)
+[ethan@ethantam.dev](mailto:ethan@ethantam.dev)
