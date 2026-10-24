@@ -391,7 +391,7 @@ function normalize() {
 }
 var UI = { locked: true, folds: {}, acct: 'bal', tab: 'home', month: monthOf(today()), filter: 'all', q: '', all: false };
 var LS_KEY = 'ledger-state-v1';
-var store = { mode: 'connecting', col: null, dirty: {}, timer: null, writing: false };
+var store = { mode: 'boot', col: null, dirty: {}, timer: null, writing: false };
 
 // What the transaction actually cost you: if you paid for others, only your share
 // counts as spending. The rest is money owed to you, tracked under People.
@@ -613,13 +613,15 @@ function connect() {
   });
   store.sb.auth.getSession().then(function (r) {
     var sess = r.data && r.data.session;
-    if (!sess) { if (store.mode === 'connecting') { store.mode = 'auth'; render(); } store.connectBusy = false; hideSplash(); return; }
+    if (!sess) { if (store.mode === 'boot' || store.mode === 'connecting') { store.mode = 'auth'; render(); } store.connectBusy = false; hideSplash(); return; }
     store.uid = sess.user.id; store.email = sess.user.email;
     var gid0 = (sess.user.identities || []).filter(function (i) { return i.provider === 'google'; })[0];
     store.google = gid0 && gid0.identity_data && gid0.identity_data.email ? gid0.identity_data.email : null;
     // A different account signing in on this device must not inherit the previous
     // account's local copy: drop it before any merge or push can see it.
     try { var lastUid = localStorage.getItem('ledger-uid'); if (lastUid && lastUid !== store.uid) { [LS_KEY, 'ledger-dirty', BASE_KEY, HIST.KEY, RP_KEY].forEach(function (k) { localStorage.removeItem(k); }); S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [], chats: [] }; store.dirty = {}; store.base = {}; HIST.list = []; HIST.shadow = {}; HIST.ready = false; } localStorage.setItem('ledger-uid', store.uid); } catch (e) { }
+    // A returning session: from here the splash covers the wait while your data loads.
+    if (store.mode === 'boot') { store.mode = 'connecting'; render(); }
     return store.sb.from('ledger_docs').select('id,body').then(function (res) {
       if (res.error) throw res.error;
       try { (JSON.parse(localStorage.getItem('ledger-dirty') || '[]')).forEach(function (k) { store.dirty[k] = true; }); } catch (e) { }
@@ -637,7 +639,7 @@ function connect() {
   }).catch(function (e) {
     store.connectBusy = false;
     store.err = errText(e);
-    if (store.mode === 'connecting') { store.mode = 'auth'; render(); } hideSplash();
+    if (store.mode === 'boot' || store.mode === 'connecting') { store.mode = 'auth'; render(); } hideSplash();
     if (isNetworkErr(e)) {
       // genuinely offline: keep working from the local copy and try again shortly
       store.mode = 'cloud-offline'; setSync('Offline, will sync'); render(); hideSplash();
@@ -2382,6 +2384,10 @@ function applyTheme() { var t = localTheme(); if (t) document.documentElement.se
 
 function render() {
   if (isLocked()) { renderLock(); return; }
+  // 'boot': the session check is still in flight, so there is nothing to show yet.
+  // A signed-out open goes straight to the login page — the splash is earned only
+  // once the person taps sign-in, or a returning session starts loading its data.
+  if (store.mode === 'boot') return;
   if (!HIST.ready) { histSnap(); HIST.ready = true; }
   if (store.mode === 'connecting') { $('#app').innerHTML = renderConnecting(); return; }
   if (store.mode === 'auth') { $('#app').innerHTML = renderLogin(); wireLogin(); return; }
