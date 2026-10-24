@@ -35,7 +35,7 @@ We keep your data while your account exists. You can delete your account any tim
 
 ## Your rights
 
-You can ask for a copy of your data, or for it to be corrected or deleted, by emailing ethan@ethantam.dev. We reply within 30 days. If you are in the EU/UK or Singapore, you also have the rights given by the GDPR or the PDPA.
+You can ask for a copy of your data, or for it to be corrected or deleted, by emailing contact@ethantam.dev. We reply within 30 days. If you are in the EU/UK or Singapore, you also have the rights given by the GDPR or the PDPA.
 
 ## Children
 
@@ -47,4 +47,4 @@ If this policy changes in a way that matters, we'll say so in the app before it 
 
 ## Contact
 
-[ethan@ethantam.dev](mailto:ethan@ethantam.dev)
+[contact@ethantam.dev](mailto:contact@ethantam.dev)
