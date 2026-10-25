@@ -154,3 +154,7 @@ Then in **Supabase → Edge Functions → Secrets** add `MISTRAL_API_KEY`, or `A
 ## Legal
 
 See the [privacy policy](PRIVACY.md) and [terms](TERMS.md). Released under the [MIT License](LICENSE).
+
+## Security
+
+Found a security problem? See [20bucks.ethantam.dev/.well-known/security.txt](https://20bucks.ethantam.dev/.well-known/security.txt), or email contact@ethantam.dev.
