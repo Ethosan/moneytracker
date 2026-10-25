@@ -64,9 +64,14 @@ Numbers:
   from search_transactions or month_summary; any arithmetic on figures goes through calculate. Copy results exactly as
   returned; never round differently, estimate or fill a gap from memory.
 - A question about one thing (a shop, product, service, subscription, person, category or tag): call search_transactions
-  with a note and/or category filter, group_by "month" and limit 200. If nothing matches, try a shorter or alternative word
-  (a brand and its maker, a nickname) before saying so, and say what you searched. Answer with the total, the month-by-month
-  table (paste groups_markdown) and the dated entries (paste rows_markdown, or the relevant rows when there are many).
+  with type "exp" for spending, group_by "month" and limit 200. A category name (Food, Transport, Subscriptions, Shopping...)
+  goes in the category filter; a shop, product or service (Grab, Claude, Netflix, a restaurant) goes in note. If nothing matches,
+  try a shorter or alternative word (a brand and its maker, a nickname) before saying so, and say what you searched. Answer with
+  the total, the month-by-month table (paste groups_markdown) and the dated entries (paste rows_markdown, or the relevant rows
+  when there are many). When the owner asks for dates, days, entries or a list, the dated rows are required, never optional.
+- Comparing two months, categories or periods: every difference, growth, share or percentage in the answer (including each
+  cell of a "Change" column) is a calculate call. A figure you did not get back from a tool must not appear in the answer.
+- "Spent on X" always means spending (type "exp"). Grouping without a type mixes income rows in; the result's caution says so.
 - "This month", "last month", "this year" are relative to the Today date in the first message. Months are YYYY-MM.
 - Spending is the owner's own share of split bills. Prop-firm fees, PayLater interest and subscriptions are spending rows
   like any other. Transfers between the owner's wallets are not spending.
@@ -288,7 +293,11 @@ Deno.serve(async (req) => {
     }
     if (body.action === "ask") {
       const question = String(body.question || "").slice(0, 1000).trim();
-      const context = String(body.context || "").slice(0, 100000);
+      // The app's snapshot minus the lines the engine states exactly: its averages count the current
+      // month and gross spending, and its "biggest notes" merge nothing (Claude ai, Claude pro and
+      // Claude api credits are three lines), so a model that trusted them answered wrong.
+      const context = String(body.context || "").slice(0, 100000).split("\n")
+        .filter((l) => !/^(Averages over the last|Biggest notes, all time)/.test(l)).join("\n");
       const history = (Array.isArray(body.history) ? body.history : []).slice(-10)
         .filter((m: Turn) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
         .map((m: Turn) => ({ role: m.role, content: m.content.slice(0, 2000) }));
@@ -309,7 +318,14 @@ Deno.serve(async (req) => {
         ...history,
         { role: "user", content: question },
       ];
-      const run: Run = (name, args) => runTool(L, name, args as Record<string, any>);
+      // the last listing with dated rows, kept so an answer that owes the owner dates can get them
+      let lastRows: { rows_markdown: string; matched: number; listed: number } | null = null;
+      const run: Run = (name, args) => {
+        const out = runTool(L, name, args as Record<string, any>);
+        const r = out.result as any;
+        if (name === "search_transactions" && r && r.rows_markdown) lastRows = { rows_markdown: r.rows_markdown, matched: r.matched, listed: r.rows.length };
+        return out;
+      };
       const out = provider() === "anthropic"
         ? (needKey("ANTHROPIC_API_KEY"), await claudeAgent({ create: (p) => new Anthropic().beta.messages.create({ ...p, ...claudeExtras } as any), model: claudeModel(), system: ASK_SYSTEM, messages, tools: TOOLS, run }))
         : await mistralAgent({ fetchImpl: fetch, key: needKey("MISTRAL_API_KEY"), model: mistralModel(), system: ASK_SYSTEM, messages, tools: TOOLS, run });
@@ -317,7 +333,16 @@ Deno.serve(async (req) => {
       const byId = new Map<string, { t: string; cat: string }>(L.tx.filter((x) => x.id && L.editable.has(x.id)).map((x) => [x.id as string, { t: x.t, cat: x.cat || "" }]));
       const catTypes = new Map<string, string>([...L.cats.values()].map((c) => [c.name, c.type === "inc" ? "inc" : "exp"]));
       const taken = takeChanges(out.text, { ids: L.editable, byId, cats: catTypes, accts: L.wallets }), changes = taken.changes;
-      const answer = out.cut ? taken.answer + "\n\n*The answer hit the length limit and was cut off. Ask for less at once, or ask it to continue.*" : taken.answer;
+      let answer = taken.answer;
+      // Asked for dates or a list and given none: the rows from the lookup go under the answer as
+      // they came back, so the owner gets them without asking twice.
+      const wantsDates = /\b(dates?|days?|when|entries|transactions|itemi[sz]e|list)\b/i.test(question);
+      const rows = lastRows as { rows_markdown: string; matched: number; listed: number } | null;
+      if (wantsDates && rows && rows.listed <= 100 && !out.cut && !/\d{4}-\d{2}-\d{2}/.test(answer)) {
+        answer += `\n\n**Entries**\n\n${rows.rows_markdown}` + (rows.matched > rows.listed ? `\n\n*${rows.listed} of ${rows.matched} entries shown; ask for a narrower period for the rest.*` : "");
+        out.steps.push("Added the dated entries from the lookup");
+      }
+      if (out.cut) answer += "\n\n*The answer hit the length limit and was cut off. Ask for less at once, or ask it to continue.*";
       return json({ answer, changes, steps: out.steps, provider: provider(), model: out.model });
     }
     return json({ error: "Unknown action" }, 400);

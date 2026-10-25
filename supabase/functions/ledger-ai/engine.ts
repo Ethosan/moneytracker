@@ -130,10 +130,17 @@ export function searchTransactions(L: Ledger, p: SearchParams) {
   const from = okDate(p.from) ? dayOf(p.from as string, false) : null, to = okDate(p.to) ? dayOf(p.to as string, true) : null;
   const type = p.type && p.type !== "all" ? String(p.type) : null;
   const cat = p.category ? norm(p.category) : "", note = p.note ? String(p.note).toLowerCase() : "", wallet = p.wallet ? norm(p.wallet) : "", tag = p.tag ? norm(p.tag) : "", person = p.person ? norm(p.person) : "";
+  // "Spent on food" is the Food category, not the word food in a note: when the note word names a
+  // category (or a subcategory in use), rows of that category match too, and the result says so.
+  const noteCats = note && !cat
+    ? [...new Set([...L.cats.values()].map((c) => c.name).concat(L.tx.map((x) => x.sub || "")).filter((n) => n && norm(n).includes(note)))]
+    : [];
+  const noteCatKeys = noteCats.map(norm);
   const rows = L.tx.filter((x) =>
     (!from || x.d >= from) && (!to || x.d <= to) && (!type || x.t === type) &&
     (!cat || norm(x.cat).includes(cat) || norm(x.sub).includes(cat)) &&
-    (!note || String(x.note || "").toLowerCase().includes(note) || String(x.sub || "").toLowerCase().includes(note)) &&
+    (!note || String(x.note || "").toLowerCase().includes(note) || String(x.sub || "").toLowerCase().includes(note) ||
+      (noteCatKeys.length > 0 && (noteCatKeys.includes(norm(x.cat)) || noteCatKeys.includes(norm(x.sub))))) &&
     (!wallet || norm(x.acct).includes(wallet) || norm(x.from).includes(wallet) || norm(x.to).includes(wallet) || (x.pm === "later" && ("paylater " + norm(x.plp)).includes(wallet))) &&
     (!tag || (x.tags || []).some((g) => norm(g).includes(tag))) &&
     (!person || norm(x.split && x.split.person).includes(person)) &&
@@ -170,6 +177,8 @@ export function searchTransactions(L: Ledger, p: SearchParams) {
   return {
     filter: { from: from || "(start)", to: to || "(today)", type: type || "all", ...(p.category ? { category: p.category } : {}), ...(p.note ? { note: p.note } : {}), ...(p.wallet ? { wallet: p.wallet } : {}), ...(p.tag ? { tag: p.tag } : {}) },
     matched: rows.length, spent, income, total_of_matched: total,
+    ...(noteCats.length ? { note_matched_category: noteCats, hint: `"${p.note}" is a category name here, so every ${noteCats.join(" / ")} row is included, not only notes containing the word` } : {}),
+    ...(!type && spent > 0 && income > 0 ? { caution: `these matches mix spending (${spent}) and income (${income}); total_of_matched adds both. Pass type "exp" for spending or "inc" for income` } : {}),
     ...(groups ? { groups, groups_markdown: groupsMarkdown } : {}), rows: list, ...(rowsMarkdown ? { rows_markdown: rowsMarkdown } : {}),
     ...(rows.length > list.length ? { note: `${rows.length - list.length} more rows not listed; raise limit or narrow the filter` } : {}),
   };
@@ -226,7 +235,7 @@ export function venueEntries(L: Ledger, account: string, limit = 60) {
 export const TOOLS = [
   {
     name: "search_transactions",
-    description: "Filter the owner's transactions and get their exact total, optional grouping, and the matching rows (with ids where an edit is allowed). Use it for any amount, count or list that is not already in the monthly totals: a category, a shop or note, a date range, a wallet, a person. Amounts are the owner's own share of split bills. Dates are YYYY-MM-DD or YYYY-MM.",
+    description: "Filter the owner's transactions and get their exact total, optional grouping, and the matching rows (with ids where an edit is allowed). Use it for any amount, count or list that is not already in the monthly totals: a category, a shop or note, a date range, a wallet, a person. For spending pass type \"exp\" (without it income and transfers are counted too). A category name (Food, Transport, Subscriptions...) goes in category; a shop, product or service (Grab, Claude, Netflix) goes in note. Amounts are the owner's own share of split bills. Dates are YYYY-MM-DD or YYYY-MM.",
     parameters: {
       type: "object",
       properties: {

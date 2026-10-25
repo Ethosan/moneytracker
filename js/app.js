@@ -1208,14 +1208,9 @@ function aiContext() {
     var cats = Object.keys(st.byCat).sort(function (a, b) { return st.byCat[b] - st.byCat[a]; }).map(function (c) { return plain(c) + ' ' + r2(st.byCat[c]); }).join(', ');
     L.push(monthLabel(m) + (m === m0 ? ' (so far)' : '') + ': spent ' + r2(st.spend) + ', paid back by friends ' + r2(st.reimb) + ', earned from work ' + inc.work + ', other income ' + inc.other + ', saved ' + r2(st.saved) + '. By category: ' + (cats || 'none'));
   });
-  // the averages a "how much should I save" question needs, worked out here
-  var win = months.slice(-12), si = 0, ss = 0, sv = 0;
-  win.forEach(function (m) { var st = monthStats(m); si += st.earned + st.other + st.reimb; ss += st.spend; sv += st.saved; });
-  if (win.length) L.push('Averages over the last ' + win.length + ' months with entries: income ' + r2(si / win.length) + ', spent ' + r2(ss / win.length) + ', saved ' + r2(sv / win.length) + (si > 0.005 ? ' (' + Math.round(sv / si * 100) + '% of income)' : '') + '.');
-  var g = {};
-  allTx().forEach(function (t) { if (t.t !== 'exp' || !t.note) return; var k = t.note.trim(); g[k] = g[k] || { n: 0, s: 0, cat: plain(t.cat || '') }; g[k].n++; g[k].s += ea(t); });
-  var top = Object.keys(g).sort(function (a, b) { return g[b].s - g[a].s; }).slice(0, 20);
-  if (top.length) L.push('Biggest notes, all time: ' + top.map(function (k) { return k + ' (' + g[k].cat + ') ' + g[k].n + 'x, ' + r2(g[k].s); }).join('; '));
+  // Averages and all-time top notes are no longer sent (1.5.1): the function works both out
+  // exactly from the ledger (complete months only, every spelling of a note found by search),
+  // and the rough versions here led the model to answer from them instead of looking up.
   if (S.meta.budgets.length) L.push('Monthly budgets: ' + S.meta.budgets.map(function (b) { return b.key.slice(4) + ' ' + b.amt; }).join(', '));
   var subs = S.meta.subs.filter(function (x) { return x.active !== false; });
   if (subs.length) L.push('Subscriptions: ' + subs.map(function (x) { return x.name + ' ' + x.amt + ' ' + cycleLabel(x.cycle); }).join(', '));

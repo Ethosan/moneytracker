@@ -107,3 +107,23 @@ test("account sections and tool labels", () => {
   assert.throws(() => runTool(L, "nope", {}), /Unknown tool/);
   assert.throws(() => runTool(L, "month_summary", { month: "October" }), /YYYY-MM/);
 });
+
+test("a note word that names a category matches the category too, and says so", () => {
+  // "spent on food" searched as note=Food: the Food rows match even though no note says food
+  const r = searchTransactions(L, { note: "food", type: "exp", from: "2026-10", to: "2026-10", group_by: "day" });
+  assert.equal(r.matched, 2);
+  assert.equal(r.total_of_matched, 42.5);
+  assert.deepEqual(r.note_matched_category, ["🍜 Food"]);
+  assert.match(r.hint, /category name/);
+  // a word that is not a category still matches notes only
+  const g = searchTransactions(L, { note: "grab", type: "exp" });
+  assert.equal(g.matched, 1);
+  assert.equal(g.note_matched_category, undefined);
+});
+
+test("a search without a type that mixes spending and income carries a caution", () => {
+  const r = searchTransactions(L, { from: "2026-10", to: "2026-10", group_by: "category", limit: 0 });
+  assert.match(r.caution, /mix spending/);
+  const e = searchTransactions(L, { from: "2026-10", to: "2026-10", type: "exp", limit: 0 });
+  assert.equal(e.caution, undefined);
+});
