@@ -1,6 +1,13 @@
 // 20bucks AI: reviews new entries for likely mistakes, answers questions about your spending,
 // and proposes changes from the Ask chat. A proposal is only data: the app shows it with an
 // Apply button and nothing in the ledger changes until the owner taps it.
+//
+// Ask works with tools (engine.ts, agent.ts): the model gets the live snapshot and exact monthly
+// totals, and for anything finer it calls search_transactions, month_summary, account_summary,
+// venue_entries and calculate. Every figure it quotes was computed here, with the rules the app's
+// own screens use, so the chat and the app agree and no arithmetic is left to the model. The
+// answer comes back with `steps`, the lookups made, which the app shows under the reply.
+//
 // The API key lives here as a Supabase secret, never in the app. OPEN_TO_ALL is true:
 // any signed-in account can use it (each capped at CALL_LIMIT calls an hour); set it to
 // false to allow only the accounts on the AI_ALLOWED_IDS allowlist, since sign-in creates
@@ -18,8 +25,11 @@
 //                       -> copy the UUID); with it unset the function then answers nobody.
 // Exact versions, each at least two weeks old when pinned: a fresh release can carry a
 // compromised package, and an unpinned import pulls whatever was published that hour.
-import { createClient, SupabaseClient } from "npm:@supabase/supabase-js@2.117.3";
+import { createClient } from "npm:@supabase/supabase-js@2.117.3";
 import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
+import { loadLedger, overview, runTool, TOOLS, plainCat } from "./engine.ts";
+import { mistralAgent, claudeAgent } from "./agent.ts";
+import type { Turn, Run } from "./agent.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -30,7 +40,6 @@ const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
 type Item = { i: number; d: string; t: string; amt: number; cat: string; note: string };
-type Turn = { role: "user" | "assistant"; content: string };
 
 const REVIEW_SYSTEM = `You check a personal spending log (Singapore dollars) for likely data-entry mistakes.
 Each entry has an index i, date d, type t (exp = spending, inc = income), amount amt, category cat and note.
@@ -46,202 +55,86 @@ For a category fix, use a name exactly as it appears in the allowed categories. 
 plain sentence addressed to the owner.
 Reply with JSON only: {"findings":[{"i":0,"issue":"...","cat":"optional category","amt":optional number}]}`;
 
-const ASK_SYSTEM = `You answer questions about the owner's personal finances using only the data provided: a current snapshot,
-exact totals worked out for you, and every transaction and entry. For any sum, use the exact totals rather than adding rows yourself;
-use the rows to look up specific purchases, dates and patterns. Savings means income minus spending: every month has a Saved line
-and averages are given, so answer "how much should I save" questions from those numbers.
-Amounts are Singapore dollars unless marked US$.
-This is a conversation: a short follow-up ("break it down", "I mean the prop firms", "and last month?") is about
-the topic of the previous messages, so answer it in that context instead of starting over.
-When asked for a breakdown, list every item with its own numbers (for prop firms: each firm's fees paid,
-payouts received and net result; by month when asked), then a one-line total. Use short lists, bold the key
-figure, and add one sentence of interpretation (is it worth it, what stands out). For a breakdown with several
-rows, use a markdown table (a header row, a |---| separator row, one row per item); the app renders it. You may
-show a formula in LaTeX, but only wrapped in double dollar signs ($$...$$) or backslash parentheses, never single
-$ signs around math, because amounts are written with $ (like $500). Never use LaTeX tabular.
-If the summary does not contain what is needed, say exactly what is missing instead of guessing.
+const ASK_SYSTEM = `You answer questions about the owner's personal finances (a Singapore-dollar ledger). The first
+message holds a live snapshot from the app and EXACT MONTHLY TOTALS. For everything else you have tools that read the
+ledger and do arithmetic. Every number you give must come from the snapshot, the totals or a tool result.
+
+Numbers:
+- Never add, subtract, average, compare or convert numbers yourself. Any figure not printed in the first message comes
+  from search_transactions or month_summary; any arithmetic on figures goes through calculate. Copy results exactly as
+  returned; never round differently, estimate or fill a gap from memory.
+- A question about one thing (a shop, product, service, subscription, person, category or tag): call search_transactions
+  with a note and/or category filter, group_by "month" and limit 200. If nothing matches, try a shorter or alternative word
+  (a brand and its maker, a nickname) before saying so, and say what you searched. Answer with the total, the month-by-month
+  table (paste groups_markdown) and the dated entries (paste rows_markdown, or the relevant rows when there are many).
+- "This month", "last month", "this year" are relative to the Today date in the first message. Months are YYYY-MM.
+- Spending is the owner's own share of split bills. Prop-firm fees, PayLater interest and subscriptions are spending rows
+  like any other. Transfers between the owner's wallets are not spending.
+- Savings means income minus net spending (spending less what friends paid back): each month has a saved figure, and the
+  averages over complete months are given, so answer "how much should I save" questions from those and calculate.
+- When something cannot be found, say exactly what you searched and that nothing matched. Never guess a figure.
+
+Writing:
+- Short and direct. Bold the key figure. One sentence of interpretation (what stands out, whether it is worth it).
+- Several rows: a markdown table (header row, |---| row, one row per item). Keep tool tables as returned.
+- Formulas only in LaTeX wrapped in $$...$$ or \\(...\\), never single $ signs, since amounts are written with $ (like $500).
+  Never use LaTeX tabular.
+- This is a conversation: a short follow-up ("break it down", "and last month?", "by month") continues the previous topic.
 
 You can propose changes to transactions: adding one, editing one, or deleting one. Propose them when the owner asks
 you to log, fix, move, recategorise or remove something, or when they agree to a fix you suggested. Do not propose
 changes they did not ask for. Nothing changes when you propose: the app shows each change with an Apply button and
 the owner decides, so say so in one short line ("Tap Apply to make the change.") and never claim it is already done.
-Write your answer first, then put the changes at the very end in a fenced block tagged changes, holding a JSON array:
+To edit or delete, first find the row with search_transactions: only rows that come back with an id can be changed.
+For the category and wallet names, use account_summary with section "categories". Write your answer first, then put
+the changes at the very end in a fenced block tagged changes, holding a JSON array:
 \`\`\`changes
 [{"op":"add","d":"2026-10-21","t":"exp","amt":12.5,"cat":"<exact category>","note":"Lunch","why":"short reason"},
- {"op":"edit","id":"<id from the ledger>","amt":15,"cat":"<exact category>","note":"...","d":"YYYY-MM-DD","t":"exp","why":"..."},
- {"op":"delete","id":"<id from the ledger>","why":"..."}]
+ {"op":"edit","id":"<id from a tool result>","amt":15,"cat":"<exact category>","note":"...","d":"YYYY-MM-DD","t":"exp","why":"..."},
+ {"op":"delete","id":"<id from a tool result>","why":"..."}]
 \`\`\`
-For add: d, t (exp or inc), amt and cat are required; note and acct (a wallet from the WALLETS list) are optional;
-d defaults to today. For edit: id, plus only the fields that change. For delete: id. Use ids exactly as they appear in
-the id column of the transactions; rows without an id cannot be changed from here (fees, investment mirrors,
-transfers), so tell the owner to change those in the app. Categories must be written exactly as in the CATEGORIES list,
-emoji included, and match the type (spending categories for exp, income categories for inc). At most 20 changes.
-Leave the block out entirely when there is nothing to change.`;
+For add: d, t (exp or inc), amt and cat are required; note and acct (a wallet from the categories section) are optional;
+d defaults to today. For edit: id, plus only the fields that change. For delete: id. Rows without an id cannot be changed
+from here (fees, investment mirrors, transfers), so tell the owner to change those in the app. Categories must be written
+exactly as listed, emoji included, and match the type (spending categories for exp, income categories for inc). At most
+20 changes. Leave the block out entirely when there is nothing to change.`;
 
 function provider() {
   const want = (Deno.env.get("AI_PROVIDER") || "").toLowerCase();
   if (want === "anthropic" || (!Deno.env.get("MISTRAL_API_KEY") && Deno.env.get("ANTHROPIC_API_KEY"))) return "anthropic";
   return "mistral";
 }
+const mistralModel = () => Deno.env.get("MISTRAL_MODEL") || "mistral-small-latest";
+const claudeModel = () => Deno.env.get("ANTHROPIC_MODEL") || "claude-opus-5-5";
+const needKey = (name: string) => { const k = Deno.env.get(name); if (!k) throw new Error(`${name} is not set in the function's secrets.`); return k; };
+// on a policy decline the API retries on a fallback model inside the same call
+const claudeExtras = { output_config: { effort: "low" }, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" };
 
-async function mistral(system: string, messages: Turn[], asJson: boolean) {
-  const key = Deno.env.get("MISTRAL_API_KEY");
-  if (!key) throw new Error("MISTRAL_API_KEY is not set in the function's secrets.");
-  const model = Deno.env.get("MISTRAL_MODEL") || "mistral-small-latest";
+// The review pass: one plain completion that must come back as JSON.
+async function completeJson(system: string, prompt: string) {
+  const messages: Turn[] = [{ role: "user", content: prompt }];
+  if (provider() === "anthropic") {
+    needKey("ANTHROPIC_API_KEY");
+    const client = new Anthropic();
+    const response = await client.beta.messages.create({ model: claudeModel(), max_tokens: 16000, system, messages, ...claudeExtras } as any);
+    if (response.stop_reason === "refusal") throw new Error("The model declined this request.");
+    return { text: response.content.map((b: any) => (b.type === "text" ? b.text : "")).join(""), model: response.model, cut: response.stop_reason === "max_tokens" };
+  }
+  const key = needKey("MISTRAL_API_KEY"), model = mistralModel();
   const r = await fetch("https://api.mistral.ai/v1/chat/completions", {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: "system", content: system }, ...messages],
-      temperature: 0.2,
-      max_tokens: 2000,
-      ...(asJson ? { response_format: { type: "json_object" } } : {}),
-    }),
+    body: JSON.stringify({ model, messages: [{ role: "system", content: system }, ...messages], temperature: 0.2, max_tokens: 2000, response_format: { type: "json_object" } }),
   });
   if (!r.ok) throw new Error(`Mistral ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const data = await r.json();
   return { text: String(data.choices?.[0]?.message?.content ?? ""), model, cut: data.choices?.[0]?.finish_reason === "length" };
 }
 
-async function claude(system: string, messages: Turn[]) {
-  if (!Deno.env.get("ANTHROPIC_API_KEY")) throw new Error("ANTHROPIC_API_KEY is not set in the function's secrets.");
-  const model = Deno.env.get("ANTHROPIC_MODEL") || "claude-opus-5-5";
-  const client = new Anthropic();
-  const response = await client.beta.messages.create({
-    model,
-    max_tokens: 16000,
-    system,
-    messages,
-    output_config: { effort: "low" },
-    // on a policy decline the API retries on a fallback model inside the same call
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
-  } as Anthropic.Beta.Messages.MessageCreateParamsNonStreaming);
-  if (response.stop_reason === "refusal") throw new Error("The model declined this request.");
-  const text = response.content.map((b) => (b.type === "text" ? b.text : "")).join("");
-  return { text, model: response.model, cut: response.stop_reason === "max_tokens" };
-}
-
-async function complete(system: string, messages: Turn[], asJson: boolean) {
-  return provider() === "anthropic" ? await claude(system, messages) : await mistral(system, messages, asJson);
-}
-
 function firstJson(text: string) {
   const s = text.indexOf("{"), e = text.lastIndexOf("}");
   if (s < 0 || e <= s) return null;
   try { return JSON.parse(text.slice(s, e + 1)); } catch { return null; }
-}
-
-
-// The whole ledger, read here with the signed-in user's own session (row level security
-// limits it to their rows), so every question can use all of it without the phone sending it.
-// Exact totals are worked out here: language models are unreliable at adding up long lists.
-type Tx = { id?: string; feeOf?: string; propOf?: string; d: string; t: string; amt: number; cat?: string; sub?: string; note?: string; acct?: string; pm?: string; plp?: string; tags?: string[]; split?: { mine: number; person: string }; from?: string; to?: string; inst?: { n: number; fee?: number } };
-const r2 = (n: number) => Math.round(n * 100) / 100;
-const plainCat = (c = "") => c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, "");
-// Budget for the whole prompt (rows + snapshot + history), in characters. The rows are
-// mostly dates, amounts and ids, which come to about 2.5 characters per token, so this keeps
-// a full prompt near 100k tokens: inside mistral-small's 128k context with room for the answer.
-const PROMPT_BUDGET = 250000;
-
-async function fullLedger(sb: SupabaseClient, rowLimit: number) {
-  const { data, error } = await sb.from("ledger_docs").select("id,body");
-  if (error) throw new Error("Couldn't read your ledger: " + error.message);
-  const doc: Record<string, any> = {};
-  (data || []).forEach((d: { id: string; body: any }) => { doc[d.id] = d.body || {}; });
-  const tx: Tx[] = Object.keys(doc).filter((k) => k.startsWith("tx-")).flatMap((k) => doc[k].items || []).filter((x: Tx) => x && x.d)
-    .sort((a: Tx, b: Tx) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
-  const mine = (x: Tx) => (x.t === "exp" && x.split && x.split.mine >= 0 ? x.split.mine : x.amt);
-  const meta = doc.meta || {}, out: string[] = [];
-  // what a proposed change may refer to: editable rows, the owner's categories and wallets
-  const ids = new Set(tx.filter((x) => x.id && !x.feeOf && !x.propOf && (x.t === "exp" || x.t === "inc")).map((x) => x.id as string));
-  // each editable row's current type and category, so an edit that changes only one of them
-  // can still be checked against the other
-  const byId = new Map<string, { t: string; cat: string }>(tx.filter((x) => x.id && ids.has(x.id as string)).map((x) => [x.id as string, { t: x.t, cat: x.cat || "" }]));
-  const cats = new Map<string, string>(((meta.cats || []) as any[]).filter((c) => c && c.name).map((c) => [String(c.name), c.type === "inc" ? "inc" : "exp"]));
-  const accts = new Set<string>(((meta.accounts || []) as any[]).filter((a) => a && a.name && !a.liability).map((a) => String(a.name)));
-
-  // exact totals
-  const byMonth: Record<string, Record<string, number>> = {}, inMonth: Record<string, Record<string, number>> = {}, byYear: Record<string, { spent: number; income: number }> = {}, notes: Record<string, { n: number; s: number; cat: string }> = {};
-  tx.forEach((x) => {
-    const m = x.d.slice(0, 7), y = x.d.slice(0, 4), c = plainCat(x.cat);
-    byYear[y] = byYear[y] || { spent: 0, income: 0 };
-    if (x.t === "exp") {
-      (byMonth[m] = byMonth[m] || {})[c] = r2((byMonth[m][c] || 0) + mine(x)); byYear[y].spent += mine(x);
-      const k = (x.note || "").trim(); if (k) { const o = notes[k] = notes[k] || { n: 0, s: 0, cat: c }; o.n++; o.s += mine(x); }
-    } else if (x.t === "inc") { (inMonth[m] = inMonth[m] || {})[c] = r2((inMonth[m][c] || 0) + x.amt); byYear[y].income += x.amt; }
-  });
-  out.push("EXACT TOTALS (use these numbers rather than adding rows yourself)");
-  Object.keys(byYear).sort().forEach((y) => out.push(`Year ${y}: spent ${r2(byYear[y].spent)}, income ${r2(byYear[y].income)}`));
-  Object.keys(byMonth).sort().forEach((m) => {
-    const c = byMonth[m], tot = r2(Object.values(c).reduce((a, b) => a + b, 0));
-    out.push(`Spent ${m}: total ${tot}; ` + Object.keys(c).sort((a, b) => c[b] - c[a]).map((k) => `${k} ${c[k]}`).join(", "));
-  });
-  Object.keys(inMonth).sort().forEach((m) => { const c = inMonth[m]; out.push(`Income ${m}: ` + Object.keys(c).map((k) => `${k} ${c[k]}`).join(", ")); });
-  // savings per month (income minus spending) and the averages a savings-goal question needs
-  const saved: Record<string, number> = {};
-  Object.keys(inMonth).forEach((m) => { saved[m] = Object.values(inMonth[m]).reduce((a, b) => a + b, 0); });
-  Object.keys(byMonth).forEach((m) => { saved[m] = (saved[m] || 0) - Object.values(byMonth[m]).reduce((a, b) => a + b, 0); });
-  Object.keys(saved).sort().forEach((m) => out.push(`Saved ${m}: ${r2(saved[m])} (income minus spending)`));
-  const last12 = Object.keys(saved).sort().slice(-12);
-  if (last12.length) {
-    const ai = last12.reduce((a, m) => a + Object.values(inMonth[m] || {}).reduce((x, y) => x + y, 0), 0) / last12.length;
-    const as = last12.reduce((a, m) => a + Object.values(byMonth[m] || {}).reduce((x, y) => x + y, 0), 0) / last12.length;
-    out.push(`Averages over the last ${last12.length} months with entries: income ${r2(ai)}, spent ${r2(as)}, saved ${r2(ai - as)}` + (ai > 0.005 ? ` (${Math.round(((ai - as) / ai) * 100)}% of income)` : "") + ".");
-  }
-  const topNotes = Object.keys(notes).sort((a, b) => notes[b].s - notes[a].s).slice(0, 40);
-  if (topNotes.length) out.push("Biggest notes, all time: " + topNotes.map((k) => `${k} (${notes[k].cat}) ${notes[k].n}x ${r2(notes[k].s)}`).join("; "));
-
-  // investments, prop firms and poker, per account
-  const venues = meta.venues || {}, led = (doc.ledger && doc.ledger.entries) || [];
-  const perV: Record<string, { type: string; inn: number; outv: number; n: number; last: string }> = {};
-  led.forEach((e: any) => {
-    const v = perV[e.venue] = perV[e.venue] || { type: (venues[e.venue] && venues[e.venue].type) || "broker", inn: 0, outv: 0, n: 0, last: "" };
-    if (e.f === "in") v.inn += e.amt; else if (e.f === "out") v.outv += e.amt; v.n++; if (e.d > v.last) v.last = e.d;
-  });
-  Object.keys(perV).forEach((k) => { const v = perV[k]; out.push(`${v.type} ${k}: paid in ${r2(v.inn)}, taken out ${r2(v.outv)}, net ${r2(v.outv - v.inn)} (cash basis), ${v.n} entries, last ${v.last}`); });
-
-  // the rows themselves
-  const rows: string[] = [];
-  rows.push("\nINVESTMENT, PROP FIRM AND POKER ENTRIES: date | account | in (money paid in / fee / buy-in) or out (money taken out / payout / win) or bal (balance) | amount | note");
-  // these sections are capped too, newest kept, so they can never crowd out every transaction
-  const newest = (list: any[], n: number, what: string) => {
-    if (list.length > n) rows.push(`(${list.length - n} older ${what} left out to fit; the totals above still include them)`);
-    return list.slice(-n);
-  };
-  newest(led.slice().sort((a: any, b: any) => (a.d < b.d ? -1 : 1)), 400, "entries")
-    .forEach((e: any) => rows.push(`${e.d} | ${e.venue} | ${e.f} | ${r2(e.amt)} | ${e.note || ""}`));
-  const debts = (doc.debts && doc.debts.entries) || [];
-  if (debts.length) {
-    rows.push("\nMONEY BETWEEN PEOPLE: date | person | amount (positive: they owe me) | note");
-    newest(debts.slice().sort((a: any, b: any) => (a.d < b.d ? -1 : 1)), 300, "entries")
-      .forEach((x: any) => rows.push(`${x.d} | ${x.person} | ${r2(x.amt)} | ${x.note || ""}`));
-  }
-  const bills = (doc.bills && doc.bills.entries) || [];
-  if (bills.length) {
-    rows.push("\nPAYLATER BILLS: provider | period from | instalments | fee | payments (date amount)");
-    bills.forEach((b: any) => rows.push(`${b.prov || "GrabPay Later"} | ${b.from} | ${b.n || 1} | ${b.fee || 0} | ${(b.payments || []).map((p: any) => p.d + " " + p.amt).join(", ")}`));
-  }
-  const checks = ((doc.checks && doc.checks.entries) || []).slice().sort((a: any, b: any) => (a.d < b.d ? -1 : 1));
-  if (checks.length) {
-    rows.push("\nBALANCE COUNTS (real balances I counted; between two counts each wallet should move by exactly what I logged on it): date | wallet amounts | what my logs said at the time");
-    newest(checks, 200, "counts").forEach((c: any) => rows.push(`${c.d} | ${Object.keys(c.lines || {}).map((k) => `${k} ${r2(+c.lines[k])}`).join(", ")} | ${c.exp ? Object.keys(c.exp).map((k) => `${k} ${r2(+c.exp[k])}`).join(", ") : ""}`));
-  }
-  if ((meta.subs || []).length) rows.push("\nSUBSCRIPTIONS: " + meta.subs.map((s: any) => `${s.name} ${s.amt} every ${s.cycle || 1} month(s), next ${s.next || "?"}${s.active === false ? " (stopped)" : ""}`).join("; "));
-  if ((meta.budgets || []).length) rows.push("BUDGETS (monthly): " + meta.budgets.map((b: any) => `${String(b.key).slice(4)} ${b.amt}`).join(", "));
-  if (cats.size) rows.push("\nCATEGORIES (write them exactly like this in changes): " + [...cats].map(([n, t]) => `${n} (${t === "inc" ? "income" : "spending"})`).join(", "));
-  if (accts.size) rows.push("WALLETS: " + [...accts].join(", "));
-  rows.push("\nTRANSACTIONS, oldest first: date | type (exp spending, inc income, xfer transfer, adj adjustment) | amount | my share if split | category | subcategory | note | paid with | tags | id (blank: cannot be changed from the chat)");
-  const txRows = tx.map((x) => [x.d, x.t, r2(x.amt), x.split ? `${r2(x.split.mine)} (rest owed by ${x.split.person})` : "", plainCat(x.cat), x.sub || "", x.note || "",
-    x.t === "xfer" ? `${x.from || "?"} -> ${x.to || "?"}` : x.pm === "later" ? `PayLater ${x.plp || "GrabPay Later"}${x.inst && x.inst.n > 1 ? " in " + x.inst.n + " instalments" : ""}` : x.acct || "", (x.tags || []).join("/"), x.id && ids.has(x.id) ? x.id : ""].join(" | "));
-  // keep the newest rows when it's too much to send
-  let used = out.join("\n").length + rows.join("\n").length, keepFrom = 0;
-  for (let i = txRows.length - 1; i >= 0; i--) { used += txRows[i].length + 1; if (used > rowLimit) { keepFrom = i + 1; break; } }
-  if (keepFrom >= txRows.length && txRows.length) rows.push(`(all ${txRows.length} transactions are left out to fit; the totals above still include them)`);
-  else if (keepFrom > 0) rows.push(`(${keepFrom} older transactions before ${tx[keepFrom].d} are left out to fit; the totals above still include them)`);
-  rows.push(...txRows.slice(keepFrom));
-  return { text: out.join("\n") + "\n" + rows.join("\n"), ids, byId, cats, accts };
 }
 
 // The changes block at the end of an answer, checked against the ledger: unknown ids, made-up
@@ -304,7 +197,6 @@ const CALL_WINDOW_MS = 3600000;
 // Open to every signed-in account (2026-10-24): the app is a personal money tracker, so the
 // owner wants all accounts to work without an allowlist. Rate caps below still apply per account
 // and per day, and a monthly spending limit at the provider is the backstop.
-
 const OPEN_TO_ALL = true;
 
 Deno.serve(async (req) => {
@@ -377,7 +269,7 @@ Deno.serve(async (req) => {
         ? "\nThe owner's usual patterns, from their own past entries. Notes (note, usual type, usual amount, usual category, times seen):\n" + histNotes.map((h) => JSON.stringify(h)).join("\n") + (histCats.length ? "\nCategories (category, usual type, times seen):\n" + histCats.map((h) => JSON.stringify(h)).join("\n") : "")
         : "";
       const prompt = `Allowed categories: ${JSON.stringify(cats)}${catTypes ? `\nCategory types (income or spending, as the owner set them): ${catTypes}` : ""}\nEntries:\n${items.map((x) => JSON.stringify(x)).join("\n")}${histBlock}`;
-      const out = await complete(REVIEW_SYSTEM, [{ role: "user", content: prompt }], true);
+      const out = await completeJson(REVIEW_SYSTEM, prompt);
       const parsed = firstJson(out.text);
       // An unreadable or cut-off reply is an error, not "nothing found": the app then keeps these
       // entries for the next review instead of marking them as checked.
@@ -401,18 +293,32 @@ Deno.serve(async (req) => {
         .filter((m: Turn) => (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
         .map((m: Turn) => ({ role: m.role, content: m.content.slice(0, 2000) }));
       if (!question) return json({ error: "Ask a question." }, 400);
-      // rows get whatever is left of the prompt budget after the snapshot and history
-      const ledger = await fullLedger(sb, Math.max(20000, PROMPT_BUDGET - context.length - history.reduce((a, m) => a + m.content.length, 0)));
+
+      // The whole ledger, read with the signed-in user's own session (row level security limits it to
+      // their rows), indexed once for the tools. The phone never sends it.
+      const { data, error } = await sb.from("ledger_docs").select("id,body");
+      if (error) throw new Error("Couldn't read your ledger: " + error.message);
+      const doc: Record<string, any> = {};
+      (data || []).forEach((d: { id: string; body: any }) => { doc[d.id] = d.body || {}; });
+      const L = loadLedger(doc);
+      // the app's own date (its time zone), from the snapshot's first line
+      const today = (context.match(/Today is (\d{4}-\d{2}-\d{2})/) || [])[1] || new Date().toISOString().slice(0, 10);
       const messages: Turn[] = [
-        { role: "user", content: `My finances. Amounts in SGD.\n\nCURRENT SNAPSHOT (live balances and recent months, from the app):\n${context}\n\nFULL LEDGER:\n${ledger.text}` },
-        { role: "assistant", content: "Got it. What would you like to know?" },
+        { role: "user", content: `Today is ${today}. Amounts in SGD.\n\nCURRENT SNAPSHOT (live balances and recent months, from the app):\n${context}\n\n${overview(L, today)}` },
+        { role: "assistant", content: "Got it. I'll look anything finer up with the tools and do the arithmetic there. What would you like to know?" },
         ...history,
         { role: "user", content: question },
       ];
-      const out = await complete(ASK_SYSTEM, messages, false);
-      const taken = takeChanges(out.text, ledger), changes = taken.changes;
+      const run: Run = (name, args) => runTool(L, name, args as Record<string, any>);
+      const out = provider() === "anthropic"
+        ? (needKey("ANTHROPIC_API_KEY"), await claudeAgent({ create: (p) => new Anthropic().beta.messages.create({ ...p, ...claudeExtras } as any), model: claudeModel(), system: ASK_SYSTEM, messages, tools: TOOLS, run }))
+        : await mistralAgent({ fetchImpl: fetch, key: needKey("MISTRAL_API_KEY"), model: mistralModel(), system: ASK_SYSTEM, messages, tools: TOOLS, run });
+
+      const byId = new Map<string, { t: string; cat: string }>(L.tx.filter((x) => x.id && L.editable.has(x.id)).map((x) => [x.id as string, { t: x.t, cat: x.cat || "" }]));
+      const catTypes = new Map<string, string>([...L.cats.values()].map((c) => [c.name, c.type === "inc" ? "inc" : "exp"]));
+      const taken = takeChanges(out.text, { ids: L.editable, byId, cats: catTypes, accts: L.wallets }), changes = taken.changes;
       const answer = out.cut ? taken.answer + "\n\n*The answer hit the length limit and was cut off. Ask for less at once, or ask it to continue.*" : taken.answer;
-      return json({ answer, changes, provider: provider(), model: out.model });
+      return json({ answer, changes, steps: out.steps, provider: provider(), model: out.model });
     }
     return json({ error: "Unknown action" }, 400);
   } catch (e) {

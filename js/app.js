@@ -1368,9 +1368,9 @@ function renderAsk() {
       '<div class="ask-msgs" role="log" aria-live="polite">' + (cur.msgs || []).map(function (m, i) {
         if (m.role === 'user') return '<div class="ask-msg me"><div class="bubble">' + esc(m.content).replace(/\n/g, '<br>') + '</div><time>' + chatWhen(m.at) + '</time></div>';
         if (m.role === 'error') return '<div class="ask-msg err"><div class="bubble"><b>That didn\u2019t go through.</b> ' + esc(m.content) + ' <button class="linkbtn" data-askretry="' + i + '">Try again</button></div></div>';
-        return '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div><div class="bubble">' + mdLite(m.content) + '</div>' + chgCard(m, i) + '<time>' + chatWhen(m.at) + '</time></div></div>';
+        return '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div><div class="bubble">' + mdLite(m.content) + '</div>' + askSteps(m) + chgCard(m, i) + '<time>' + chatWhen(m.at) + '</time></div></div>';
       }).join('') +
-      (busy ? '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div class="bubble typing" aria-label="Thinking"><i></i><i></i><i></i></div></div>' : '') + '</div>';
+      (busy ? '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div class="bubble typing" aria-label="Thinking"><i></i><i></i><i></i><span class="typing-label"></span></div></div>' : '') + '</div>';
   }
   main += '<form class="ask-compose" id="askform"><textarea id="askq" rows="1" placeholder="' + (cur ? 'Ask a follow-up' : 'Ask about your money') + '" aria-label="Your question" enterkeyhint="send">' + esc(UI.askDraft || '') + '</textarea>' +
     '<button class="ask-send" type="submit" aria-label="Send"' + (UI.askBusy ? ' disabled' : '') + '><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button></form></div>';
@@ -1384,6 +1384,18 @@ function wireAsk() {
   q.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); askSend(q.value); } });
   f.addEventListener('submit', function (e) { e.preventDefault(); askSend(q.value); });
   if (UI.chatId) askScroll();
+  // While an answer is on its way the typing bubble says what is happening: the function reads
+  // the ledger through its tools and does the sums before the model writes, which takes longer
+  // than a plain reply, so the dots alone read as a hang.
+  clearInterval(wireAsk.tk);
+  if (UI.askBusy && document.querySelector('.typing-label')) {
+    var t0 = UI.askStarted || Date.now(), stages = [[0, ''], [2500, 'Reading your ledger'], [7000, 'Working out the numbers'], [15000, 'Writing the answer']];
+    var tick = function () {
+      var el = document.querySelector('.typing-label'); if (!el) { clearInterval(wireAsk.tk); return; }
+      var age = Date.now() - t0, s = ''; stages.forEach(function (x) { if (age >= x[0]) s = x[1]; }); el.textContent = s;
+    };
+    wireAsk.tk = setInterval(tick, 1000); tick();
+  }
   // Mobile keyboard: shrink the chat area when the on-screen keyboard opens so the
   // compose bar and the latest message stay visible above the keyboard.
   if (window.visualViewport && isTouch()) {
@@ -1407,7 +1419,7 @@ function askSend(text) {
   if (!c) { c = { id: uid(), title: q.length > 52 ? q.slice(0, 51) + '\u2026' : q, t: now, msgs: [] }; S.chats.push(c); UI.chatId = c.id; }
   var hist = (c.msgs || []).filter(function (m) { return m.role === 'user' || m.role === 'assistant'; }).slice(-10).map(function (m) { return { role: m.role, content: m.content + chgRecap(m) }; });
   c.msgs.push({ role: 'user', content: q, at: now }); c.u = now;
-  UI.askDraft = ''; UI.askBusy = c.id;
+  UI.askDraft = ''; UI.askBusy = c.id; UI.askStarted = Date.now();
   // keep the history bounded: 50 conversations, 60 messages each
   S.chats = chatList().slice(0, 50); S.chats.forEach(function (x) { if (x.msgs && x.msgs.length > 60) x.msgs = x.msgs.slice(-60); });
   mark('chats'); render(); askScroll();
@@ -1415,6 +1427,8 @@ function askSend(text) {
   Promise.resolve().then(function () { return aiCall({ action: 'ask', question: q, context: aiContext(), history: hist }); }).then(function (r) {
     var am = { role: 'assistant', content: r.answer || '(no answer)', at: new Date().toISOString() }, ch = chgTake(r.changes);
     if (ch.length) am.changes = ch;
+    // the lookups and sums the function made for this answer, shown under it (askSteps)
+    if (Array.isArray(r.steps) && r.steps.length) am.steps = r.steps.slice(0, 12).map(function (x) { return String(x).slice(0, 160); });
     c.msgs.push(am);
     if (r.model) S.meta.ai.model = r.model;
   }, function (e) {
@@ -1449,6 +1463,13 @@ function chgText(c) {
   if (c.note != null && c.note !== w.note) d.push('note → <b>' + esc(c.note || 'none') + '</b>');
   if (c.acct != null) d.push('paid with → <b>' + esc(c.acct) + '</b>');
   return 'Change ' + what + ': ' + (d.join(', ') || 'no difference');
+}
+// What the answer was worked out from: each lookup and sum the function made, folded away under
+// the reply. Every figure in the answer came from one of these, never from the model's own adding.
+function askSteps(m) {
+  if (!m.steps || !m.steps.length) return '';
+  var n = m.steps.length;
+  return '<details class="ask-steps"><summary>Worked out from ' + n + ' lookup' + (n === 1 ? '' : 's') + '</summary><ul>' + m.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></details>';
 }
 function chgCard(m, i) {
   if (!m.changes || !m.changes.length) return '';

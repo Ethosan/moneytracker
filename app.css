@@ -766,6 +766,9 @@ details.morepat>summary span{flex-basis:100%;font-size:13px;font-weight:400;colo
 .ask-msg{display:flex;flex-direction:column;max-width:88%}
 .ask-msg.me{align-self:flex-end;align-items:flex-end}
 .ask-msg.ai{flex-direction:row;gap:10px;align-items:flex-start;max-width:94%}
+/* the answer column may shrink: a wide table then scrolls inside the bubble instead of
+   pushing the bubble and the change cards past the edge of the screen */
+.ask-msg.ai>div{min-width:0;flex:1 1 auto;max-width:100%}
 .ask-msg time{font-size:11.5px;color:var(--muted);margin:4px 6px 0}
 .ask-msg .bubble{padding:11px 15px;border-radius:20px;font-size:15px;line-height:1.5;overflow-wrap:anywhere}
 .ask-msg.me .bubble{background:var(--accent);color:var(--accent-ink);border-bottom-right-radius:6px}
@@ -782,8 +785,24 @@ details.morepat>summary span{flex-basis:100%;font-size:13px;font-weight:400;colo
 .chg-st{font-size:13px;color:var(--muted)}.chg-st.ok{color:var(--gain);font-weight:600}
 .chg.settled p{color:var(--muted)}
 .ask-msg.err .bubble{background:var(--loss-soft);color:var(--ink);font-size:14px}
-.mdtbl{width:100%;border-collapse:collapse;margin:4px 0 8px;font-size:14px}
-.mdtbl th,.mdtbl td{padding:5px 12px 5px 0;border-bottom:1px solid var(--line);vertical-align:top;text-align:left}
+/* the lookups behind an answer, folded away under it */
+.ask-steps{margin:6px 4px 0;font-size:12.5px;color:var(--muted)}
+.ask-steps summary{cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:6px;padding:2px 0}
+.ask-steps summary::-webkit-details-marker{display:none}
+.ask-steps summary::before{content:'';width:6px;height:6px;border-right:1.5px solid currentColor;border-bottom:1.5px solid currentColor;transform:rotate(-45deg);transition:transform 150ms}
+.ask-steps[open] summary::before{transform:rotate(45deg)}
+.ask-steps ul{margin:4px 0 0;padding-left:18px}.ask-steps li{margin:2px 0;line-height:1.4}
+/* Tables keep their columns whole: dates and amounts never wrap, and a wide table scrolls
+   sideways inside the bubble (which has overflow-x:auto) instead of breaking "$29.20" in two. */
+.mdtbl{width:auto;min-width:100%;border-collapse:collapse;margin:4px 0 8px;font-size:14px}
+.mdtbl th,.mdtbl td{padding:5px 12px 5px 0;border-bottom:1px solid var(--line);vertical-align:top;text-align:left;white-space:nowrap}
+.mdtbl td:last-child,.mdtbl th:last-child{white-space:normal;min-width:9ch;padding-right:0}
+@media (max-width:1023px){.mdtbl{font-size:13px}.mdtbl th,.mdtbl td{padding:5px 10px 5px 0}}
+/* in a chat the compose bar owns the bottom-right corner: the feedback widget's floating button
+   (appended to body by feedback-widget.js) would sit on the Send button */
+body:has(main.tab-ask .ask.in-chat) #fbw-root .fbw-btn{display:none}
+/* the typing bubble says what the assistant is doing while the tools run (wireAsk) */
+.typing-label{font-size:13px;color:var(--muted);margin-left:6px}.typing-label:empty{display:none}
 .mdtbl th{color:var(--muted);font-weight:600}
 .mdtbl tbody tr:last-child td{border-bottom:none}
 .latex{color:inherit}
