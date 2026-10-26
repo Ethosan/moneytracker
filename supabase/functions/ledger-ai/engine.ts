@@ -20,7 +20,8 @@ export const r2 = (n: number) => Math.round(n * 100) / 100;
 export const plainCat = (c = "") => String(c).replace(/^\p{Extended_Pictographic}️?\s*/u, "").trim();
 // a spending row's own share: a split bill counts only the owner's part (the app's ea())
 export const mine = (x: Tx) => (x.t === "exp" && x.split && x.split.mine >= 0 ? x.split.mine : x.amt);
-const norm = (s: unknown) => plainCat(String(s ?? "")).replace(/️/g, "").toLowerCase();
+// names compared without any emoji, wherever the model put it ("Food 🍜" is Food), and in lower case
+const norm = (s: unknown) => plainCat(String(s ?? "")).replace(/[\p{Extended_Pictographic}‍️]/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
 const sum = (a: number[]) => r2(a.reduce((x, y) => x + y, 0));
 
 // The documents as the app stores them (meta, ledger, debts, bills, checks, one tx-YYYY-MM per month).
@@ -51,12 +52,13 @@ export function monthSummary(L: Ledger, month: string) {
   const rows = L.tx.filter((x) => x.d.slice(0, 7) === month);
   let spend = 0, earned = 0, other = 0, reimb = 0;
   const byCat: Record<string, { total: number; count: number }> = {};
-  const byNote: Record<string, { total: number; count: number; category: string }> = {};
+  const byNote: Record<string, { total: number; count: number; category: string; note: string }> = {};
   for (const x of rows) {
     if (x.t === "exp") {
       const v = mine(x), c = plainCat(x.cat) || "(no category)";
       spend += v; (byCat[c] = byCat[c] || { total: 0, count: 0 }).total += v; byCat[c].count++;
-      const k = (x.note || "").trim(); if (k) { const o = byNote[k] = byNote[k] || { total: 0, count: 0, category: c }; o.total += v; o.count++; }
+      // notes merge regardless of case and spacing ("Claude ai" and "Claude AI" are one line)
+      const k = (x.note || "").replace(/\s+/g, " ").trim().toLowerCase(); if (k) { const o = byNote[k] = byNote[k] || { total: 0, count: 0, category: c, note: (x.note || "").replace(/\s+/g, " ").trim() }; o.total += v; o.count++; }
     } else if (x.t === "inc") {
       const k = incKind(L, x.cat); if (k === "earned") earned += x.amt; else if (k === "reimb") reimb += x.amt; else other += x.amt;
     }
@@ -66,7 +68,7 @@ export function monthSummary(L: Ledger, month: string) {
     month, transactions: rows.length, spent: r2(spend), reimbursed_by_friends: r2(reimb), net_spent: r2(net),
     earned_from_work: r2(earned), other_income: r2(other), income_total: r2(earned + other), saved: r2(earned + other - net),
     by_category: Object.keys(byCat).sort((a, b) => byCat[b].total - byCat[a].total).map((c) => ({ category: c, total: r2(byCat[c].total), count: byCat[c].count })),
-    top_notes: Object.keys(byNote).sort((a, b) => byNote[b].total - byNote[a].total).slice(0, 15).map((k) => ({ note: k, category: byNote[k].category, total: r2(byNote[k].total), count: byNote[k].count })),
+    top_notes: Object.keys(byNote).sort((a, b) => byNote[b].total - byNote[a].total).slice(0, 15).map((k) => ({ note: byNote[k].note, category: byNote[k].category, total: r2(byNote[k].total), count: byNote[k].count })),
   };
 }
 
@@ -80,7 +82,7 @@ export function monthsWithEntries(L: Ledger) {
 export function overview(L: Ledger, today: string) {
   const out: string[] = [];
   const months = monthsWithEntries(L), m0 = today.slice(0, 7);
-  out.push("EXACT MONTHLY TOTALS (SGD, own share of split bills; the tools give any finer breakdown):");
+  out.push("EXACT MONTHLY TOTALS (SGD, own share of split bills). Top = the month's largest categories only, not all of them: a category total over any period comes from search_transactions, never from adding these:");
   for (const m of months) {
     const s = monthSummary(L, m);
     const top = s.by_category.slice(0, 6).map((c) => `${c.category} ${c.total}`).join(", ");
@@ -89,31 +91,64 @@ export function overview(L: Ledger, today: string) {
   const done = months.filter((m) => m < m0).slice(-12);
   if (done.length) {
     const ss = done.map((m) => monthSummary(L, m));
-    const ai = sum(ss.map((s) => s.income_total)) / done.length, as = sum(ss.map((s) => s.net_spent)) / done.length, av = sum(ss.map((s) => s.saved)) / done.length;
-    out.push(`Averages over the last ${done.length} complete month${done.length > 1 ? "s" : ""} (${done[0]} to ${done[done.length - 1]}): income ${r2(ai)}, net spent ${r2(as)}, saved ${r2(av)}${ai > 0.005 ? ` (${Math.round((av / ai) * 100)}% of income)` : ""}.`);
+    const ti = sum(ss.map((s) => s.income_total)), ts = sum(ss.map((s) => s.net_spent)), tv = sum(ss.map((s) => s.saved));
+    const ai = ti / done.length, as = ts / done.length, av = tv / done.length;
+    const span = `the last ${done.length} complete month${done.length > 1 ? "s" : ""} (${done[0]} to ${done[done.length - 1]}, the current month left out)`;
+    out.push(`Totals over ${span}: income ${ti}, net spent ${ts}, saved ${tv}. A share of income over this period divides by this income ${ti}, nothing else.`);
+    out.push(`Averages per month over ${span}: income ${r2(ai)}, net spent ${r2(as)}, saved ${r2(av)}${ai > 0.005 ? ` (${Math.round((av / ai) * 100)}% of income)` : ""}.`);
   }
   const years: Record<string, { spent: number; income: number }> = {};
   for (const x of L.tx) { const y = x.d.slice(0, 4); years[y] = years[y] || { spent: 0, income: 0 }; if (x.t === "exp") years[y].spent += mine(x); else if (x.t === "inc") years[y].income += x.amt; }
   for (const y of Object.keys(years).sort()) out.push(`Year ${y}: spent ${r2(years[y].spent)}, income ${r2(years[y].income)}`);
   const v = venueSummary(L);
-  if (v.length) out.push("ACCOUNTS (cash basis, all time): " + v.map((a) => `${a.type} ${a.account}: paid in ${a.paid_in}, taken out ${a.taken_out}, net ${a.net}`).join("; "));
+  if (v.length) out.push(`ACCOUNTS (${cashBasis(L) ? "cash" : "balance"} basis, all time, as the app's Accounts screen counts them): ` + v.map((a: any) =>
+    `${a.type} ${a.account}: paid in ${a.paid_in}${a.basis === "cash" && a.opening_balance != null ? ` (incl. opening balance ${a.opening_balance})` : ""}, taken out ${a.taken_out}, result ${a.net == null ? "n/a" : a.net}${a.still_in_account ? `, still in the account ${a.still_in_account}` : ""}${a.last_balance != null ? `, last balance ${a.last_balance}` : ""}`).join("; "));
   return out.join("\n");
 }
 
-// Investments, prop firms, poker and crypto: money in and out per account, from the venue ledger.
+// Investments, prop firms, poker and crypto: money in and out per account, from the venue ledger,
+// with the app's venuePnl rules so the "result" here equals the one on the Accounts screen.
+// Cash basis (prop firms and poker always; brokers and crypto unless meta.basis says otherwise):
+// result = taken out - paid in, and a balance logged before any deposit is capital carried in,
+// so it counts as paid in. Otherwise the result is balance-based: last balance - opening balance
+// + money taken out - money paid in between the two.
+export const cashBasis = (L: Ledger) => (L.meta.basis || "cash") === "cash";
 export function venueSummary(L: Ledger, account?: string) {
   const venues = L.meta.venues || {};
-  const per: Record<string, { type: string; inn: number; out: number; n: number; last: string; lastBal: number | null; lastBalDate: string }> = {};
-  for (const e of L.led) {
-    if (!e || !e.venue || (e.who && e.who !== "me" && e.f !== "bal")) continue;
-    const v = per[e.venue] = per[e.venue] || { type: (venues[e.venue] && venues[e.venue].type) || "broker", inn: 0, out: 0, n: 0, last: "", lastBal: null, lastBalDate: "" };
-    if (e.f === "in") v.inn += e.amt; else if (e.f === "out") v.out += e.amt; else if (e.f === "bal" && e.d >= v.lastBalDate) { v.lastBal = e.amt; v.lastBalDate = e.d; }
-    v.n++; if (e.d > v.last) v.last = e.d;
-  }
+  const names = [...new Set(L.led.filter((e: any) => e && e.venue).map((e: any) => String(e.venue)))];
   const want = account ? norm(account) : "";
-  return Object.keys(per).filter((k) => !want || norm(k).includes(want)).sort().map((k) => {
-    const v = per[k];
-    return { account: k, type: v.type, paid_in: r2(v.inn), taken_out: r2(v.out), net: r2(v.out - v.inn), entries: v.n, last_entry: v.last, ...(v.lastBal != null ? { last_balance: r2(v.lastBal), balance_date: v.lastBalDate } : {}) };
+  return names.filter((k) => !want || norm(k).includes(want)).sort().map((k) => {
+    const type = (venues[k] && venues[k].type) || "broker", closed = !!(venues[k] && venues[k].closed);
+    const all = L.led.filter((e: any) => e && e.venue === k);
+    // the owner's own flows plus every balance, oldest first; a balance on the same day as a flow comes after it
+    const es = all.filter((e: any) => !e.who || e.who === "me" || e.f === "bal")
+      .sort((a: any, b: any) => (a.d < b.d ? -1 : a.d > b.d ? 1 : (a.f === "bal" ? 1 : 0) - (b.f === "bal" ? 1 : 0)));
+    const o: Record<string, unknown> = { account: k, type, entries: all.length, last_entry: es.length ? es[es.length - 1].d : "" };
+    let inn = 0, out = 0;
+    if (type === "prop" || type === "poker" || cashBasis(L)) {
+      let lastBal: number | null = null, lastBalDate = "", opening: number | null = null;
+      if (es.length && es[0].f === "bal") { opening = es[0].amt; inn += es[0].amt; }
+      es.forEach((e: any, i: number) => { if (e.f === "in") inn += e.amt; else if (e.f === "out") out += e.amt; else if (i > 0) { lastBal = e.amt; lastBalDate = e.d; } });
+      const stillIn = (type === "broker" || type === "crypto") && !closed && inn - out > 0.01 ? r2(inn - out) : 0;
+      return { ...o, basis: "cash", paid_in: r2(inn), taken_out: r2(out), net: r2(out - inn),
+        ...(opening != null ? { opening_balance: r2(opening), note: "the opening balance was there before tracking started, so it counts as paid in" } : {}),
+        ...(lastBal != null ? { last_balance: r2(lastBal), balance_date: lastBalDate } : {}),
+        ...(stillIn ? { still_in_account: stillIn, note_on_result: "money still with the account is not a result yet" } : {}) };
+    }
+    let startIdx = -1, start = 0;
+    if (es.length && es[0].f === "bal") { startIdx = 0; start = es[0].amt; }
+    let endIdx = -1;
+    for (let i = es.length - 1; i > startIdx; i--) if (es[i].f === "bal") { endIdx = i; break; }
+    let stale = false;
+    es.forEach((e: any, i: number) => { if (i <= startIdx || e.f === "bal") return; if (e.f === "in") inn += e.amt; else out += e.amt; if (endIdx > -1 && i > endIdx) stale = true; });
+    const r: Record<string, unknown> = { ...o, basis: "balance", paid_in: r2(inn), taken_out: r2(out), ...(startIdx === 0 ? { opening_balance: r2(start) } : {}) };
+    if (endIdx < 0 && closed) return { ...r, last_balance: 0, net: r2(out - inn - start) };
+    if (endIdx > -1) {
+      let fin = 0, fout = 0;
+      es.forEach((e: any, i: number) => { if (i > startIdx && i < endIdx && e.f !== "bal") { if (e.f === "in") fin += e.amt; else fout += e.amt; } });
+      return { ...r, last_balance: r2(es[endIdx].amt), balance_date: es[endIdx].d, net: r2(es[endIdx].amt - start + fout - fin), ...(stale ? { note: "entries after the last balance are not in the result yet; count the balance again" } : {}) };
+    }
+    return { ...r, net: null, note: "no balance logged yet, so there is no result on this basis" };
   });
 }
 
@@ -126,20 +161,42 @@ const dayOf = (d: string, end: boolean) => (d.length === 7 ? d + (end ? "-31" : 
 
 // The one lookup behind most questions: filter the transactions, total them exactly, and group
 // them when asked. Rows come back with their ids so a proposed edit can name them.
+const TYPE_WORDS: Record<string, string> = { exp: "exp", expense: "exp", expenses: "exp", spending: "exp", spend: "exp", spent: "exp", inc: "inc", income: "inc", earned: "inc", xfer: "xfer", transfer: "xfer", transfers: "xfer", adj: "adj", adjustment: "adj", all: "all", "": "all" };
+const GROUPS = ["none", "month", "year", "day", "category", "subcategory", "note", "wallet", "type", "tag"];
+// A filter the model wrote wrongly is an error it can correct, never a silent no-op: "October 2026"
+// as a date would otherwise match all time, and type "expense" would match nothing at all.
+function checkParams(p: SearchParams) {
+  for (const k of ["from", "to"] as const) if (p[k] != null && String(p[k]) !== "" && !okDate(p[k])) throw new Error(`${k} must be YYYY-MM-DD or YYYY-MM, not "${p[k]}".`);
+  const t = TYPE_WORDS[String(p.type ?? "").trim().toLowerCase()];
+  if (!t) throw new Error(`type must be exp, inc, xfer, adj or all, not "${p.type}".`);
+  if (p.group_by != null && String(p.group_by) !== "" && !GROUPS.includes(String(p.group_by))) throw new Error(`group_by must be one of ${GROUPS.join(", ")}, not "${p.group_by}".`);
+  return t === "all" ? null : t;
+}
+const wordIn = (hay: string, word: string) => new RegExp("(^|[^\\p{L}\\p{N}])" + word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "($|[^\\p{L}\\p{N}])", "u").test(hay);
+
 export function searchTransactions(L: Ledger, p: SearchParams) {
+  const type = checkParams(p);
   const from = okDate(p.from) ? dayOf(p.from as string, false) : null, to = okDate(p.to) ? dayOf(p.to as string, true) : null;
-  const type = p.type && p.type !== "all" ? String(p.type) : null;
-  const cat = p.category ? norm(p.category) : "", note = p.note ? String(p.note).toLowerCase() : "", wallet = p.wallet ? norm(p.wallet) : "", tag = p.tag ? norm(p.tag) : "", person = p.person ? norm(p.person) : "";
-  // "Spent on food" is the Food category, not the word food in a note: when the note word names a
-  // category (or a subcategory in use), rows of that category match too, and the result says so.
-  const noteCats = note && !cat
-    ? [...new Set([...L.cats.values()].map((c) => c.name).concat(L.tx.map((x) => x.sub || "")).filter((n) => n && norm(n).includes(note)))]
+  const cat = p.category ? norm(p.category) : "", wallet = p.wallet ? norm(p.wallet) : "", tag = p.tag ? norm(p.tag) : "", person = p.person ? norm(p.person) : "";
+  // The note filter: one or more terms separated by |, any of which may match the note or the
+  // subcategory. A term of three letters or fewer matches whole words only ("ai" is inside Alaina,
+  // haircut and chair, and those are not AI); a longer term matches inside words ("grab" finds GrabFood).
+  const terms = p.note ? String(p.note).toLowerCase().split("|").map((t) => t.trim()).filter(Boolean) : [];
+  const note = terms.join("|");
+  const termHits = (text: string, t: string) => (t.length <= 3 ? wordIn(text, t) : text.includes(t));
+  const noteText = (x: Tx) => String(x.note || "").toLowerCase(), subText = (x: Tx) => String(x.sub || "").toLowerCase();
+  const noteHit = (x: Tx, t: string) => termHits(noteText(x), t) || termHits(subText(x), t);
+  // "Spent on food" is the Food category, not the word food in a note: when a term is a whole word
+  // of a category name (or of a subcategory in use), rows of that category match too, and the result
+  // says so. Whole words only: "ai" is in "Entertainment" and "Paid back", and those are not AI.
+  const noteCats = terms.length && !cat
+    ? [...new Set([...L.cats.values()].map((c) => c.name).concat(L.tx.map((x) => x.sub || "")).filter((n) => n && terms.some((t) => wordIn(norm(n), t))))]
     : [];
   const noteCatKeys = noteCats.map(norm);
   const rows = L.tx.filter((x) =>
     (!from || x.d >= from) && (!to || x.d <= to) && (!type || x.t === type) &&
     (!cat || norm(x.cat).includes(cat) || norm(x.sub).includes(cat)) &&
-    (!note || String(x.note || "").toLowerCase().includes(note) || String(x.sub || "").toLowerCase().includes(note) ||
+    (!terms.length || terms.some((t) => noteHit(x, t)) ||
       (noteCatKeys.length > 0 && (noteCatKeys.includes(norm(x.cat)) || noteCatKeys.includes(norm(x.sub))))) &&
     (!wallet || norm(x.acct).includes(wallet) || norm(x.from).includes(wallet) || norm(x.to).includes(wallet) || (x.pm === "later" && ("paylater " + norm(x.plp)).includes(wallet))) &&
     (!tag || (x.tags || []).some((g) => norm(g).includes(tag))) &&
@@ -178,16 +235,33 @@ export function searchTransactions(L: Ledger, p: SearchParams) {
   const gbName = p.group_by === "month" ? "Month" : p.group_by === "year" ? "Year" : p.group_by === "day" ? "Date" : String(p.group_by || "Group");
   const groupsMarkdown = groups ? ["| " + gbName[0].toUpperCase() + gbName.slice(1) + " | Total | Entries |", "|---|---:|---:|", ...groups.map((g) => `| ${cell(g.key)} | ${md(g.total)} | ${g.count} |`), `| **All** | **${md(total)}** | **${rows.length}** |`].join(NL) : undefined;
   const rowsMarkdown = list.length ? ["| Date | Amount | Category | Note |", "|---|---:|---|---|", ...list.map((r) => `| ${r.d} | ${md((r as any).my_share ?? r.amt)} | ${cell(r.cat + ((r as any).sub ? " / " + (r as any).sub : ""))} | ${cell(r.note || "")} |`)].join(NL) : undefined;
-  return {
+  // the whole period's spending and income, for "what share of my income" questions: the same
+  // dates, every category, so the share divides by the right income
+  const narrowed = !!(cat || note || wallet || tag || person || p.min_amount != null || p.max_amount != null);
+  const inPeriod = narrowed ? L.tx.filter((x) => (!from || x.d >= from) && (!to || x.d <= to)) : [];
+  const periodSpent = sum(inPeriod.filter((x) => x.t === "exp").map(mine));
+  const periodIncome = sum(inPeriod.filter((x) => x.t === "inc" && incKind(L, x.cat) !== "reimb").map((x) => x.amt));
+  const periodReimb = sum(inPeriod.filter((x) => x.t === "inc" && incKind(L, x.cat) === "reimb").map((x) => x.amt));
+  const head = {
     filter: { from: from || "(start)", to: to || "(today)", type: type || "all", ...(p.category ? { category: p.category } : {}), ...(p.note ? { note: p.note } : {}), ...(p.wallet ? { wallet: p.wallet } : {}), ...(p.tag ? { tag: p.tag } : {}) },
     matched: rows.length, spent, income, total_of_matched: total,
+    ...(terms.length > 1 ? { by_term: terms.map((t) => { const hit = rows.filter((x) => noteHit(x, t)); return { term: t, count: hit.length, total: sum(hit.map(amount)) }; }), note_on_terms: "a row can match more than one term" } : {}),
+    ...(narrowed ? { period_totals: { from: from || "(start)", to: to || "(today)", all_spending: periodSpent, all_income: periodIncome, friends_paid_back: periodReimb, net_spending: r2(periodSpent - periodReimb), note: "every category over the same dates; a share of income or of spending divides by these" } } : {}),
     ...(noteCats.length ? { note_matched_category: noteCats, hint: `"${p.note}" is a category name here, so every ${noteCats.join(" / ")} row is included, not only notes containing the word` } : {}),
     ...(!type && spent > 0 && income > 0 ? { caution: `these matches mix spending (${spent}) and income (${income}); total_of_matched adds both. Pass type "exp" for spending or "inc" for income` } : {}),
     ...(catSpan.length > 1 ? { categories: catSpan, note_on_categories: "the matches span several categories; say so rather than calling them all one thing" } : {}),
-    ...(groups ? { groups, groups_markdown: groupsMarkdown } : {}), rows: list, ...(rowsMarkdown ? { rows_markdown: rowsMarkdown } : {}),
+    ...(groups ? { groups, groups_markdown: groupsMarkdown } : {}),
+    ...(rowsMarkdown ? { rows_markdown: rowsMarkdown } : {}),
     ...(rows.length > list.length ? { note: `${rows.length - list.length} more rows not listed; raise limit or narrow the filter` } : {}),
   };
+  // The result must fit the agent's cap whole, or the model reads a cut-off table. The markdown
+  // (what it pastes) comes first; the JSON rows carry the ids an edit needs, so when a long listing
+  // would not fit, the rows go and the model is told how to get the ids back.
+  const full = { ...head, rows: list };
+  if (JSON.stringify(full).length <= RESULT_BUDGET) return full;
+  return { ...head, rows: [], rows_note: `${list.length} rows are listed in rows_markdown; their ids were left out to fit. To edit one, search again with a narrower filter or a lower limit.` };
 }
+export const RESULT_BUDGET = 22000;  // characters; agent.ts clips anything above RESULT_CHARS (larger)
 
 // Plain arithmetic for the model: + - * / ^ % and brackets, nothing else runs.
 export function calculate(expr: string): number {
@@ -197,8 +271,9 @@ export function calculate(expr: string): number {
   const peek = () => s[i], next = () => s[i++];
   const num = (): number => {
     if (peek() === "(") { next(); const v = add(); if (next() !== ")") throw new Error("Unbalanced brackets."); return v; }
-    if (peek() === "-") { next(); return -num(); }
-    if (peek() === "+") { next(); return num(); }
+    // a sign binds looser than ^, so -2^2 is -(2^2) = -4 as in ordinary arithmetic
+    if (peek() === "-") { next(); return -pow(); }
+    if (peek() === "+") { next(); return pow(); }
     const m = /^\d*\.?\d+(e[+-]?\d+)?/i.exec(s.slice(i)); if (!m) throw new Error("Expected a number at position " + (i + 1) + ".");
     i += m[0].length; let v = parseFloat(m[0]);
     if (peek() === "%") { next(); v /= 100; }
@@ -248,7 +323,7 @@ export const TOOLS = [
         to: { type: "string", description: "End date, inclusive (YYYY-MM-DD or YYYY-MM)" },
         type: { type: "string", enum: ["exp", "inc", "xfer", "adj", "all"], description: "exp spending, inc income, xfer transfers; default all" },
         category: { type: "string", description: "Category or subcategory name, partial match, emoji not needed" },
-        note: { type: "string", description: "Text in the note, partial match (a shop, a thing bought)" },
+        note: { type: "string", description: "Text in the note or subcategory: a shop, product or service. Several alternatives separated by | (Claude|OpenAI|AI) match any of them. A term of 1-3 letters matches whole words only; a longer term also matches inside words (grab finds GrabFood)" },
         wallet: { type: "string", description: "Wallet or account the money moved on, partial match; 'paylater' for PayLater purchases" },
         tag: { type: "string", description: "A tag, partial match" },
         person: { type: "string", description: "Person a bill was split with" },

@@ -65,10 +65,17 @@ Numbers:
   returned; never round differently, estimate or fill a gap from memory.
 - A question about one thing (a shop, product, service, subscription, person, category or tag): call search_transactions
   with type "exp" for spending, group_by "month" and limit 200. A category name (Food, Transport, Subscriptions, Shopping...)
-  goes in the category filter; a shop, product or service (Grab, Claude, Netflix, a restaurant) goes in note. If nothing matches,
-  try a shorter or alternative word (a brand and its maker, a nickname) before saying so, and say what you searched. Answer with
+  goes in the category filter; a shop, product or service (Grab, Claude, Netflix, a restaurant) goes in note. Several names at once
+  go in one note separated by | ("Claude|OpenAI|AI"), and the result's by_term shows each one's share; a term of three letters or
+  fewer matches whole words only. If nothing matches, try an alternative word (a brand and its maker, a nickname) before saying
+  so, and say what you searched. Answer with
   the total, the month-by-month table (paste groups_markdown) and the dated entries (paste rows_markdown, or the relevant rows
   when there are many). When the owner asks for dates, days, entries or a list, the dated rows are required, never optional.
+- A category over several months (a share of income, an average, a yearly total, "how much on X since"): one search_transactions
+  call with category, from, to and group_by "month", then calculate. Never add up the Top lists in the monthly totals: they show
+  only each month's largest categories, and a month where the category is missing from them is not a zero month. A share of income
+  or of spending divides by the same period's all_income or all_spending from that result's period_totals (or by the "Totals over the
+  last N complete months" line when the question is about those months), never by a sum you make from the monthly lines.
 - Comparing two months, categories or periods: every difference, growth, share or percentage in the answer (including each
   cell of a "Change" column) is a calculate call. A figure you did not get back from a tool must not appear in the answer.
 - "Spent on X" always means spending (type "exp"). Grouping without a type mixes income rows in; the result's caution says so.
@@ -152,7 +159,7 @@ function firstJson(text: string) {
 // The changes block at the end of an answer, checked against the ledger: unknown ids, made-up
 // categories, impossible dates and amounts are dropped, so the app only ever shows real proposals.
 type Change = { op: "add" | "edit" | "delete"; id?: string; d?: string; t?: "exp" | "inc"; amt?: number; cat?: string; note?: string; acct?: string; why?: string };
-function takeChanges(text: string, L: { ids: Set<string>; byId: Map<string, { t: string; cat: string }>; cats: Map<string, string>; accts: Set<string> }) {
+function takeChanges(text: string, L: { ids: Set<string>; byId: Map<string, { t: string; cat: string }>; cats: Map<string, string>; accts: Set<string>; today?: string }) {
   // the block can sit anywhere (models often add a line after it), or be cut off at the end
   const m = text.match(/```changes\s*([\s\S]*?)```/) || text.match(/```changes\s*([\s\S]*)$/);
   if (!m) return { answer: text.trim(), changes: [] as Change[] };
@@ -160,40 +167,54 @@ function takeChanges(text: string, L: { ids: Set<string>; byId: Map<string, { t:
   const none = (why: string) => ({ answer: (answer ? answer + "\n\n" : "") + "*" + why + "*", changes: [] as Change[] });
   let raw: unknown;
   try { raw = JSON.parse(m[1].trim()); } catch { return none("The proposed changes didn't come through in full, so none are shown. Ask again to get them."); }
-  // categories as the model writes them often lose or gain the emoji; match on the name
-  const catKey = (c: string) => plainCat(c).replace(/️/g, "").trim().toLowerCase();
+  // categories as the model writes them often lose, gain or move the emoji ("Food 🍜"); match on the name
+  const catKey = (c: string) => plainCat(c).replace(/[\p{Extended_Pictographic}‍️]/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
   const catByKey = new Map<string, string>([...L.cats.keys()].map((n) => [catKey(n), n]));
   const findCat = (c: unknown) => typeof c !== "string" ? undefined : L.cats.has(c) ? c : catByKey.get(catKey(c));
-  const okDate = (d: unknown) => typeof d === "string" && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d + "T00:00:00Z")) && new Date(d + "T00:00:00Z").toISOString().slice(0, 10) === d;
-  const okAmt = (a: unknown) => typeof a === "number" && isFinite(a) && a > 0 && a < 1e7;
+  const acctByKey = new Map<string, string>([...L.accts].map((n) => [n.trim().toLowerCase(), n]));
+  const isDate = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d + "T00:00:00Z")) && new Date(d + "T00:00:00Z").toISOString().slice(0, 10) === d;
+  // "today" and "yesterday" as the model sometimes writes them become real dates
+  const readDate = (d: unknown): string | undefined => {
+    if (typeof d !== "string") return undefined;
+    const s = d.trim().toLowerCase();
+    if (L.today && (s === "today" || s === "")) return L.today;
+    if (L.today && s === "yesterday") { const t = new Date(L.today + "T00:00:00Z"); t.setUTCDate(t.getUTCDate() - 1); return t.toISOString().slice(0, 10); }
+    return isDate(d.trim()) ? d.trim() : undefined;
+  };
+  // an amount written as text ("$12.50", "12,50") is still an amount
+  const readAmt = (a: unknown): number | undefined => {
+    const v = typeof a === "number" ? a : typeof a === "string" ? Number(a.replace(/[\s$,]/g, "").replace(/^S\$/i, "")) : NaN;
+    return isFinite(v) && v > 0 && v < 1e7 ? Math.round(v * 100) / 100 : undefined;
+  };
   const str = (v: unknown, n: number) => String(v).replace(/\s+/g, " ").trim().slice(0, n);
-  const changes: Change[] = [];
+  const changes: Change[] = [], dropped: string[] = [];
   for (const c of (Array.isArray(raw) ? raw : []).slice(0, 20) as any[]) {
-    if (!c || typeof c !== "object") continue;
+    if (!c || typeof c !== "object") { dropped.push("an entry that was not an object"); continue; }
     const why = typeof c.why === "string" ? str(c.why, 200) : undefined;
-    if (c.op === "delete") { if (L.ids.has(c.id)) changes.push({ op: "delete", id: c.id, why }); continue; }
-    if (c.op !== "add" && c.op !== "edit") continue;
+    if (c.op === "delete") { if (L.ids.has(c.id)) changes.push({ op: "delete", id: c.id, why }); else dropped.push(`delete: no entry with id "${str(c.id, 40)}" can be changed from here`); continue; }
+    if (c.op !== "add" && c.op !== "edit") { dropped.push(`unknown operation "${str(c.op, 20)}"`); continue; }
     const o: Change = { op: c.op, why };
-    if (c.op === "edit") { if (!L.ids.has(c.id)) continue; o.id = c.id; }
+    if (c.op === "edit") { if (!L.ids.has(c.id)) { dropped.push(`edit: no entry with id "${str(c.id, 40)}" can be changed from here`); continue; } o.id = c.id; }
     if (c.t === "exp" || c.t === "inc") o.t = c.t;
-    if (c.d != null) { if (!okDate(c.d)) continue; o.d = c.d; }
-    if (c.amt != null) { if (!okAmt(c.amt)) continue; o.amt = Math.round(c.amt * 100) / 100; }
-    if (c.cat != null) { const cat = findCat(c.cat); if (!cat) continue; o.cat = cat; }
+    if (c.d != null) { const d = readDate(c.d); if (!d) { dropped.push(`${c.op}: "${str(c.d, 30)}" is not a date (YYYY-MM-DD)`); continue; } o.d = d; }
+    if (c.amt != null) { const a = readAmt(c.amt); if (a == null) { dropped.push(`${c.op}: "${str(c.amt, 30)}" is not a positive amount`); continue; } o.amt = a; }
+    if (c.cat != null) { const cat = findCat(c.cat); if (!cat) { dropped.push(`${c.op}: "${str(c.cat, 40)}" is not one of your categories`); continue; } o.cat = cat; }
     if (typeof c.note === "string") o.note = str(c.note, 120);
-    if (typeof c.acct === "string" && L.accts.has(c.acct)) o.acct = c.acct;
+    if (typeof c.acct === "string") { const a = L.accts.has(c.acct) ? c.acct : acctByKey.get(c.acct.trim().toLowerCase()); if (a) o.acct = a; }
     if (o.op === "add") {
-      if (!o.amt || !o.cat) continue;
+      if (!o.amt || !o.cat) { dropped.push(`add: ${!o.amt ? "no amount" : "no category"} given`); continue; }
       o.t = o.t || (L.cats.get(o.cat) as "exp" | "inc");
     }
     // a category of the other type would file spending as income or the reverse; for an edit
     // that changes only one of the two, check against what the entry has now
     const cur = o.op === "edit" ? L.byId.get(o.id as string) : undefined;
     const effT = o.t ?? cur?.t, effCat = o.cat ?? cur?.cat;
-    if (effCat && effT && L.cats.has(effCat) && L.cats.get(effCat) !== effT) continue;
-    if (o.op === "edit" && o.t == null && o.d == null && o.amt == null && o.cat == null && o.note == null && o.acct == null) continue;
+    if (effCat && effT && L.cats.has(effCat) && L.cats.get(effCat) !== effT) { dropped.push(`${o.op}: ${effCat} is ${L.cats.get(effCat) === "inc" ? "an income" : "a spending"} category, so it cannot hold ${effT === "inc" ? "income" : "spending"}`); continue; }
+    if (o.op === "edit" && o.t == null && o.d == null && o.amt == null && o.cat == null && o.note == null && o.acct == null) { dropped.push("edit: nothing to change"); continue; }
     changes.push(o);
   }
-  if (!changes.length && Array.isArray(raw) && raw.length) return none("None of the proposed changes matched your ledger, so nothing is shown.");
+  if (!changes.length && Array.isArray(raw) && raw.length) return none(`None of the proposed changes could be used, so nothing is shown: ${[...new Set(dropped)].slice(0, 3).join("; ")}.`);
+  if (dropped.length) return { answer: `${answer}\n\n*${dropped.length} proposed change${dropped.length === 1 ? " was" : "s were"} left out: ${[...new Set(dropped)].slice(0, 3).join("; ")}.*`, changes };
   return { answer, changes };
 }
 
@@ -365,15 +386,19 @@ Deno.serve(async (req) => {
 
       const byId = new Map<string, { t: string; cat: string }>(L.tx.filter((x) => x.id && L.editable.has(x.id)).map((x) => [x.id as string, { t: x.t, cat: x.cat || "" }]));
       const catTypes = new Map<string, string>([...L.cats.values()].map((c) => [c.name, c.type === "inc" ? "inc" : "exp"]));
-      const taken = takeChanges(out.text, { ids: L.editable, byId, cats: catTypes, accts: L.wallets }), changes = taken.changes;
+      const taken = takeChanges(out.text, { ids: L.editable, byId, cats: catTypes, accts: L.wallets, today }), changes = taken.changes;
       let answer = taken.answer;
       // Asked for dates or a list and given none: the rows from the lookup go under the answer as
       // they came back, so the owner gets them without asking twice.
       const wantsDates = /\b(dates?|days?|when|entries|transactions|itemi[sz]e|list)\b/i.test(question);
       const rows = lastRows as { rows_markdown: string; matched: number; listed: number } | null;
+      const datedRows = (answer.match(/^\|\s*\d{4}-\d{2}-\d{2}\s*\|/gm) || []).length;
       if (wantsDates && rows && rows.listed <= 100 && !out.cut && !/\d{4}-\d{2}-\d{2}/.test(answer)) {
         answer += `\n\n**Entries**\n\n${rows.rows_markdown}` + (rows.matched > rows.listed ? `\n\n*${rows.listed} of ${rows.matched} entries shown; ask for a narrower period for the rest.*` : "");
         out.steps.push("Added the dated entries from the lookup");
+      } else if (wantsDates && rows && datedRows > 0 && datedRows < rows.matched && !out.cut) {
+        // the model listed some of the rows: say how many, so a short table is not taken for all of them
+        answer += `\n\n*${datedRows} of ${rows.matched} dated entries shown; ask for one month at a time to see the rest.*`;
       }
       if (out.cut) answer += "\n\n*The answer hit the length limit and was cut off. Ask for less at once, or ask it to continue.*";
       return json({ answer, changes, steps: out.steps, provider: used, model: out.model });

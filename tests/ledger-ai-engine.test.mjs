@@ -94,8 +94,9 @@ test("overview reports each month and averages over complete months only", () =>
   const text = overview(L, "2026-10-26");
   assert.match(text, /2026-09: spent 22.5, income 3000, saved 2977.5/);
   assert.match(text, /2026-10 \(so far\): spent 151.5 \(friends paid back 15, net 136.5\), income 3050 \(work 3000, other 50\), saved 2913.5/);
-  assert.match(text, /Averages over the last 1 complete month \(2026-09 to 2026-09\): income 3000, net spent 22.5, saved 2977.5 \(99% of income\)/);
-  assert.match(text, /prop FTMO: paid in 100, taken out 250, net 150/);
+  assert.match(text, /Totals over the last 1 complete month \(2026-09 to 2026-09, the current month left out\): income 3000, net spent 22.5, saved 2977.5\. A share of income over this period divides by this income 3000/);
+  assert.match(text, /Averages per month over the last 1 complete month \(2026-09 to 2026-09, the current month left out\): income 3000, net spent 22.5, saved 2977.5 \(99% of income\)/);
+  assert.match(text, /prop FTMO: paid in 100, taken out 250, result 150/);
 });
 
 test("account sections and tool labels", () => {

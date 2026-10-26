@@ -15,7 +15,7 @@ export type Run = (name: string, args: Record<string, unknown>) => { result: unk
 export type Outcome = { text: string; model: string; cut: boolean; steps: string[]; rounds: number; unverified: number[] };
 
 const MAX_ROUNDS = 8;          // tool rounds before the model must answer with what it has
-const RESULT_CHARS = 14000;    // one tool result's size cap: a 200-row listing fits, a dump does not
+const RESULT_CHARS = 26000;    // one tool result's size cap; engine.ts keeps a search result under RESULT_BUDGET (22000) by dropping row ids, so a 200-row listing fits whole
 
 // One tool call, never thrown: a bad filter or expression goes back to the model as an error it
 // can correct, and the owner sees what was tried.
@@ -27,7 +27,13 @@ function callTool(run: Run, name: string, rawArgs: unknown, steps: string[], kno
     const out = run(name, args);
     steps.push(out.label);
     const text = clip(JSON.stringify(out.result));
-    for (const n of numbersIn(text)) known.add(n);
+    for (const n of numbersIn(text, true)) known.add(n);
+    // a figure the calculator produced may be rounded, or rounded up or down, in the answer:
+    // 175.69 months becomes "176 months", 12.75 becomes "13%"
+    const r = out.result as { result?: unknown; exact?: unknown } | null;
+    if (name === "calculate" && r && typeof r.exact === "number" && Number.isFinite(r.exact)) {
+      for (const v of [Math.round(r.exact), Math.ceil(r.exact), Math.floor(r.exact), Math.round(r.exact * 10) / 10]) known.add(Math.abs(v));
+    }
     return text;
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
@@ -39,16 +45,18 @@ function clip(s: string) { return s.length > RESULT_CHARS ? s.slice(0, RESULT_CH
 
 // The figures in a text, as absolute values: dates, times, years, small counts (0-31) and digits
 // glued to letters (ids, "5x") are not figures. Commas inside numbers are thousands separators.
-export function numbersIn(text: string): number[] {
+// With `everything` set (the given side: snapshot, question, tool results) small whole numbers are
+// kept too, so a calculate result of 22 can vouch for a "22%" in the answer.
+export function numbersIn(text: string, everything = false): number[] {
   const s = String(text || "").replace(/\d{4}-\d{2}(-\d{2})?/g, " ").replace(/\b\d{1,2}:\d{2}\b/g, " ");
   const out: number[] = [];
-  const re = /(?<![A-Za-z0-9_.])(\$\s?)?(\d[\d,]*(?:\.\d+)?)(?![A-Za-z0-9_])/g;
+  const re = /(?<![A-Za-z0-9_.])(\$\s?)?(\d[\d,]*(?:\.\d+)?)(\s?%)?(?![A-Za-z0-9_])/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
     const v = Number(m[2].replace(/,/g, ""));
     if (!Number.isFinite(v)) continue;
-    // "$20" is money even when small; a bare 20 is a count or a day
-    if (!m[1] && Number.isInteger(v) && (v <= 31 || (v >= 1900 && v <= 2100))) continue;
+    // "$20" is money and "22%" is a share even when small; a bare 20 is a count or a day
+    if (!everything && !m[1] && !m[3] && Number.isInteger(v) && (v <= 31 || (v >= 1900 && v <= 2100))) continue;
     out.push(v);
   }
   return out;
@@ -73,10 +81,18 @@ const auditMessage = (bad: number[]) =>
   `Check before this goes out: these figures in your answer are not in any lookup or calculation result, so they were worked out by hand: ${bad.join(", ")}. ` +
   `Work each one out with calculate (differences, averages, percentages included) or leave it out, then give the complete answer again with the corrected figures. Do not mention this check.`;
 
+// A reply with no words (a model that still wanted a tool when told it had to answer) must not go
+// out as a blank bubble marked "checked".
+function ensureText(text: string, steps: string[]) {
+  if (text.trim()) return text;
+  steps.push("The model ran out of lookups without answering");
+  return "I couldn't finish working this out within the lookup limit. Ask for a narrower period or one thing at a time.";
+}
+
 type Audit = { known: Set<number>; repaired: boolean };
 function startAudit(messages: Turn[]): Audit {
   const known = new Set<number>();
-  for (const m of messages) for (const n of numbersIn(m.content)) known.add(n);
+  for (const m of messages) for (const n of numbersIn(m.content, true)) known.add(n);
   return { known, repaired: false };
 }
 // Decides whether an answer goes out or back: returns the audit message to send, or null, and
@@ -98,7 +114,7 @@ export async function mistralAgent(o: { fetchImpl: typeof fetch; key: string; mo
     const r = await o.fetchImpl("https://api.mistral.ai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${o.key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: o.model, messages: msgs, temperature: 0.1, max_tokens: 2500, tools, tool_choice: last ? "none" : "auto" }),
+      body: JSON.stringify({ model: o.model, messages: msgs, temperature: 0.1, max_tokens: 6000, tools, tool_choice: last ? "none" : "auto" }),
     });
     if (!r.ok) throw new Error(`Mistral ${r.status}: ${(await r.text()).slice(0, 300)}`);
     const data = await r.json();
@@ -112,7 +128,7 @@ export async function mistralAgent(o: { fetchImpl: typeof fetch; key: string; mo
       }
       continue;
     }
-    const text = String(m.content ?? ""), cut = choice?.finish_reason === "length";
+    const text = ensureText(String(m.content ?? ""), steps), cut = choice?.finish_reason === "length";
     const f = finish(audit, text, steps, !last && !cut);
     if (f.ask) { msgs.push({ role: "assistant", content: text }, { role: "user", content: f.ask }); continue; }
     return { text, model: o.model, cut, steps, rounds: round, unverified: f.unverified };
@@ -126,7 +142,7 @@ export async function claudeAgent(o: { create: (params: Record<string, unknown>)
   const steps: string[] = [], audit = startAudit(o.messages);
   for (let round = 1; ; round++) {
     const last = round > MAX_ROUNDS + (audit.repaired ? 2 : 0);
-    const res = await o.create({ model: o.model, max_tokens: 4000, system: o.system, messages: msgs, ...(last ? {} : { tools }) });
+    const res = await o.create({ model: o.model, max_tokens: 6000, system: o.system, messages: msgs, ...(last ? {} : { tools }) });
     if (res.stop_reason === "refusal") throw new Error("The model declined this request.");
     const blocks: any[] = Array.isArray(res.content) ? res.content : [];
     const uses = blocks.filter((b) => b.type === "tool_use");
@@ -135,7 +151,7 @@ export async function claudeAgent(o: { create: (params: Record<string, unknown>)
       msgs.push({ role: "user", content: uses.map((u) => ({ type: "tool_result", tool_use_id: u.id, content: callTool(o.run, u.name, u.input, steps, audit.known) })) });
       continue;
     }
-    const text = blocks.map((b) => (b.type === "text" ? b.text : "")).join(""), cut = res.stop_reason === "max_tokens";
+    const text = ensureText(blocks.map((b) => (b.type === "text" ? b.text : "")).join(""), steps), cut = res.stop_reason === "max_tokens";
     const f = finish(audit, text, steps, !last && !cut);
     if (f.ask) { msgs.push({ role: "assistant", content: text || "(empty)" }, { role: "user", content: f.ask }); continue; }
     return { text, model: res.model || o.model, cut, steps, rounds: round, unverified: f.unverified };

@@ -60,7 +60,8 @@ test("Mistral loop: a model that keeps calling tools is made to answer after the
   const out = await mistralAgent({ fetchImpl: f.fetchImpl, key: "k", model: "m", system: "sys", messages: [], tools, run });
   assert.equal(out.rounds, 9);
   assert.equal(f.seen[8].tool_choice, "none");
-  assert.equal(out.steps.length, 9); // 8 lookups and the figure check
+  assert.equal(out.steps.length, 10); // 8 lookups, the ran-out note and the figure check
+  assert.match(out.text, /couldn't finish working this out/);
 });
 
 test("Mistral loop: an upstream error is thrown with its status", async () => {
