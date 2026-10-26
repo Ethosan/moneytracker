@@ -41,3 +41,31 @@ function parseDateAny(v, lenient) {
   }
   return null;
 }
+
+// ---- when something was logged, and which side of a balance count it falls on ----
+// Ids from uid() are 'a' + Date.now() in base 36 (8 characters from 1972 to 2059) + a random tail,
+// so every entry and every count already carries the moment it was saved.
+function idTime(id) {
+  if (typeof id !== 'string' || !/^a[0-9a-z]{9,13}$/.test(id)) return null;
+  var ms = parseInt(id.slice(1, 9), 36);
+  return ms > 1.3e12 && ms < 2.8e12 ? ms : null; // 2011 to 2058: anything else is not one of ours
+}
+// The moment x was saved, in ms: an explicit `at` (ISO string) wins, else the time in its id.
+function whenMade(x) {
+  if (!x) return null;
+  if (x.at) { var t = Date.parse(x.at); if (!isNaN(t)) return t; }
+  return idTime(x.id);
+}
+// Did entry e happen after balance count c? On different days the dates decide. On the count's own
+// day, the count is a snapshot of the moment it was saved, not the end of the day: an entry logged
+// after that moment is after the count and is not inside the counted figure. With no time on either
+// side the day's entries count as before (the old end-of-day rule).
+function afterCount(c, e) {
+  if (!c || !e || !e.d || !c.d) return false;
+  if (e.d > c.d) return true;
+  if (e.d < c.d) return false;
+  var tc = whenMade(c), te = whenMade(e);
+  return tc != null && te != null && te > tc;
+}
+// An `at` stamp that puts an entry one second before (side -1) or after (side +1) count c.
+function besideCount(c, side) { var t = whenMade(c); return t == null ? null : new Date(t + (side < 0 ? -1000 : 1000)).toISOString(); }

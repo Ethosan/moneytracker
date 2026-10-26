@@ -15,6 +15,19 @@ function tone(n) { return n > 0.005 ? 'pos' : n < -0.005 ? 'neg' : ''; }
 function signed(n, dp) { return n == null ? '–' : (n > 0 ? '+' : '') + money(n, dp); }
 function monthLabel(m, short) { var i = +m.slice(5, 7) - 1; return short ? MN[i] : ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][i] + ' ' + m.slice(0, 4); }
 function dayLabel(d) { var dt = new Date(d + 'T00:00:00'); return dt.toLocaleDateString('en-SG', { weekday: 'short', day: 'numeric', month: 'short' }); }
+function timeLabel(ms) { return new Date(ms).toLocaleTimeString('en-SG', { hour: 'numeric', minute: '2-digit' }); }
+// A balance count's day with the moment it was saved: "Sun, 26 Oct, 2:32 pm". A count is a snapshot of
+// that moment, not of the end of its day, so an entry logged later that day is after it (dates.js afterCount).
+function countLabel(c) { var t = c && whenMade(c); return dayLabel(c.d) + (t != null ? ', ' + timeLabel(t) : ''); }
+// The same for the assistant: "2026-10-26 at 14:32"
+function countStamp(c) { var t = c && whenMade(c); return c.d + (t != null ? ' at ' + new Date(t).toTimeString().slice(0, 5) : ''); }
+// Is wallet flow or move f (a day plus the entry it came from) after count c?
+function flowAfter(c, f) { return afterCount(c, { d: f.d, id: f.ref && f.ref.id, at: f.ref && f.ref.at }); }
+// A new entry dated a count's day gets a time just before that count, so it sits inside the count's stretch.
+function stampBefore(t, c) { var at = besideCount(c, -1); if (at) t.at = at; return t; }
+// Put an entry on the asked side ('before' or 'after') of the balance count made on its day, if there was one.
+function stampSide(t, side) { if (!side) return; var ck = checksSorted().filter(function (c) { return c.d === t.d; }).pop(); var at = ck && besideCount(ck, side === 'after' ? 1 : -1); if (at) t.at = at; }
+function localZone() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Singapore'; } catch (e) { return 'Asia/Singapore'; } }
 function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
 function sum(a, f) { var s = 0; for (var i = 0; i < a.length; i++) s += f ? f(a[i]) : a[i]; return s; }
 // Every change is recorded as one history entry holding the previous version of just the
@@ -1201,7 +1214,7 @@ function aiMaybe() {
 // What a question gets to see: every month's totals (with what was saved), all-time top
 // notes, budgets, subscriptions, people, trading accounts and wallet balances.
 function aiContext() {
-  var m0 = monthOf(today()), L = ['Today is ' + today() + '. Amounts in SGD.'];
+  var m0 = monthOf(today()), L = ['Today is ' + today() + '. Amounts in SGD.', 'Time zone: ' + localZone() + '.'];
   var months = Object.keys(S.tx).sort();
   months.forEach(function (m) {
     var st = monthStats(m), inc = incomeBy(m);
@@ -1238,11 +1251,11 @@ function aiContext() {
   // where the money is now
   var AB = accountBalances();
   if (AB.lc) {
-    L.push('Wallet balances now: ' + AB.accs.map(function (n) { var a = acctOf(n), b = AB.bal[n]; return n + ' ' + (b == null ? 'not counted' : r2(b)) + (a && a.cur === 'USD' && b != null && usdRate() ? ' (US$' + r2(b / usdRate()) + ')' : '') + (a && a.cur === 'CRYPTO' ? ' (' + (a.coins || []).map(function (c) { return c.qty + ' ' + c.sym; }).join(', ') + ')' : ''); }).join(', ') + '. Last counted ' + AB.since + '.');
+    L.push('Wallet balances now: ' + AB.accs.map(function (n) { var a = acctOf(n), b = AB.bal[n]; return n + ' ' + (b == null ? 'not counted' : r2(b)) + (a && a.cur === 'USD' && b != null && usdRate() ? ' (US$' + r2(b / usdRate()) + ')' : '') + (a && a.cur === 'CRYPTO' ? ' (' + (a.coins || []).map(function (c) { return c.qty + ' ' + c.sym; }).join(', ') + ')' : ''); }).join(', ') + '. Last counted ' + countStamp(AB.lc) + '. A count is a snapshot of that moment, not of the end of its day: an entry dated the count day but logged after the count was not inside the counted figure and has already been taken off these balances; one logged before it was inside it.');
   }
   // gaps between counts that nothing explains yet; each stays open after later counts
   var OG = [];
-  openCountGaps().forEach(function (G) { G.open.forEach(function (w) { OG.push(w.name + ' ' + r2(w.gap) + ' between the counts of ' + G.prev.d + ' and ' + G.check.d + ' (counted ' + r2(w.prev) + ' then ' + r2(w.counted) + ', logs said ' + r2(w.logs) + ')'); }); });
+  openCountGaps().forEach(function (G) { G.open.forEach(function (w) { OG.push(w.name + ' ' + r2(w.gap) + ' between the counts of ' + countStamp(G.prev) + ' and ' + countStamp(G.check) + ' (counted ' + r2(w.prev) + ' then ' + r2(w.counted) + ', logs said ' + r2(w.logs) + ')'); }); });
   if (OG.length) L.push('Balance-count gaps still unexplained, oldest first (negative: less money than my logs say). A gap stays open after later counts until an entry explains it. Two opposite gaps on one wallet either side of a count usually mean an entry dated on the wrong side of that count: ' + OG.slice(-30).join('; ') + '.');
   var owedPL = laterOwed(); if (owedPL > 0.005) L.push('Owed on PayLater: ' + r2(owedPL) + '.');
   return L.join('\n');
@@ -1416,6 +1429,7 @@ function renderAsk() {
       }).join('') +
       (busy ? '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div class="bubble typing" aria-label="Thinking"><i></i><i></i><i></i><span class="typing-label"></span></div></div>' : '') + '</div>';
   }
+  // while an answer is on its way the send button becomes Stop (askStop)
   main += '<form class="ask-compose" id="askform"><textarea id="askq" rows="1" placeholder="' + (cur ? 'Ask a follow-up' : 'Ask about your money') + '" aria-label="Your question" enterkeyhint="send">' + esc(UI.askDraft || '') + '</textarea>' +
     (UI.askBusy
       ? '<button class="ask-send ask-stop" type="button" data-askstop="1" aria-label="Stop waiting for this answer" title="Stop"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5" fill="currentColor"/></svg></button>'
@@ -1431,7 +1445,6 @@ function wireAsk() {
   f.addEventListener('submit', function (e) { e.preventDefault(); askSend(q.value); });
   if (UI.chatId) askScroll();
   // While an answer is on its way the typing bubble says what is happening: the function reads
-  // while an answer is on its way the send button becomes Stop (askStop)
   // the ledger through its tools and does the sums before the model writes, which takes longer
   // than a plain reply, so the dots alone read as a hang.
   clearInterval(wireAsk.tk);
@@ -1453,6 +1466,14 @@ function wireAsk() {
   // the visible area, with the compose bar at the bottom edge above the keys. The keyboard counts
   // as open when the viewport is well short of the tallest it has been (the tab bar steps aside).
   if (wireAsk.off) { wireAsk.off(); wireAsk.off = null; }
+  // Desktop: the chat column scrolls inside itself (app.css, min-width 1024px); its height is the
+  // window minus the column's offset from the top, measured here and kept on resize.
+  var col = document.querySelector('.ask.in-chat .ask-main'), mainTop = document.querySelector('main');
+  if (wireAsk.rs) { window.removeEventListener('resize', wireAsk.rs); wireAsk.rs = null; }
+  if (col && mainTop && !isTouch()) {
+    var setTop = function () { mainTop.style.setProperty('--ask-top', Math.round(col.getBoundingClientRect().top + window.scrollY) + 'px'); askScroll(); };
+    setTop(); wireAsk.rs = setTop; window.addEventListener('resize', setTop);
+  } else if (mainTop) mainTop.style.removeProperty('--ask-top');
   if (window.visualViewport && isTouch()) {
     var vv = window.visualViewport, askEl = document.querySelector('.ask.in-chat'), mainEl = document.querySelector('main');
     if (askEl && mainEl) {
@@ -1466,14 +1487,6 @@ function wireAsk() {
       var settle = function () { onVV(); setTimeout(onVV, 120); setTimeout(onVV, 450); };
       var noScroll = function () { if (window.scrollY) window.scrollTo(0, 0); };
       vv.addEventListener('resize', onVV); vv.addEventListener('scroll', onVV);
-  // Desktop: the chat column scrolls inside itself (app.css, min-width 1024px); its height is the
-  // window minus the column's offset from the top, measured here and kept on resize.
-  var col = document.querySelector('.ask.in-chat .ask-main'), mainTop = document.querySelector('main');
-  if (wireAsk.rs) { window.removeEventListener('resize', wireAsk.rs); wireAsk.rs = null; }
-  if (col && mainTop && !isTouch()) {
-    var setTop = function () { mainTop.style.setProperty('--ask-top', Math.round(col.getBoundingClientRect().top + window.scrollY) + 'px'); askScroll(); };
-    setTop(); wireAsk.rs = setTop; window.addEventListener('resize', setTop);
-  } else if (mainTop) mainTop.style.removeProperty('--ask-top');
       window.addEventListener('scroll', noScroll);
       q.addEventListener('focus', function () { settle(); setTimeout(askScroll, 300); });
       q.addEventListener('blur', settle);
@@ -1494,6 +1507,9 @@ function askSend(text) {
   var hist = (c.msgs || []).filter(function (m) { return m.role === 'user' || m.role === 'assistant'; }).slice(-10).map(function (m) { return { role: m.role, content: m.content + chgRecap(m) }; });
   c.msgs.push({ role: 'user', content: q, at: now }); c.u = now;
   UI.askDraft = ''; UI.askBusy = c.id; UI.askStarted = Date.now();
+  // each request carries a number; askStop() bumps it, so a stopped request's answer is ignored
+  var req = UI.askReq = (UI.askReq || 0) + 1, ac = window.AbortController ? new AbortController() : null;
+  UI.askAbort = ac;
   // keep the history bounded: 50 conversations, 60 messages each
   S.chats = chatList().slice(0, 50); S.chats.forEach(function (x) { if (x.msgs && x.msgs.length > 60) x.msgs = x.msgs.slice(-60); });
   mark('chats'); render(); askScroll();
@@ -1507,10 +1523,8 @@ function askSend(text) {
     c.msgs.push(am);
     if (r.model) S.meta.ai.model = r.model;
   }, function (e) {
+    if (UI.askReq !== req) return;
     c.msgs.push({ role: 'error', content: String(e.message || e), at: new Date().toISOString() });
-  // each request carries a number; askStop() bumps it, so a stopped request's answer is ignored
-  var req = UI.askReq = (UI.askReq || 0) + 1, ac = window.AbortController ? new AbortController() : null;
-  UI.askAbort = ac;
   }).then(function () {
     if (UI.askReq !== req) return;
     UI.askBusy = null; UI.askAbort = null; c.u = new Date().toISOString(); mark('chats');
@@ -1523,8 +1537,8 @@ function chgSig(t) { return { d: t.d, t: t.t, amt: t.amt, cat: t.cat || '', note
 function chgTake(list) {
   return (Array.isArray(list) ? list : []).slice(0, 20).map(function (x) {
     var c = { op: x.op, st: 'new' };
-    ['id', 'd', 't', 'amt', 'cat', 'note', 'acct', 'why'].forEach(function (k) { if (x[k] != null) c[k] = x[k]; });
-    if (UI.askReq !== req) return;
+    ['id', 'd', 't', 'amt', 'cat', 'note', 'acct', 'count_side', 'why'].forEach(function (k) { if (x[k] != null) c[k] = x[k]; });
+    if (c.count_side !== 'before' && c.count_side !== 'after') delete c.count_side;
     if (c.op === 'add') { if (!c.d) c.d = today(); if (!c.t) c.t = (catObj(c.cat) || {}).type || 'exp'; }
     else { var t = findTx(c.id); if (t) c.was = chgSig(t); else c.st = 'gone'; }
     return c;
@@ -1532,7 +1546,7 @@ function chgTake(list) {
 }
 function chgName(w) { return w.note || plain(w.cat) || 'entry'; }
 function chgText(c) {
-  if (c.op === 'add') return 'Add ' + (c.t === 'inc' ? 'income ' : '') + '<b>' + money(c.amt) + '</b> ' + esc(c.note || '') + ' · ' + esc(plain(c.cat)) + ' · ' + sugDay(c.d) + (c.acct ? ' · ' + esc(c.acct) : '');
+  if (c.op === 'add') return 'Add ' + (c.t === 'inc' ? 'income ' : '') + '<b>' + money(c.amt) + '</b> ' + esc(c.note || '') + ' · ' + esc(plain(c.cat)) + ' · ' + sugDay(c.d) + (c.acct ? ' · ' + esc(c.acct) : '') + (c.count_side ? ' · ' + c.count_side + ' that day\u2019s balance count' : '');
   var w = c.was || {}, what = '<b>' + esc(chgName(w)) + '</b>' + (w.d ? ' on ' + sugDay(w.d) : '');
   if (c.op === 'delete') return 'Delete ' + what + (w.amt ? ', ' + money(w.amt) : '');
   var d = [];
@@ -1542,6 +1556,7 @@ function chgText(c) {
   if (c.d != null && c.d !== w.d) d.push('date → <b>' + sugDay(c.d) + '</b>');
   if (c.note != null && c.note !== w.note) d.push('note → <b>' + esc(c.note || 'none') + '</b>');
   if (c.acct != null) d.push('paid with → <b>' + esc(c.acct) + '</b>');
+  if (c.count_side) d.push('logged <b>' + c.count_side + '</b> that day\u2019s balance count');
   return 'Change ' + what + ': ' + (d.join(', ') || 'no difference');
 }
 // What the answer was worked out from: each lookup and sum the function made, folded away under
@@ -1551,6 +1566,8 @@ function askSteps(m) {
   var n = m.steps.length;
   return '<details class="ask-steps"><summary>Worked out from ' + n + ' lookup' + (n === 1 ? '' : 's') + '</summary><ul>' + m.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></details>';
 }
+// A delete is never one more Apply: it gets its own rose Delete button, and "Apply all" leaves
+// deletes out, so removing a real entry is always a deliberate tap on its own.
 function chgCard(m, i) {
   if (!m.changes || !m.changes.length) return '';
   var open = m.changes.filter(function (c) { return c.st === 'new'; }), dels = open.filter(function (c) { return c.op === 'delete'; }).length, keep = open.length - dels;
@@ -1567,11 +1584,10 @@ function chgCard(m, i) {
 // One change, through the same path the Suggestions sheet uses. False when it no longer fits.
 function chgApply(c) {
   if (c.op === 'add') {
-// A delete is never one more Apply: it gets its own rose Delete button, and "Apply all" leaves
-// deletes out, so removing a real entry is always a deliberate tap on its own.
     var cat = catObj(c.cat); if (!cat || !(c.amt > 0)) return false;
     var t = { id: uid(), d: c.d || today(), t: c.t || cat.type || 'exp', amt: r2(c.amt), cat: c.cat, sub: '', note: c.note || '', tags: [], src: 'app' };
     t.acct = c.acct && wallets().indexOf(c.acct) > -1 ? c.acct : defWallet();
+    stampSide(t, c.count_side);
     ruleTags(t).forEach(function (g) { if (t.tags.indexOf(g) < 0) t.tags.push(g); });
     var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
     c.tid = t.id; return true;
@@ -1583,6 +1599,7 @@ function chgApply(c) {
   applyDoubt({ t: x, fix: { apply: function (y) {
     ['d', 't', 'amt', 'cat', 'note'].forEach(function (k) { if (c[k] != null) y[k] = c[k]; });
     if (c.acct != null && y.pm !== 'later' && wallets().indexOf(c.acct) > -1) y.acct = c.acct;
+    stampSide(y, c.count_side);
   } } });
   syncInstFee(x);
   return true;
@@ -2014,7 +2031,7 @@ function renderHome() {
   if (due) {
     var late = due <= today(), dname = WEEKDAYS[new Date(due + 'T00:00:00').getDay()];
     h += '<button class="banner' + (late ? '' : ' quiet') + '" data-act="check"><b>' + (!lcx ? 'Count your balances to get started' : late ? (due === today() ? 'Balance check due today' : 'Balance check due since ' + dayLabel(due)) : 'Next balance check ' + (addDays(today(), 1) === due ? 'tomorrow' : dname + ', ' + dayLabel(due).replace(/^\w+, /, ''))) + '</b>' +
-      '<span>' + (lcx ? 'Last counted ' + dayLabel(lcx.d) + '. ' : '') + (late ? 'Takes a minute: count each wallet and what you owe.' : checkPlanLabel() + '.') + '</span></button>';
+      '<span>' + (lcx ? 'Last counted ' + countLabel(lcx) + '. ' : '') + (late ? 'Takes a minute: count each wallet and what you owe.' : checkPlanLabel() + '.') + '</span></button>';
   }
   // trend
   var months = []; for (var k = 8; k >= 0; k--) months.push(addMonth(m, -k));
@@ -2457,7 +2474,7 @@ function balanceSection() {
   var h = '';
   var lc = lastCheck();
   h += '<section class="blk"><h2>Balance check</h2><div class="panel">' +
-    '<button class="row" data-act="check"><div class="l"><b>Count your balances now</b><span>' + (lc ? 'Last done ' + dayLabel(lc.d) + ', total ' + money(lc.total, 0) : 'Count what you have and find missed spending') + '</span></div><div class="r">›</div></button></div>' +
+    '<button class="row" data-act="check"><div class="l"><b>Count your balances now</b><span>' + (lc ? 'Last done ' + countLabel(lc) + ', total ' + money(lc.total, 0) : 'Count what you have and find missed spending') + '</span></div><div class="r">›</div></button></div>' +
     '<button class="row" data-act="checkplan"><div class="l"><b>Reminder</b><span>' + checkPlanLabel() + '</span></div><div class="r">\u203a</div></button></div>' +
     '<p class="note">Any gap between what you have and what your logs say is either spending you forgot or money you did not record.</p></section>';
   return h;
@@ -4069,23 +4086,25 @@ function themeSheet() {
 }
 
 // ---------- balance checks ----------
-function flowsBetween(a, b) {
-  // net change to your money for dates in (a, b]
-  var n = 0;
+function flowsSince(c) {
+  // net change to your money after count c, up to today. An entry dated the count day is after the
+  // count only if it was logged after the count was saved (afterCount in dates.js).
+  var n = 0, b = today();
   allTx().forEach(function (t) {
-    if (t.d <= a || t.d > b || t.t === 'xfer' || t.propOf) return; // transfers leave your total unchanged; prop mirrors carry no cash
+    if (!afterCount(c, t) || t.d > b || t.t === 'xfer' || t.propOf) return; // transfers leave your total unchanged; prop mirrors carry no cash
     n += t.t === 'exp' ? -t.amt : t.amt; // full amount: the cash really did leave
   });
-  S.ledger.forEach(function (e) { if (e.d > a && e.d <= b && e.f !== 'bal') n += e.f === 'out' ? e.amt : -e.amt; });
+  S.ledger.forEach(function (e) { if (afterCount(c, e) && e.d <= b && e.f !== 'bal') n += e.f === 'out' ? e.amt : -e.amt; });
   S.debts.forEach(function (e) {
     // Balances created by a split purchase or by investing someone's capital carry no
     // cash of their own: the transaction or ledger entry already moved the money.
     if (e.txId || e.ledgerId) return;
-    if (e.d > a && e.d <= b) n -= e.amt;
+    if (afterCount(c, e) && e.d <= b) n -= e.amt;
   });
   return n;
 }
-// Each account's balance = what you counted last time + everything since that names it.
+// Each account's balance = what you counted last time + everything since that names it. "Since"
+// means after the moment of the count: an entry dated the count day but logged later is after it.
 // Money that moved without naming an account is shown separately, so the total still
 // agrees with the balance check.
 function accountBalances() {
@@ -4093,7 +4112,7 @@ function accountBalances() {
   var accs = wallets(), bal = {}, touched = {};
   accs.forEach(function (n) { bal[n] = lines[n] != null ? +lines[n] : null; });
   var noWallet = 0, noWalletN = 0, people = 0;
-  if (since) walletMoves(since).forEach(function (m) {
+  if (lc) walletMoves(lc).forEach(function (m) {
     if (m.acct) { bal[m.acct] = r2((bal[m.acct] || 0) + m.amt); touched[m.acct] = 1; }
     else if (m.kind === 'debt') people += m.amt;
     else if (!m.skip) { noWallet += m.amt; noWalletN++; }
@@ -4105,10 +4124,10 @@ function accountBalances() {
   var liabs = Object.keys(liabNames).map(function (n) {
     var counted = lines[n] != null ? +lines[n] : null, delta = 0;
     if (since) {
-      allTx().forEach(function (t) { if (t.t === 'exp' && t.pm === 'later' && provOf(t) === n && t.d > since) delta += t.amt + ((t.inst && t.inst.fee) || 0); });
+      allTx().forEach(function (t) { if (t.t === 'exp' && t.pm === 'later' && provOf(t) === n && afterCount(lc, t)) delta += t.amt + ((t.inst && t.inst.fee) || 0); });
       S.bills.filter(function (b) { return billProv(b) === n; }).forEach(function (b) {
-        (b.feeTxs || []).concat(b.feeTx ? [b.feeTx] : []).forEach(function (id) { var f = findTx(id); if (f && f.d > since) delta += f.amt; });
-        (b.payments || []).forEach(function (p) { if (p.d > since) delta -= p.amt; });
+        (b.feeTxs || []).concat(b.feeTx ? [b.feeTx] : []).forEach(function (id) { var f = findTx(id); if (f && afterCount(lc, f)) delta += f.amt; });
+        (b.payments || []).forEach(function (p) { if (afterCount(lc, p)) delta -= p.amt; });
       });
     }
     var bills = laterOwed(n), now = counted != null ? r2(Math.max(0, counted + delta)) : bills;
@@ -4127,7 +4146,7 @@ function accountBalances() {
     if (live != null) { if (lc) reval += live - book; bal[n] = live; }
   });
   reval = r2(reval);
-  var total = since ? flowsBetween(since, today()) : 0, expected = lc ? r2(lc.total + total + reval) : null;
+  var total = lc ? flowsSince(lc) : 0, expected = lc ? r2(lc.total + total + reval) : null;
   var named = r2(sum(accs, function (n) { return bal[n] || 0; })), owed = r2(sum(liabs, function (l) { return l.math; }));
   var unassigned = lc ? r2(expected - (named + gone - owed)) : 0;
   return { since: since, lc: lc, bal: bal, touched: touched, unassigned: unassigned, expected: expected, owed: owed, accs: accs, liabs: liabs, gone: gone,
@@ -4229,42 +4248,44 @@ function walletFlows(n) {
   var out = [];
   allTx().forEach(function (t) {
     if (t.t === 'xfer') {
-      if (t.from === n) out.push({ d: t.d, amt: -t.amt, title: t.note || 'Transfer', sub: 'To ' + t.to, attr: 'data-edit-xfer="' + esc(t.id) + '"', av: '\u21c4', kind: 'xfer' });
-      if (t.to === n) out.push({ d: t.d, amt: t.amt, title: t.note || 'Transfer', sub: 'From ' + t.from, attr: 'data-edit-xfer="' + esc(t.id) + '"', av: '\u21c4', kind: 'xfer' });
+      if (t.from === n) out.push({ d: t.d, ref: t, amt: -t.amt, title: t.note || 'Transfer', sub: 'To ' + t.to, attr: 'data-edit-xfer="' + esc(t.id) + '"', av: '\u21c4', kind: 'xfer' });
+      if (t.to === n) out.push({ d: t.d, ref: t, amt: t.amt, title: t.note || 'Transfer', sub: 'From ' + t.from, attr: 'data-edit-xfer="' + esc(t.id) + '"', av: '\u21c4', kind: 'xfer' });
       return;
     }
     if (t.pm === 'later' || t.acct !== n || t.propOf) return;
-    out.push({ d: t.d, amt: t.t === 'exp' ? -t.amt : t.amt, title: t.note || plain(t.cat), sub: plain(t.cat) + (t.sub ? ' \u00b7 ' + t.sub : ''), attr: 'data-edit-tx="' + esc(t.id) + '"', av: avatar(t.cat), kind: t.t });
+    out.push({ d: t.d, ref: t, amt: t.t === 'exp' ? -t.amt : t.amt, title: t.note || plain(t.cat), sub: plain(t.cat) + (t.sub ? ' \u00b7 ' + t.sub : ''), attr: 'data-edit-tx="' + esc(t.id) + '"', av: avatar(t.cat), kind: t.t });
   });
   S.ledger.forEach(function (e) {
     if (e.acct !== n || e.f === 'bal') return;
-    out.push({ d: e.d, amt: e.f === 'out' ? e.amt : -e.amt, title: e.venue + (e.f === 'out' ? ' withdrawal' : ' deposit'), sub: e.note || 'Investment', attr: 'data-venue="' + esc(e.venue) + '"', av: '\u2197', kind: 'inv' });
+    out.push({ d: e.d, ref: e, amt: e.f === 'out' ? e.amt : -e.amt, title: e.venue + (e.f === 'out' ? ' withdrawal' : ' deposit'), sub: e.note || 'Investment', attr: 'data-venue="' + esc(e.venue) + '"', av: '\u2197', kind: 'inv' });
   });
   S.debts.forEach(function (x) {
     if (x.acct !== n || x.txId || x.ledgerId) return;
-    out.push({ d: x.d, amt: -x.amt, title: x.k === 'settle' ? 'Settled up with ' + x.person : x.amt > 0 ? (x.k === 'paid' ? 'Paid ' + x.person + ' back' : 'Lent to ' + x.person) : x.person + ' paid you', sub: x.note || 'People', attr: 'data-person="' + esc(x.person) + '"', av: '\u21c4', kind: 'xfer' });
+    out.push({ d: x.d, ref: x, amt: -x.amt, title: x.k === 'settle' ? 'Settled up with ' + x.person : x.amt > 0 ? (x.k === 'paid' ? 'Paid ' + x.person + ' back' : 'Lent to ' + x.person) : x.person + ' paid you', sub: x.note || 'People', attr: 'data-person="' + esc(x.person) + '"', av: '\u21c4', kind: 'xfer' });
   });
   var lumps = {};
   S.bills.forEach(function (b) {
     (b.payments || []).forEach(function (p) {
       if (p.from !== n) return; var k = p.payId || p.id;
-      var L = lumps[k] = lumps[k] || { d: p.d, amt: 0, prov: billProv(b), k: k }; L.amt = r2(L.amt + p.amt);
+      var L = lumps[k] = lumps[k] || { d: p.d, ref: p, amt: 0, prov: billProv(b), k: k }; L.amt = r2(L.amt + p.amt);
     });
   });
-  Object.keys(lumps).forEach(function (k) { var L = lumps[k]; out.push({ d: L.d, amt: -L.amt, title: 'Paid ' + L.prov, sub: 'PayLater bill', attr: 'data-lump="' + esc(k) + '"', av: '\uD83D\uDCB3', kind: 'bill' }); });
+  Object.keys(lumps).forEach(function (k) { var L = lumps[k]; out.push({ d: L.d, ref: L.ref, amt: -L.amt, title: 'Paid ' + L.prov, sub: 'PayLater bill', attr: 'data-lump="' + esc(k) + '"', av: '\uD83D\uDCB3', kind: 'bill' }); });
   return out.sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
 }
 // Balance on any day, anchored to your last count of this wallet. Without a count we can
 // only show how much it went up or down, so the numbers are relative.
 function walletModel(n) {
-  var flows = walletFlows(n), lc = lastCheck(), anchorD = null, anchor = null;
-  S.checks.slice().sort(function (a, b) { return a.d < b.d ? 1 : -1; }).some(function (c) { if (c.lines && c.lines[n] != null) { anchorD = c.d; anchor = +c.lines[n]; return true; } return false; });
+  var flows = walletFlows(n), anchorC = null, anchorD = null, anchor = null;
+  checksSorted().reverse().some(function (c) { if (c.lines && c.lines[n] != null) { anchorC = c; anchorD = c.d; anchor = +c.lines[n]; return true; } return false; });
+  function amt(f) { return f.amt; }
   function balOn(day) {
-    if (anchorD == null) return r2(sum(flows.filter(function (f) { return f.d <= day; }), function (f) { return f.amt; }));
-    if (day >= anchorD) return r2(anchor + sum(flows.filter(function (f) { return f.d > anchorD && f.d <= day; }), function (f) { return f.amt; }));
-    return r2(anchor - sum(flows.filter(function (f) { return f.d > day && f.d <= anchorD; }), function (f) { return f.amt; }));
+    if (!anchorC) return r2(sum(flows.filter(function (f) { return f.d <= day; }), amt));
+    // the count is a moment: an entry on its day comes after it only if it was logged after it
+    if (day >= anchorD) return r2(anchor + sum(flows.filter(function (f) { return flowAfter(anchorC, f) && f.d <= day; }), amt));
+    return r2(anchor - sum(flows.filter(function (f) { return f.d > day && !flowAfter(anchorC, f); }), amt));
   }
-  return { flows: flows, anchorD: anchorD, anchor: anchor, balOn: balOn, now: balOn(today()) };
+  return { flows: flows, anchorC: anchorC, anchorD: anchorD, anchor: anchor, balOn: balOn, now: balOn(today()) };
 }
 function walletPage(n, range) {
   range = range || UI.wrange || 90; UI.wrange = range;
@@ -4275,7 +4296,7 @@ function walletPage(n, range) {
   var inn = r2(sum(inR.filter(function (f) { return f.amt > 0; }), function (f) { return f.amt; })), outt = r2(-sum(inR.filter(function (f) { return f.amt < 0; }), function (f) { return f.amt; }));
   var rel = M.anchorD == null;
   var body = '<div class="wal-hero"><span>' + (rel ? 'Change since first entry' : 'Balance now') + '</span><b>' + (rel ? signed(M.now) : money(M.now)) + '</b>' +
-    '<em>' + (rel ? 'Not counted yet. Count it once to see real balances.' : 'Counted ' + money(M.anchor) + ' on ' + dayLabel(M.anchorD) + (M.flows.some(function (f) { return f.d > M.anchorD; }) ? ', updated since' : '')) + '</em></div>' +
+    '<em>' + (rel ? 'Not counted yet. Count it once to see real balances.' : 'Counted ' + money(M.anchor) + ' on ' + countLabel(M.anchorC) + (M.flows.some(function (f) { return flowAfter(M.anchorC, f); }) ? ', updated since' : '')) + '</em></div>' +
     '<div class="seg wal-range" id="wr">' + [[30, '30 days'], [90, '90 days'], ['all', 'All']].map(function (r) { return '<button data-wr="' + r[0] + '" aria-pressed="' + (range === r[0]) + '">' + r[1] + '</button>'; }).join('') + '</div>' +
     '<div class="wal-chart"><canvas id="wch" aria-label="Balance over time"></canvas></div>' +
     '<div class="wal-stats"><div><b class="pos">+' + money(inn, 0) + '</b><span>In</span></div><div><b>\u2212' + money(outt, 0) + '</b><span>Out</span></div><div><b>' + inR.length + '</b><span>Entries</span></div></div>' +
@@ -4579,18 +4600,18 @@ function gapSheet(prov, gap) {
 // Money that moved since your last count without naming a wallet, with a quick way to say which.
 function unlinkedItems() {
   var lc = lastCheck(); if (!lc) return [];
-  var since = lc.d, ws = wallets(), out = [];
+  var ws = wallets(), out = [];
   allTx().forEach(function (t) {
-    if (t.d <= since || t.t === 'xfer' || t.pm === 'later' || t.feeOf || t.propOf || /Finance fees/.test(t.cat || '')) return;
+    if (!afterCount(lc, t) || t.t === 'xfer' || t.pm === 'later' || t.feeOf || t.propOf || /Finance fees/.test(t.cat || '')) return;
     if (t.acct && ws.indexOf(t.acct) > -1) return;
     out.push({ kind: 'tx', ref: t, d: t.d, amt: t.t === 'exp' ? -t.amt : t.amt, title: t.note || plain(t.cat), sub: plain(t.cat) });
   });
   S.debts.forEach(function (x) {
-    if (x.d <= since || x.txId || x.ledgerId || (x.acct && ws.indexOf(x.acct) > -1)) return;
+    if (!afterCount(lc, x) || x.txId || x.ledgerId || (x.acct && ws.indexOf(x.acct) > -1)) return;
     out.push({ kind: 'debt', ref: x, d: x.d, amt: -x.amt, title: x.k === 'settle' ? 'Settled up with ' + x.person : x.amt > 0 ? 'Lent to ' + x.person : x.person + ' paid you', sub: 'People' });
   });
   S.ledger.forEach(function (e) {
-    if (e.d <= since || e.f === 'bal' || (e.acct && ws.indexOf(e.acct) > -1)) return;
+    if (!afterCount(lc, e) || e.f === 'bal' || (e.acct && ws.indexOf(e.acct) > -1)) return;
     out.push({ kind: 'inv', ref: e, d: e.d, amt: e.f === 'out' ? e.amt : -e.amt, title: e.venue + (e.f === 'out' ? ' withdrawal' : ' deposit'), sub: 'Investments' });
   });
   return out.sort(function (a, b) { return a.d < b.d ? 1 : -1; });
@@ -4622,11 +4643,12 @@ function walletSub(n, b) {
   return '<span>' + coinsLabel(a) + '</span>';
 }
 
-// Every entry that moves a wallet's money, dated after day a and up to day b (no b: up to now).
+// Every entry that moves a wallet's money, after count a and up to count b (no b: up to now). On a
+// count's own day the time decides: an entry logged after the count was saved comes after it.
 // An entry that names no wallet, or one since removed, comes back with acct null.
 function walletMoves(a, b) {
   var ok = {}, out = []; wallets().forEach(function (n) { ok[n] = 1; });
-  function add(o) { if (o.d <= a || (b && o.d > b)) return; if (!ok[o.acct]) o.acct = null; out.push(o); }
+  function add(o) { if (!flowAfter(a, o) || (b && flowAfter(b, o))) return; if (!ok[o.acct]) o.acct = null; out.push(o); }
   allTx().forEach(function (t) {
     // a transfer or bill payment with no wallet changes nothing you can count
     if (t.t === 'xfer') { add({ kind: 'xfer', ref: t, d: t.d, amt: -t.amt, acct: t.from, skip: 1 }); add({ kind: 'xfer', ref: t, d: t.d, amt: t.amt, acct: t.to, skip: 1 }); return; }
@@ -4655,7 +4677,7 @@ var GAP_MIN = 0.05;
 function countGaps(c) {
   var cs = checksSorted(), i = cs.indexOf(c), p = i > 0 ? cs[i - 1] : null;
   if (!p) return null;
-  var mv = walletMoves(p.d, c.d), pl = p.lines || {}, cl = c.lines || {}, pn = p.native || {}, cn = c.native || {};
+  var mv = walletMoves(p, c), pl = p.lines || {}, cl = c.lines || {}, pn = p.native || {}, cn = c.native || {};
   var list = wallets().map(function (n) {
     if (pl[n] == null || cl[n] == null) return null;
     var a = acctOf(n); if (a && a.cur === 'CRYPTO') return null; // its value moves with prices, so a difference isn't a gap
@@ -4674,15 +4696,17 @@ function openCountGaps() {
   checksSorted().forEach(function (c) { var G = countGaps(c); if (G && G.open.length) out.push(G); });
   return out;
 }
-// Move an entry to another day, keeping its id and everything linked to it.
-function moveEntryDate(m, d) {
+// Move an entry to another day, keeping its id and everything linked to it. `at` places it on a
+// chosen side of a count made that day; without one the entry's own logging time decides.
+function moveEntryDate(m, d, at) {
   var r = m.ref;
-  if (m.kind !== 'tx') { r.d = d; mark(m.kind === 'debt' ? 'debts' : 'ledger'); return; }
+  function stamp() { if (at) r.at = at; else delete r.at; }
+  if (m.kind !== 'tx') { r.d = d; stamp(); mark(m.kind === 'debt' ? 'debts' : 'ledger'); return; }
   var from = monthOf(r.d);
   S.tx[from] = (S.tx[from] || []).filter(function (x) { return x.id !== r.id; });
   if (!S.tx[from].length) delete S.tx[from];
   markMonth(from);
-  r.d = d; pushTx(r);
+  r.d = d; stamp(); pushTx(r);
   S.debts.forEach(function (x) { if (x.txId === r.id) { x.d = d; mark('debts'); } });
 }
 // What could explain wallet n's gap. Each fix carries eff: how much of the gap it removes.
@@ -4720,28 +4744,40 @@ function gapFixes(G, n) {
     var e = -Math.sign(m.amt) * Math.min(Math.abs(m.amt), Math.abs(g)); if (!helps(e)) return;
     out.push({ kind: 'unacc', m: m, eff: r2(e), title: m.ref.note || plain(m.ref.cat), sub: dayLabel(m.d) + ', logged earlier for a gap', act: Math.abs(e) >= Math.abs(m.amt) - T ? 'Remove it' : 'Reduce by ' + money(Math.abs(e)) });
   });
-  // 6. dated on the wrong side of a count: the stretch next door is off the other way on this
-  // wallet, and one of its entries would clear both. Closest to the count day first.
+  // 6. on the wrong side of a count: the stretch next door is off the other way on this wallet, and
+  // one of its entries would clear both. An entry dated the count day itself sits on one side by the
+  // time it was logged, so for it the fix is "it was before/after the count", not a new date.
+  // Closest to the count first.
   var cs = checksSorted(), ci = cs.indexOf(G.check), sides = [];
   if (ci + 1 < cs.length) sides.push({ N: countGaps(cs[ci + 1]), to: G.check.d, after: true });
   if (G.prev.d < G.check.d) sides.push({ N: countGaps(G.prev), to: addDays(G.prev.d, 1), after: false });
   sides.forEach(function (s) {
     var o = s.N && gapOfIn(s.N, n); if (!o || Math.abs(o.gap) < GAP_MIN || o.gap * g >= 0) return;
-    var edge = s.after ? G.check.d : G.prev.d, short = function (d) { return dayLabel(d).replace(/^\w+, /, ''); }, also = ', this also clears ' + signed(o.gap) + ' from ' + short(s.N.check.d);
+    var ec = s.after ? G.check : G.prev, edge = ec.d, short = function (d) { return dayLabel(d).replace(/^\w+, /, ''); }, also = ', this also clears ' + signed(o.gap) + ' from ' + short(s.N.check.d);
+    var ecLabel = short(edge) + (whenMade(ec) != null ? ' ' + timeLabel(whenMade(ec)) : '');
     function near(list, eff) {
       return list.filter(function (m) { return m.acct === n && !m.skip && m.kind !== 'xfer' && m.kind !== 'bill' && helps(eff(m)) && Math.abs(m.amt) <= Math.abs(o.gap) + T; })
-        .sort(function (a, b) { return Math.abs(new Date(a.d) - new Date(edge)) - Math.abs(new Date(b.d) - new Date(edge)); }).slice(0, 5);
+        .sort(function (a, b) { return (Math.abs(new Date(a.d) - new Date(edge)) - Math.abs(new Date(b.d) - new Date(edge))) || (Math.abs(Math.abs(a.amt) - Math.abs(o.gap)) - Math.abs(Math.abs(b.amt) - Math.abs(o.gap))); }).slice(0, 5);
     }
-    // in from next door: logged on the far side of the count, belongs in this stretch
+    // same day as the count: flip which side of that moment the entry is on
+    function flip(m, eff, dir, was) {
+      var at = besideCount(ec, dir); if (!at) return false;
+      out.push({ kind: 'side', m: m, eff: eff, at: at, dir: dir, title: moveTitle(m), act: 'It was ' + (dir > 0 ? 'after' : 'before') + ' the count',
+        sub: 'Logged ' + was + ' your ' + ecLabel + ' count, on the same day. If it was really ' + (dir > 0 ? 'after' : 'before') + also });
+      return true;
+    }
+    // in from next door: on the far side of the count, belongs in this stretch
     near(s.N.moves, function (m) { return m.amt; }).forEach(function (m) {
-      out.push({ kind: 'date', m: m, eff: m.amt, to: s.to, title: moveTitle(m), act: 'Move to ' + dayLabel(s.to),
+      if (m.d === edge && flip(m, m.amt, s.after ? -1 : 1, s.after ? 'after' : 'before')) return;
+      out.push({ kind: 'date', m: m, eff: m.amt, to: s.to, at: s.after ? besideCount(G.check, -1) : null, title: moveTitle(m), act: 'Move to ' + dayLabel(s.to),
         sub: dayLabel(m.d) + (s.after ? ', after your ' + short(edge) + ' count. If it was before' : ', before your ' + short(edge) + ' count. If it was after') + also });
     });
-    // out to next door: logged in this stretch, belongs on the far side of the count
-    var away = s.after ? addDays(G.check.d, 1) : G.prev.d;
-    if (s.after && away > s.N.check.d) return;
+    // out to next door: in this stretch, belongs on the far side of the count
+    var away = s.after ? addDays(G.check.d, 1) : G.prev.d, canMove = !(s.after && away > s.N.check.d);
     near(G.moves, function (m) { return -m.amt; }).forEach(function (m) {
-      out.push({ kind: 'date', m: m, eff: -m.amt, to: away, title: moveTitle(m), act: 'Move to ' + dayLabel(away),
+      if (m.d === edge && flip(m, -m.amt, s.after ? 1 : -1, s.after ? 'before' : 'after')) return;
+      if (!canMove) return;
+      out.push({ kind: 'date', m: m, eff: -m.amt, to: away, at: s.after ? null : besideCount(G.prev, -1), title: moveTitle(m), act: 'Move to ' + dayLabel(away),
         sub: dayLabel(m.d) + (s.after ? ', by your ' + short(edge) + ' count. If it was after' : ', after your ' + short(edge) + ' count. If it was before') + also });
     });
   });
@@ -4759,9 +4795,10 @@ function markMove(m) { if (m.kind === 'tx') markMonth(monthOf(m.ref.d)); else ma
 function pushTx(t) { var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m); }
 function applyGapFix(G, n, f) {
   if (f.kind === 'link' || f.kind === 'move') { f.m.ref.acct = n; markMove(f.m); return (f.kind === 'link' ? 'Linked to ' : 'Moved to ') + n; }
-  if (f.kind === 'xfer') { pushTx({ id: uid(), d: G.check.d, t: 'xfer', amt: r2(f.amt), from: f.from, to: f.to, note: 'Found from a balance count', src: 'app' }); return 'Transfer logged'; }
+  if (f.kind === 'xfer') { pushTx(stampBefore({ id: uid(), d: G.check.d, t: 'xfer', amt: r2(f.amt), from: f.from, to: f.to, note: 'Found from a balance count', src: 'app' }, G.check)); return 'Transfer logged'; }
   if (f.kind === 'dup') { removeTx(f.m.ref); return 'Removed the copy'; }
-  if (f.kind === 'date') { moveEntryDate(f.m, f.to); return 'Moved to ' + dayLabel(f.to); }
+  if (f.kind === 'date') { moveEntryDate(f.m, f.to, f.at); return 'Moved to ' + dayLabel(f.to); }
+  if (f.kind === 'side') { f.m.ref.at = f.at; markMove(f.m); return 'Now counted as ' + (f.dir > 0 ? 'after' : 'before') + ' the count'; }
   if (f.kind === 'unacc') {
     var t = f.m.ref, left = r2(Math.abs(t.amt) - Math.abs(f.eff));
     if (left < 0.005) removeTx(t); else { t.amt = left; markMonth(monthOf(t.d)); }
@@ -4770,8 +4807,8 @@ function applyGapFix(G, n, f) {
   // the rest: accept it, on this wallet, so the next count starts clean
   var g = f.eff;
   if (g < 0 && !catObj('\u2753 Unaccounted')) { S.meta.cats.push({ name: '\u2753 Unaccounted', type: 'exp' }); mark('meta'); }
-  pushTx(g < 0 ? { id: uid(), d: G.check.d, t: 'exp', amt: r2(-g), cat: '\u2753 Unaccounted', sub: '', note: 'Balance count gap', acct: n, tags: [], src: 'app', gapOf: G.check.id }
-    : { id: uid(), d: G.check.d, t: 'adj', amt: r2(g), cat: '\ud83d\udd27 Adjustment', sub: '', note: 'Balance count: found money', acct: n, tags: [], src: 'app', gapOf: G.check.id });
+  pushTx(stampBefore(g < 0 ? { id: uid(), d: G.check.d, t: 'exp', amt: r2(-g), cat: '\u2753 Unaccounted', sub: '', note: 'Balance count gap', acct: n, tags: [], src: 'app', gapOf: G.check.id }
+    : { id: uid(), d: G.check.d, t: 'adj', amt: r2(g), cat: '\ud83d\udd27 Adjustment', sub: '', note: 'Balance count: found money', acct: n, tags: [], src: 'app', gapOf: G.check.id }, G.check));
   return 'Logged ' + money(Math.abs(g)) + (g < 0 ? ' as unaccounted' : ' as found');
 }
 // days in the stretch with nothing spent from this wallet: where unlogged spending usually hides
@@ -4828,7 +4865,7 @@ function countGapSheet(c, only, fresh) {
     body += '<button class="row gaprow" data-plgap="' + esc(l.name) + '" data-amt="' + gp + '"><span class="av warn">!</span><div class="l"><b>' + money(Math.abs(gp)) + ' unexplained on ' + esc(l.name) + '</b><span>Against your bills. Tap to find it</span></div><div class="r">›</div></button>';
   });
   body += '<p class="note">Nothing changes until you tap a button, and every change can be undone.</p>';
-  openSheet(c ? (only ? only + ': count on ' + dayLabel(c.d) : 'Gaps in your count') : 'Open gaps', body, function (el) {
+  openSheet(c ? (only ? only + ': count on ' + countLabel(c) : 'Gaps in your count') : 'Open gaps', body, function (el) {
     el.addEventListener('click', function (e) {
       var b, msg, n, G, p;
       // data-fix="stretch|fix|wallet"; data-fixlog and data-gapask="stretch|wallet"
@@ -4841,12 +4878,12 @@ function countGapSheet(c, only, fresh) {
         // the other open gaps on this wallet, with their dates: two opposite gaps either side
         // of one count usually mean an entry dated on the wrong side of it
         var more = openCountGaps().filter(function (H) { return H.check !== G.check; }).map(function (H) {
-          var o = gapOfIn(H, n); return o && Math.abs(o.gap) >= GAP_MIN ? signed(o.gap) + ' between ' + H.prev.d + ' and ' + H.check.d : null;
+          var o = gapOfIn(H, n); return o && Math.abs(o.gap) >= GAP_MIN ? signed(o.gap) + ' between ' + countStamp(H.prev) + ' and ' + countStamp(H.check) : null;
         }).filter(Boolean).slice(-4);
         closeSheet(); UI.tab = 'ask'; UI.chatId = null; render(); window.scrollTo(0, 0);
-        askSend('My ' + n + ' wallet: I counted ' + money(x.prev) + ' on ' + G.prev.d + ' and ' + money(x.counted) + ' on ' + G.check.d + '. My logs in between say it should be ' + money(x.logs) + ', so it is ' + signed(x.gap) + ' off.' +
+        askSend('My ' + n + ' wallet: I counted ' + money(x.prev) + ' on ' + countStamp(G.prev) + ' and ' + money(x.counted) + ' on ' + countStamp(G.check) + '. My logs in between say it should be ' + money(x.logs) + ', so it is ' + signed(x.gap) + ' off.' +
           (more.length ? ' Also still open on ' + n + ': ' + more.join('; ') + '.' : '') +
-          ' Using the dates of my counts and of what I logged on ' + n + ' around them, what did I most likely miss, log on the wrong wallet, or date on the wrong side of a count?');
+          ' Using the dates and times of my counts and of what I logged on ' + n + ' around them (an entry dated a count day but logged after the count is after it, not inside it), what did I most likely miss, log on the wrong wallet, or put on the wrong side of a count?');
         return;
       } else return;
       render(); toastUndo(msg); countGapSheet(c, only, fresh);
@@ -4860,7 +4897,7 @@ function countGapRows(n) {
     if (!c.lines || c.lines[n] == null) return;
     var G = countGaps(c), w = G && G.wallets.filter(function (x) { return x.name === n; })[0];
     var off = w && Math.abs(w.gap) >= GAP_MIN;
-    rows += '<button class="row" data-cg="' + esc(c.id) + '"' + (off ? '' : ' disabled') + '><div class="l"><b>' + dayLabel(c.d) + '</b><span>' + (w ? (off ? 'Your logs said ' + money(w.logs) + '. Tap to find the difference' : 'Matched your logs') : 'First count of ' + esc(n)) + '</span></div>' +
+    rows += '<button class="row" data-cg="' + esc(c.id) + '"' + (off ? '' : ' disabled') + '><div class="l"><b>' + countLabel(c) + '</b><span>' + (w ? (off ? 'Your logs said ' + money(w.logs) + '. Tap to find the difference' : 'Matched your logs') : 'First count of ' + esc(n)) + '</span></div>' +
       '<div class="r">' + money(+c.lines[n]) + (off ? '<span class="' + (w.gap < 0 ? 'neg' : 'pos') + '">' + signed(w.gap) + '</span>' : '') + '</div></button>';
   });
   return rows ? '<label class="f">Counts</label><div class="panel cg-list">' + rows + '</div>' : '';
@@ -4876,7 +4913,7 @@ function balancesSection() {
   h += '<div class="panel">';
   A.accs.forEach(function (n) {
     var b = A.bal[n], counted = A.lc.lines && A.lc.lines[n] != null ? +A.lc.lines[n] : null;
-    h += '<button class="row" data-wallet="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>' + (counted == null ? 'Not counted yet' : 'Counted ' + money(counted) + ' on ' + dayLabel(A.since) + (A.touched[n] ? ', updated since' : '')) + '</span></div>' +
+    h += '<button class="row" data-wallet="' + esc(n) + '"><div class="l"><b>' + esc(n) + '</b><span>' + (counted == null ? 'Not counted yet' : 'Counted ' + money(counted) + ' on ' + countLabel(A.lc) + (A.touched[n] ? ', updated since' : '')) + '</span></div>' +
       '<div class="r">' + (b == null ? '\u2013' : money(b)) + walletSub(n, b) + '</div></button>';
   });
   // every gap still open, not only the latest count's: an older one carries over until explained
@@ -4906,7 +4943,7 @@ function balancesSection() {
     '<p class="note">Tap a wallet to see its balance over time and every entry. Each one starts from your last count and moves with anything since that uses it. Choosing a wallet under "Paid with" keeps it exact.</p></section>';
   return h;
 }
-function checksSorted() { return S.checks.slice().sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; }); }
+function checksSorted() { return S.checks.slice().sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : (whenMade(a) || 0) - (whenMade(b) || 0); }); }
 function lastCheck() { var c = checksSorted(); return c[c.length - 1] || null; }
 function quietDays(n) {
   var has = {}; allTx().forEach(function (t) { if (t.t === 'exp') has[t.d] = 1; });
@@ -4952,7 +4989,7 @@ function checkSheet() {
     acc.liability = true;
     vals[p.name] = o; // your bills are the authority on what you owe, not last time's figure
   });
-  var body = '<p class="note" style="margin-top:0">Enter what you actually have right now. The app compares it with what your logs say you should have' + (prev ? ' since your last check on ' + dayLabel(prev.d) : '') + '.</p>' +
+  var body = '<p class="note" style="margin-top:0">Enter what you actually have right now. The app compares it with what your logs say you should have' + (prev ? ' since your last check on ' + countLabel(prev) : '') + '. The time is saved with the count, so anything you log later today counts as after it.</p>' +
     '<div class="panel" id="accs">' + accRows() + '</div>' +
     '<div style="display:flex;gap:8px;margin-top:10px"><input class="t" id="an" placeholder="e.g. DBS, Cash, GrabPay Later"><button class="btn sm ghost" id="aa">Add</button></div>' +
     '<label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-top:8px"><input type="checkbox" id="al"> This is money I owe, like GrabPay Later</label>' +
@@ -4984,8 +5021,8 @@ function checkSheet() {
         c.innerHTML = '<div class="kv"><span>Total you have</span><span>' + money(tot) + '</span></div><p class="note">This first check sets your starting point. Next time, the app shows any gap.</p>';
         acts.innerHTML = '<button class="btn" id="sv" data-mode="none">Save starting point</button>';
       } else {
-        var mm = accountBalances().reval, exp = prev.total + flowsBetween(prev.d, today()) + mm, diff = r2(tot - exp);
-        c.innerHTML = '<div class="kv"><span>Last check</span><span>' + money(prev.total) + '</span><span>Change from your logs</span><span>' + signed(flowsBetween(prev.d, today())) + '</span>' + (Math.abs(mm) > 0.005 ? '<span>Market moves (US$ and crypto)</span><span>' + signed(mm) + '</span>' : '') + '<span>Expected now</span><span>' + money(exp) + '</span><span>You actually have</span><span>' + money(tot) + '</span>' +
+        var mm = accountBalances().reval, exp = prev.total + flowsSince(prev) + mm, diff = r2(tot - exp);
+        c.innerHTML = '<div class="kv"><span>Last check</span><span>' + money(prev.total) + '</span><span>Change from your logs</span><span>' + signed(flowsSince(prev)) + '</span>' + (Math.abs(mm) > 0.005 ? '<span>Market moves (US$ and crypto)</span><span>' + signed(mm) + '</span>' : '') + '<span>Expected now</span><span>' + money(exp) + '</span><span>You actually have</span><span>' + money(tot) + '</span>' +
           '<span><b>Gap</b></span><span class="' + (Math.abs(diff) < 1 ? '' : diff < 0 ? 'neg' : 'pos') + '"><b>' + signed(diff) + '</b></span></div>' +
           (Math.abs(diff) < 1 ? '<p class="note">Everything is accounted for.</p>' : diff < 0 ? '<p class="note">You have less than expected: probably spending you did not log. Save, and the app looks for it wallet by wallet.</p>' : '<p class="note">You have more than expected: probably income, a refund or a payback you did not log. Save, and the app looks for it wallet by wallet.</p>');
         if (carried.length) c.innerHTML += '<p class="note">Still open from earlier counts: ' + carried.join(', ') + '. Saving this count won’t clear them. They stay on Balances until something you log explains them.</p>';
@@ -5006,7 +5043,7 @@ function checkSheet() {
       var tot = r2(total()), lines = {}; S.meta.accounts.forEach(function (a) { if (vals[a.name] != null) lines[a.name] = vals[a.name]; });
       var native = {}; Object.keys(nat).forEach(function (n) { if (nat[n]) native[n] = { cur: 'USD', amt: nat[n].amt, rate: usdRate() }; });
       // exp: what your logs said each wallet held, kept as a record next to what you counted
-      var ck = { id: uid(), d: today(), total: tot, lines: lines, native: native, exp: expect };
+      var ck = { id: uid(), d: today(), at: new Date().toISOString(), total: tot, lines: lines, native: native, exp: expect };
       S.checks.push(ck); mark('checks');
       closeSheet(); render();
       // this count's gaps and any still open from earlier ones, which this count doesn't clear
@@ -6271,11 +6308,12 @@ function onClick(e) {
   if ((b = t.closest('[data-askq]'))) { askSend(b.dataset.askq); return; }
   if ((b = t.closest('[data-chat]'))) { UI.chatId = b.dataset.chat; UI.askDraft = ''; render(); return; }
   if ((b = t.closest('[data-chg]'))) { var chp = b.dataset.chg.split(':'); chgRun(+chp[0], [+chp[1]]); return; }
-  if ((b = t.closest('[data-chgall]'))) {
+  if ((b = t.closest('[data-chgall]'))) { // every open change except deletes, which are one tap each
     var am = UI.chatId && chatById(UI.chatId), amm = am && am.msgs[+b.dataset.chgall];
-    if (amm && amm.changes) chgRun(+b.dataset.chgall, amm.changes.map(function (c, k) { return k; }));
+    if (amm && amm.changes) chgRun(+b.dataset.chgall, amm.changes.map(function (c, k) { return c.op === 'delete' ? -1 : k; }).filter(function (k) { return k >= 0; }));
     return;
   }
+  if (t.closest('[data-askstop]')) { askStop(); return; }
   if ((b = t.closest('[data-chgskip]'))) {
     var sp = b.dataset.chgskip.split(':'), sc = UI.chatId && chatById(UI.chatId), sm = sc && sc.msgs[+sp[0]], sx = sm && sm.changes && sm.changes[+sp[1]];
     if (sx && sx.st === 'new') { sx.st = 'skip'; mark('chats'); render(); }

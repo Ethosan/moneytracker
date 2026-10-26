@@ -14,6 +14,7 @@ export type Cat = { name: string; type?: string; kind?: string };
 export type Ledger = {
   tx: Tx[]; meta: Record<string, any>; led: any[]; debts: any[]; bills: any[]; checks: any[];
   cats: Map<string, Cat>; editable: Set<string>; wallets: Set<string>;
+  tz?: string; // the owner's time zone (from the app's snapshot), for the times of balance counts
 };
 
 export const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -45,6 +46,35 @@ export function loadLedger(doc: Record<string, any>): Ledger {
 }
 
 const incKind = (L: Ledger, cat?: string) => { const c = L.cats.get(cat || ""); return (c && c.kind) || "other"; };
+
+// ---- when an entry or a balance count was saved, and which side of a count an entry falls on ----
+// The app's ids are 'a' + Date.now() in base 36 (8 characters from 1972 to 2059) + a random tail, so
+// every entry and every count carries the moment it was saved; an explicit `at` (ISO) wins. Same
+// rules as js/dates.js in the app, so the chat and the app agree on which side an entry is on.
+export function whenMade(x: any): number | null {
+  if (!x) return null;
+  if (typeof x.at === "string") { const t = Date.parse(x.at); if (!Number.isNaN(t)) return t; }
+  if (typeof x.id !== "string" || !/^a[0-9a-z]{9,13}$/.test(x.id)) return null;
+  const ms = parseInt(x.id.slice(1, 9), 36);
+  return ms > 1.3e12 && ms < 2.8e12 ? ms : null;
+}
+// A count is a snapshot of the moment it was saved, not of the end of its day: on the count's own day
+// an entry logged after that moment is after the count and was not inside the counted figure. With no
+// time on either side the day's entries count as before (the old end-of-day rule).
+export function afterCount(c: any, e: any): boolean {
+  if (!c || !e || !e.d || !c.d) return false;
+  if (e.d > c.d) return true;
+  if (e.d < c.d) return false;
+  const tc = whenMade(c), te = whenMade(e);
+  return tc != null && te != null && te > tc;
+}
+export function fmtTime(ms: number | null, tz?: string): string | null {
+  if (ms == null) return null;
+  for (const zone of [tz || "Asia/Singapore", "Asia/Singapore"]) {
+    try { return new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ms)); } catch { /* unknown zone: try the default */ }
+  }
+  return null;
+}
 
 // One month the way the app's Month tab counts it: spent (own share), reimbursements from
 // friends, income by kind, and saved = earned + other income - (spent - reimbursed).
@@ -298,7 +328,21 @@ export function accountSummary(L: Ledger, kind: string) {
   if (kind === "paylater") return { bills: L.bills.map((b: any) => ({ provider: b.prov || "GrabPay Later", from: b.from, instalments: b.n || 1, fee: b.fee || 0, payments: (b.payments || []).map((p: any) => ({ d: p.d, amt: r2(p.amt) })) })) };
   if (kind === "subscriptions") return { subscriptions: (L.meta.subs || []).map((s: any) => ({ name: s.name, amount: s.amt, every_months: s.cycle || 1, next: s.next || null, active: s.active !== false })), monthly_total_active: sum((L.meta.subs || []).filter((s: any) => s.active !== false).map((s: any) => Number(s.amt || 0) / (s.cycle || 1))) };
   if (kind === "budgets") return { monthly_budgets: (L.meta.budgets || []).map((b: any) => ({ category: plainCat(String(b.key || "").slice(4)), amount: b.amt })) };
-  if (kind === "balance_counts") return { note: "real balances counted on a date, and what the logs said then", counts: L.checks.slice().sort((a: any, b: any) => (a.d < b.d ? -1 : 1)).slice(-40).map((c: any) => ({ d: c.d, counted: c.lines || {}, logs_said: c.exp || {} })) };
+  if (kind === "balance_counts") {
+    const cs = L.checks.slice().sort((a: any, b: any) => (a.d < b.d ? -1 : a.d > b.d ? 1 : (whenMade(a) || 0) - (whenMade(b) || 0))).slice(-40);
+    // the entries dated each count's day, and which side of the count's moment each falls on
+    const sameDay = (c: any) => {
+      const rows: any[] = [];
+      for (const x of L.tx) if (x.d === c.d && !x.propOf && !x.feeOf) rows.push({ ...(x.id ? { id: x.id } : {}), kind: x.t === "xfer" ? "transfer" : x.t === "inc" ? "income" : x.pm === "later" ? "paylater purchase" : "spending", amt: r2(x.amt), ...(x.note ? { note: x.note } : {}), ...(x.t === "xfer" ? { from: x.from, to: x.to } : x.acct ? { wallet: x.acct } : {}), side: afterCount(c, x) ? "after" : "before", logged_at: fmtTime(whenMade(x), L.tz) });
+      for (const e of L.led) if (e && e.d === c.d && e.f !== "bal") rows.push({ kind: e.f === "out" ? "investment withdrawal" : "investment deposit", account: e.venue, amt: r2(e.amt), ...(e.acct ? { wallet: e.acct } : {}), side: afterCount(c, e) ? "after" : "before", logged_at: fmtTime(whenMade(e), L.tz) });
+      for (const x of L.debts) if (x && x.d === c.d && !x.txId && !x.ledgerId) rows.push({ kind: "people", person: x.person, amt: r2(x.amt), ...(x.acct ? { wallet: x.acct } : {}), side: afterCount(c, x) ? "after" : "before", logged_at: fmtTime(whenMade(x), L.tz) });
+      return rows;
+    };
+    return {
+      note: "Real balances counted at a moment, and what the logs said then. A count is a snapshot of the moment it was saved (time given), not of the end of its day: an entry dated the count day is inside the counted figure only if it was logged before the count (side before); one logged after it (side after) is taken off the balance separately. Balance now = counted + everything after the count. If a same-day entry sits on the wrong side, propose an edit with count_side.",
+      counts: cs.map((c: any) => ({ d: c.d, time: fmtTime(whenMade(c), L.tz), total: c.total, counted: c.lines || {}, logs_said: c.exp || {}, same_day_entries: sameDay(c) })),
+    };
+  }
   if (kind === "venues") return { accounts: venueSummary(L) };
   if (kind === "categories") return { categories: [...L.cats.values()].map((c) => ({ name: c.name, type: c.type === "inc" ? "income" : "spending", ...(c.kind ? { kind: c.kind } : {}) })), wallets: [...L.wallets] };
   throw new Error("Unknown section: " + kind);
@@ -346,7 +390,7 @@ export const TOOLS = [
   },
   {
     name: "account_summary",
-    description: "Other parts of the ledger: venues (prop firms, brokers, poker, crypto: money in and out per account), people (who owes whom), paylater (bills and instalments), subscriptions, budgets, balance_counts (real balances counted against the logs), categories (the category and wallet names to use in a proposed change).",
+    description: "Other parts of the ledger: venues (prop firms, brokers, poker, crypto: money in and out per account), people (who owes whom), paylater (bills and instalments), subscriptions, budgets, balance_counts (real balances counted against the logs, each count's time of day and the entries dated that day with the side of the count they fall on), categories (the category and wallet names to use in a proposed change).",
     parameters: { type: "object", properties: { section: { type: "string", enum: ["venues", "people", "paylater", "subscriptions", "budgets", "balance_counts", "categories"] } }, required: ["section"] },
   },
   {

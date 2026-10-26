@@ -86,6 +86,18 @@ Numbers:
   averages over complete months are given, so answer "how much should I save" questions from those and calculate.
 - When something cannot be found, say exactly what you searched and that nothing matched. Never guess a figure.
 
+Balance counts:
+- A balance count is a snapshot of the wallets at the moment it was saved (its time is given), not at the end
+  of its day. An entry dated the count day is inside the counted figure only if it was logged before the count;
+  one logged after the count is taken off the balance separately. Balance now = the counted figure, plus income
+  and minus spending logged after the count (never the entries before it: those were already in the count).
+- When the owner says a count and a same-day payment disagree with the balance shown, read account_summary
+  with section "balance_counts": it gives each count's time and the entries dated that day with the side each
+  falls on. Work out with calculate which order makes the figures agree (counted minus a payment made after
+  the count equals what they hold now; a payment made before the count was already inside the counted figure,
+  so "before" would mean the money appeared from nowhere), say which it is, and if an entry is on the wrong
+  side propose an edit for it with count_side "before" or "after" (the entry keeps its date).
+
 Writing:
 - Short and direct. Bold the key figure. One sentence of interpretation (what stands out, whether it is worth it).
 - Several rows: a markdown table (header row, |---| row, one row per item). Keep tool tables as returned.
@@ -106,7 +118,9 @@ the changes at the very end in a fenced block tagged changes, holding a JSON arr
  {"op":"delete","id":"<id from a tool result>","why":"..."}]
 \`\`\`
 For add: d, t (exp or inc), amt and cat are required; note and acct (a wallet from the categories section) are optional;
-d defaults to today. For edit: id, plus only the fields that change. For delete: id. Rows without an id cannot be changed
+d defaults to today. For edit: id, plus only the fields that change. Add and edit may carry count_side ("before" or
+"after") when the entry's day has a balance count, to put the entry on that side of the count without changing its date.
+For delete: id. Rows without an id cannot be changed
 from here (fees, investment mirrors, transfers), so tell the owner to change those in the app. Categories must be written
 exactly as listed, emoji included, and match the type (spending categories for exp, income categories for inc). At most
 20 changes. Leave the block out entirely when there is nothing to change.`;
@@ -158,8 +172,8 @@ function firstJson(text: string) {
 
 // The changes block at the end of an answer, checked against the ledger: unknown ids, made-up
 // categories, impossible dates and amounts are dropped, so the app only ever shows real proposals.
-type Change = { op: "add" | "edit" | "delete"; id?: string; d?: string; t?: "exp" | "inc"; amt?: number; cat?: string; note?: string; acct?: string; why?: string };
-function takeChanges(text: string, L: { ids: Set<string>; byId: Map<string, { t: string; cat: string }>; cats: Map<string, string>; accts: Set<string>; today?: string }) {
+type Change = { op: "add" | "edit" | "delete"; id?: string; d?: string; t?: "exp" | "inc"; amt?: number; cat?: string; note?: string; acct?: string; count_side?: "before" | "after"; why?: string };
+function takeChanges(text: string, L: { ids: Set<string>; byId: Map<string, { t: string; cat: string; d?: string }>; cats: Map<string, string>; accts: Set<string>; today?: string; countDays?: Set<string> }) {
   // the block can sit anywhere (models often add a line after it), or be cut off at the end
   const m = text.match(/```changes\s*([\s\S]*?)```/) || text.match(/```changes\s*([\s\S]*)$/);
   if (!m) return { answer: text.trim(), changes: [] as Change[] };
@@ -210,7 +224,14 @@ function takeChanges(text: string, L: { ids: Set<string>; byId: Map<string, { t:
     const cur = o.op === "edit" ? L.byId.get(o.id as string) : undefined;
     const effT = o.t ?? cur?.t, effCat = o.cat ?? cur?.cat;
     if (effCat && effT && L.cats.has(effCat) && L.cats.get(effCat) !== effT) { dropped.push(`${o.op}: ${effCat} is ${L.cats.get(effCat) === "inc" ? "an income" : "a spending"} category, so it cannot hold ${effT === "inc" ? "income" : "spending"}`); continue; }
-    if (o.op === "edit" && o.t == null && o.d == null && o.amt == null && o.cat == null && o.note == null && o.acct == null) { dropped.push("edit: nothing to change"); continue; }
+    // which side of that day's balance count the entry falls on; only meaningful on a count day
+    if (c.count_side != null) {
+      const side = String(c.count_side).trim().toLowerCase(), day = o.d ?? cur?.d;
+      if (side !== "before" && side !== "after") { dropped.push(`${o.op}: count_side must be "before" or "after"`); continue; }
+      if (!day || !L.countDays || !L.countDays.has(day)) { dropped.push(`${o.op}: no balance count on ${day || "that day"}, so count_side does not apply`); continue; }
+      o.count_side = side;
+    }
+    if (o.op === "edit" && o.t == null && o.d == null && o.amt == null && o.cat == null && o.note == null && o.acct == null && o.count_side == null) { dropped.push("edit: nothing to change"); continue; }
     changes.push(o);
   }
   if (!changes.length && Array.isArray(raw) && raw.length) return none(`None of the proposed changes could be used, so nothing is shown: ${[...new Set(dropped)].slice(0, 3).join("; ")}.`);
@@ -338,8 +359,9 @@ Deno.serve(async (req) => {
       const doc: Record<string, any> = {};
       (data || []).forEach((d: { id: string; body: any }) => { doc[d.id] = d.body || {}; });
       const L = loadLedger(doc);
-      // the app's own date (its time zone), from the snapshot's first line
+      // the app's own date and time zone, from the snapshot's first lines
       const today = (context.match(/Today is (\d{4}-\d{2}-\d{2})/) || [])[1] || new Date().toISOString().slice(0, 10);
+      L.tz = (context.match(/Time zone: ([A-Za-z_\/+\-0-9]+)/) || [])[1] || "Asia/Singapore";
       const messages: Turn[] = [
         { role: "user", content: `Today is ${today}. Amounts in SGD.\n\nCURRENT SNAPSHOT (live balances and recent months, from the app):\n${context}\n\n${overview(L, today)}` },
         { role: "assistant", content: "Got it. I'll look anything finer up with the tools and do the arithmetic there. What would you like to know?" },
@@ -384,9 +406,10 @@ Deno.serve(async (req) => {
         }
       } else out = await viaMistral();
 
-      const byId = new Map<string, { t: string; cat: string }>(L.tx.filter((x) => x.id && L.editable.has(x.id)).map((x) => [x.id as string, { t: x.t, cat: x.cat || "" }]));
+      const byId = new Map<string, { t: string; cat: string; d?: string }>(L.tx.filter((x) => x.id && L.editable.has(x.id)).map((x) => [x.id as string, { t: x.t, cat: x.cat || "", d: x.d }]));
+      const countDays = new Set<string>(L.checks.map((c: any) => String(c && c.d || "")).filter(Boolean));
       const catTypes = new Map<string, string>([...L.cats.values()].map((c) => [c.name, c.type === "inc" ? "inc" : "exp"]));
-      const taken = takeChanges(out.text, { ids: L.editable, byId, cats: catTypes, accts: L.wallets, today }), changes = taken.changes;
+      const taken = takeChanges(out.text, { ids: L.editable, byId, cats: catTypes, accts: L.wallets, today, countDays }), changes = taken.changes;
       let answer = taken.answer;
       // Asked for dates or a list and given none: the rows from the lookup go under the answer as
       // they came back, so the owner gets them without asking twice.
