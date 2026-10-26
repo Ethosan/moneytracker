@@ -92,7 +92,9 @@ test("numbersIn picks figures and skips dates, times, years, small counts and id
 
 test("unknownNumbers allows rounding to the written decimals and sign changes, flags the rest", () => {
   const known = new Set([2827.41, 347.72, 104.34222, 58.5]);
-  assert.deepEqual(unknownNumbers("$2,827 and $2827.4 and 104.34 and 104.3 and -347.72 and 59", known), []);
+  assert.deepEqual(unknownNumbers("$2,827 and $2827.4 and 104.34 and 104.3 and -347.72 and 58.5", known), []);
+  // a small whole number is not the rounding of a known figure: 59 for 58.5 is flagged, 2827 for 2827.41 is not
+  assert.deepEqual(unknownNumbers("59% of it", known), [59]);
   assert.deepEqual(unknownNumbers("grew by $2,479.69, that is 2830", known), [2479.69, 2830]);
 });
 

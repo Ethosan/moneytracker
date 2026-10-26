@@ -54,13 +54,16 @@ export function numbersIn(text: string): number[] {
 }
 const decimals = (v: number) => { const s = String(v); const i = s.indexOf("."); return i < 0 ? 0 : s.length - i - 1; };
 // A figure is known when some given number equals it, or rounds to it at the decimals it was
-// written with ($2,827 for 2827.41 is fine; $2,830 is not).
+// written with ($2,827 for 2827.41 is fine; $2,830 is not). A whole number under 1000 must match
+// exactly: with a few hundred amounts in play almost any small integer is the rounding of one of
+// them, which let a hand-made "59%" through when the calculator said 58.55.
 export function unknownNumbers(text: string, known: Set<number>): number[] {
   const list = [...known];
   const out: number[] = [];
   for (const v of new Set(numbersIn(text))) {
     const d = Math.min(decimals(v), 6), f = Math.pow(10, d);
-    const ok = list.some((k) => Math.abs(k - v) < 0.005 || Math.abs(Math.round(k * f) / f - v) < 0.5 / f + 1e-9);
+    const mayRound = d > 0 || v >= 1000;
+    const ok = list.some((k) => Math.abs(k - v) < 0.005 || (mayRound && Math.abs(Math.round(k * f) / f - v) < 0.5 / f + 1e-9));
     if (!ok) out.push(v);
   }
   return out;

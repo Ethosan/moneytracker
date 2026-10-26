@@ -169,6 +169,10 @@ export function searchTransactions(L: Ledger, p: SearchParams) {
     ...(x.t === "xfer" ? { from: x.from || "?", to: x.to || "?" } : x.pm === "later" ? { paid_with: `PayLater ${x.plp || ""}`.trim() + (x.inst && x.inst.n > 1 ? ` in ${x.inst.n} instalments` : "") } : x.acct ? { wallet: x.acct } : {}),
     ...(x.tags && x.tags.length ? { tags: x.tags } : {}), ...(x.id && L.editable.has(x.id) ? { id: x.id } : {}),
   }));
+  // what kinds of thing matched: a note search for "Grab" spans rides, food orders and a subscription
+  const spanMap: Record<string, { total: number; count: number }> = {};
+  for (const x of rows) { const k = plainCat(x.cat) || "(no category)"; (spanMap[k] = spanMap[k] || { total: 0, count: 0 }).total += amount(x); spanMap[k].count++; }
+  const catSpan = Object.keys(spanMap).sort((a, b) => spanMap[b].total - spanMap[a].total).slice(0, 8).map((k) => ({ category: k, total: r2(spanMap[k].total), count: spanMap[k].count }));
   // ready-made markdown, so the model pastes the numbers instead of retyping them
   const md = (v: number) => "$" + v.toFixed(2), NL = String.fromCharCode(10), cell = (s: string) => s.split("|").join("/");
   const gbName = p.group_by === "month" ? "Month" : p.group_by === "year" ? "Year" : p.group_by === "day" ? "Date" : String(p.group_by || "Group");
@@ -179,6 +183,7 @@ export function searchTransactions(L: Ledger, p: SearchParams) {
     matched: rows.length, spent, income, total_of_matched: total,
     ...(noteCats.length ? { note_matched_category: noteCats, hint: `"${p.note}" is a category name here, so every ${noteCats.join(" / ")} row is included, not only notes containing the word` } : {}),
     ...(!type && spent > 0 && income > 0 ? { caution: `these matches mix spending (${spent}) and income (${income}); total_of_matched adds both. Pass type "exp" for spending or "inc" for income` } : {}),
+    ...(catSpan.length > 1 ? { categories: catSpan, note_on_categories: "the matches span several categories; say so rather than calling them all one thing" } : {}),
     ...(groups ? { groups, groups_markdown: groupsMarkdown } : {}), rows: list, ...(rowsMarkdown ? { rows_markdown: rowsMarkdown } : {}),
     ...(rows.length > list.length ? { note: `${rows.length - list.length} more rows not listed; raise limit or narrow the filter` } : {}),
   };

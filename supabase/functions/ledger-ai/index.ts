@@ -29,7 +29,7 @@ import { createClient } from "npm:@supabase/supabase-js@2.117.3";
 import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
 import { loadLedger, overview, runTool, TOOLS, plainCat } from "./engine.ts";
 import { mistralAgent, claudeAgent } from "./agent.ts";
-import type { Turn, Run } from "./agent.ts";
+import type { Turn, Run, Outcome } from "./agent.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -104,13 +104,19 @@ from here (fees, investment mirrors, transfers), so tell the owner to change tho
 exactly as listed, emoji included, and match the type (spending categories for exp, income categories for inc). At most
 20 changes. Leave the block out entirely when there is nothing to change.`;
 
+// Mistral unless AI_PROVIDER says anthropic or only the Anthropic key is set. The Ask model is
+// Mistral Medium (1.6.2): Small got every sum right through the tools but not the reasoning (it
+// took "22% of income" from the totals as the subscriptions share). Small stays the fallback.
+// The ANTHROPIC_API_KEY stored on 2026-10-08 is rejected by the API as invalid; with a working
+// key and AI_PROVIDER=anthropic, Claude answers and Mistral is the fallback if Claude fails.
 function provider() {
   const want = (Deno.env.get("AI_PROVIDER") || "").toLowerCase();
   if (want === "anthropic" || (!Deno.env.get("MISTRAL_API_KEY") && Deno.env.get("ANTHROPIC_API_KEY"))) return "anthropic";
   return "mistral";
 }
-const mistralModel = () => Deno.env.get("MISTRAL_MODEL") || "mistral-small-latest";
-const claudeModel = () => Deno.env.get("ANTHROPIC_MODEL") || "claude-opus-5-5";
+const MISTRAL_FALLBACK = "mistral-small-latest";
+const mistralModel = () => Deno.env.get("MISTRAL_MODEL") || "mistral-medium-latest";
+const claudeModel = () => Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5-5";
 const needKey = (name: string) => { const k = Deno.env.get(name); if (!k) throw new Error(`${name} is not set in the function's secrets.`); return k; };
 // on a policy decline the API retries on a fallback model inside the same call
 const claudeExtras = { output_config: { effort: "low" }, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" };
@@ -326,9 +332,35 @@ Deno.serve(async (req) => {
         if (name === "search_transactions" && r && r.rows_markdown) lastRows = { rows_markdown: r.rows_markdown, matched: r.matched, listed: r.rows.length };
         return out;
       };
-      const out = provider() === "anthropic"
-        ? (needKey("ANTHROPIC_API_KEY"), await claudeAgent({ create: (p) => new Anthropic().beta.messages.create({ ...p, ...claudeExtras } as any), model: claudeModel(), system: ASK_SYSTEM, messages, tools: TOOLS, run }))
-        : await mistralAgent({ fetchImpl: fetch, key: needKey("MISTRAL_API_KEY"), model: mistralModel(), system: ASK_SYSTEM, messages, tools: TOOLS, run });
+      // the configured Mistral model, then Small if that one is refused (an alias retired, a
+      // model not on the plan), so a model name never takes Ask down
+      const viaMistral = async () => {
+        const key = needKey("MISTRAL_API_KEY"), model = mistralModel();
+        try { return await mistralAgent({ fetchImpl: fetch, key, model, system: ASK_SYSTEM, messages, tools: TOOLS, run }); }
+        catch (e) {
+          if (model === MISTRAL_FALLBACK || !/Mistral 4\d\d/.test(e instanceof Error ? e.message : "")) throw e;
+          console.error(`${model} refused, answering with ${MISTRAL_FALLBACK}:`, e instanceof Error ? e.message : e);
+          lastRows = null;
+          const out = await mistralAgent({ fetchImpl: fetch, key, model: MISTRAL_FALLBACK, system: ASK_SYSTEM, messages, tools: TOOLS, run });
+          out.steps.unshift(`${model} was unavailable; answered with ${MISTRAL_FALLBACK}`);
+          return out;
+        }
+      };
+      let used = provider(), out: Outcome;
+      if (used === "anthropic") {
+        try {
+          needKey("ANTHROPIC_API_KEY");
+          out = await claudeAgent({ create: (p) => new Anthropic().beta.messages.create({ ...p, ...claudeExtras } as any), model: claudeModel(), system: ASK_SYSTEM, messages, tools: TOOLS, run });
+        } catch (e) {
+          // Claude down, over quota or declining: the Mistral path answers instead, and says so
+          if (!Deno.env.get("MISTRAL_API_KEY")) throw e;
+          const why = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 90);
+          console.error("Claude failed, answering with Mistral:", why);
+          used = "mistral"; lastRows = null;
+          out = await viaMistral();
+          out.steps.unshift(`Claude was unavailable (${why}); answered with Mistral`);
+        }
+      } else out = await viaMistral();
 
       const byId = new Map<string, { t: string; cat: string }>(L.tx.filter((x) => x.id && L.editable.has(x.id)).map((x) => [x.id as string, { t: x.t, cat: x.cat || "" }]));
       const catTypes = new Map<string, string>([...L.cats.values()].map((c) => [c.name, c.type === "inc" ? "inc" : "exp"]));
@@ -343,7 +375,7 @@ Deno.serve(async (req) => {
         out.steps.push("Added the dated entries from the lookup");
       }
       if (out.cut) answer += "\n\n*The answer hit the length limit and was cut off. Ask for less at once, or ask it to continue.*";
-      return json({ answer, changes, steps: out.steps, provider: provider(), model: out.model });
+      return json({ answer, changes, steps: out.steps, provider: used, model: out.model });
     }
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
