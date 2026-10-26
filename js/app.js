@@ -1391,21 +1391,38 @@ function wireAsk() {
     };
     wireAsk.tk = setInterval(tick, 1000); tick();
   }
-  // Mobile keyboard: shrink the chat area when the on-screen keyboard opens so the
-  // compose bar and the latest message stay visible above the keyboard.
+  // Phone keyboard. Chrome on Android and Safari on iOS do not shrink the page when the
+  // on-screen keyboard opens: they shrink the visual viewport and pan it to the focused field,
+  // which slid the compose bar under the keys and the chat header off the top. The chat is
+  // pinned to the visual viewport instead (app.css, main.tab-ask:has(.ask.in-chat)): its height
+  // and top offset follow visualViewport on every resize and scroll, so it always covers exactly
+  // the visible area, with the compose bar at the bottom edge above the keys. The keyboard counts
+  // as open when the viewport is well short of the tallest it has been (the tab bar steps aside).
+  if (wireAsk.off) { wireAsk.off(); wireAsk.off = null; }
   if (window.visualViewport && isTouch()) {
-    var vv = window.visualViewport, askEl = document.querySelector('.ask.in-chat');
-    if (askEl) {
-      var onKbResize = function () {
-        var kb = window.innerHeight - vv.height;
-        if (kb > 80) { askEl.style.setProperty('--kb', kb + 'px'); askEl.classList.add('kb-open'); askScroll(); }
-        else { askEl.style.removeProperty('--kb'); askEl.classList.remove('kb-open'); }
+    var vv = window.visualViewport, askEl = document.querySelector('.ask.in-chat'), mainEl = document.querySelector('main');
+    if (askEl && mainEl) {
+      var onVV = function () {
+        var h = vv.height, t = vv.offsetTop;
+        ASK_VV.full = Math.max(ASK_VV.full || 0, h, window.innerHeight);
+        mainEl.style.setProperty('--vvh', h + 'px'); mainEl.style.setProperty('--vvt', t + 'px');
+        var open = h < ASK_VV.full - 80;
+        if (open !== askEl.classList.contains('kb-open')) { askEl.classList.toggle('kb-open', open); askScroll(); }
       };
-      vv.addEventListener('resize', onKbResize);
-      q.addEventListener('blur', function () { setTimeout(function () { var el = document.querySelector('.ask.in-chat'); if (el) { el.style.removeProperty('--kb'); el.classList.remove('kb-open'); } }, 100); });
-    }
+      var settle = function () { onVV(); setTimeout(onVV, 120); setTimeout(onVV, 450); };
+      var noScroll = function () { if (window.scrollY) window.scrollTo(0, 0); };
+      vv.addEventListener('resize', onVV); vv.addEventListener('scroll', onVV);
+      window.addEventListener('scroll', noScroll);
+      q.addEventListener('focus', function () { settle(); setTimeout(askScroll, 300); });
+      q.addEventListener('blur', settle);
+      wireAsk.off = function () { vv.removeEventListener('resize', onVV); vv.removeEventListener('scroll', onVV); window.removeEventListener('scroll', noScroll); };
+      onVV();
+    } else if (mainEl) { mainEl.style.removeProperty('--vvh'); mainEl.style.removeProperty('--vvt'); }
   }
 }
+// the tallest the visual viewport has been with the chat open: the keyboard is open when it is well short of it
+var ASK_VV = { full: 0 };
+window.addEventListener('orientationchange', function () { ASK_VV.full = 0; });
 function askScroll() { requestAnimationFrame(function () { var msgs = document.querySelector('.ask-msgs'); if (msgs) { msgs.scrollTop = msgs.scrollHeight; } else { window.scrollTo(0, document.documentElement.scrollHeight); } }); }
 function askSend(text) {
   var q = String(text || '').trim(); if (!q || UI.askBusy) return;

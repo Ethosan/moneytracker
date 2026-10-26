@@ -830,10 +830,18 @@ body:has(main.tab-ask .ask.in-chat) #fbw-root .fbw-btn{display:none}
      between the header and the nav tabs. */
   /* When in a chat: make the main a fixed-height flex column so the messages
      area can scroll independently between the header and the nav tabs. */
+  /* The chat pins itself to the visible part of the screen. wireAsk() sets --vvh and --vvt from
+     the visual viewport, so when the on-screen keyboard opens (Chrome and Safari shrink the
+     visual viewport, not the page) the chat shrinks with it and nothing slides under the keys;
+     until JS runs, 100dvh. The page behind it cannot scroll, so the browser's "scroll the
+     focused field into view" has nothing to move. */
+  body:has(main.tab-ask .ask.in-chat){overflow:hidden;height:100%}
   main.tab-ask:has(.ask.in-chat){
-    display:flex;flex-direction:column;
-    height:calc(100dvh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));
-    height:calc(100svh - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px));
+    display:flex;flex-direction:column;box-sizing:border-box;
+    position:fixed;left:0;right:0;top:0;
+    height:var(--vvh,100dvh);
+    transform:translateY(var(--vvt,0px));
+    padding-top:calc(10px + env(safe-area-inset-top,0px));
     padding-bottom:calc(82px + env(safe-area-inset-bottom,0px));
     overflow:hidden;
   }
@@ -842,12 +850,10 @@ body:has(main.tab-ask .ask.in-chat) #fbw-root .fbw-btn{display:none}
     flex:1;min-height:0;overflow:hidden;
     display:flex;flex-direction:column;gap:0;
   }
-  /* When the on-screen keyboard is open, shrink the main to the visible area. */
-  main.tab-ask:has(.ask.in-chat.kb-open){
-    height:calc(100dvh - var(--kb,0px) - env(safe-area-inset-top,0px));
-    height:calc(100svh - var(--kb,0px) - env(safe-area-inset-top,0px));
-    padding-bottom:8px;
-  }
+  /* Keyboard open: the compose bar sits right above the keys and the tab bar steps aside
+     (it would otherwise float over the messages, or sit on the compose bar). */
+  main.tab-ask:has(.ask.in-chat.kb-open){padding-bottom:8px}
+  body:has(main.tab-ask .ask.in-chat.kb-open) nav.tabs{display:none}
   .ask.in-chat .ask-side{display:none}
   .ask.in-chat .ask-main{order:0;flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
   /* Chat header: sticky at the top of the messages area */
