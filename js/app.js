@@ -153,10 +153,10 @@ function raiseToast(t) {
   var host = dlg && dlg.open ? dlg : document.body;
   if (t.parentNode !== host) host.appendChild(t);
 }
-function toastUndo(msg) { HIST.label = msg; HIST.labelT = Date.now();
+function toastUndo(msg, ms) { HIST.label = msg; HIST.labelT = Date.now();
   var t = $('#toast'); t.innerHTML = '<span class="msg">' + esc(msg) + '</span><button id="undo" class="undo">Undo</button>'; raiseToast(t); t.classList.add('on', 'act');
   $('#undo').onclick = function () { t.classList.remove('on', 'act'); undoLast(); };
-  clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on', 'act'); }, 5000);
+  clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on', 'act'); }, ms || 5000);
 }
 function toast(msg) { if (msg && !/^Undid|^Redone|^Nothing to/.test(msg)) { HIST.label = msg; HIST.labelT = Date.now(); } $('#toast').classList.remove('act'); var t = $('#toast'); t.innerHTML = '<span class="msg">' + esc(msg) + '</span>'; raiseToast(t); t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on'); }, 1800); }
 
@@ -1149,8 +1149,8 @@ function suggestSheet() {
 // Runs through the ledger-ai Supabase function, which holds the API key. Off until you turn it on.
 function aiOn() { return !!(S.meta.ai && S.meta.ai.on); }
 function aiReady() { return aiOn() && store.mode === 'cloud' && !!store.sb; }
-function aiCall(body) {
-  return store.sb.functions.invoke('ledger-ai', { body: body }).then(function (r) {
+function aiCall(body, signal) {
+  return store.sb.functions.invoke('ledger-ai', signal ? { body: body, signal: signal } : { body: body }).then(function (r) {
     if (!r.error) { if (r.data && r.data.error) throw new Error(r.data.error); return r.data || {}; }
     var res = r.error.context;
     return (res && res.json ? res.json().catch(function () { return {}; }) : Promise.resolve({})).then(function (j) {
@@ -1253,7 +1253,52 @@ function aiContext() {
 // full-history summary from aiContext() plus the last few messages of that conversation.
 // An answer can carry proposed changes (add, edit or delete a transaction). They are kept on
 // the message and shown as cards; nothing in the ledger changes until you tap Apply.
-var ASK_STARTERS = ['How much have I spent this month, and on what?', 'Why was last month more expensive?', 'Where could I cut $100 a month?', 'How much did I spend on food this month?', 'Are my subscriptions worth it?', 'How much should I save each month to reach $100k?'];
+// Three starters for the day of the month: early on, last month is the story; mid-month, the
+// pace; late, where the month went. Three fit a phone screen stacked; six did not.
+function askStarters() {
+  var day = +today().slice(8, 10);
+  if (day <= 10) return ['What did I spend most on last month?', 'Why was last month more expensive?', 'Where could I cut $100 a month?'];
+  if (day <= 20) return ['Am I on pace this month?', 'How much did I spend on food this month?', 'Are my subscriptions worth it?'];
+  return ['Where did this month go?', 'How does this month compare with last month?', 'How much should I save each month to reach $100k?'];
+}
+// A markdown table as ledger rows for phones: the first column leads, the amount column sits
+// bold on the right, the rest becomes one muted line ("11 entries · Transport"). Empty when no
+// column reads as an amount (by header name, else by $ signs), so the table scrolls instead.
+function mdRows(head, body) {
+  if (head.length < 3 || !body.length) return '';
+  var plainText = function (s) { return String(s || '').replace(/<[^>]+>/g, '').replace(/\*\*/g, '').trim(); };
+  var isNum = function (s) { return /^[-−+]?\$?\s?[\d,]+(\.\d+)?%?$/.test(plainText(s)); };
+  var isMoney = function (s) { return /\$/.test(plainText(s)) && isNum(s); };
+  var share = function (f, k) { return body.filter(function (r) { return f(r[k]); }).length / body.length; };
+  // the column that answers the question first (Result beats Paid In), then any money column
+  var AMTS = [/result|total|amount|net|balance|saved|change|p&l/i, /spent|income|owed|paid|cost|value/i], amt = -1, k, a;
+  for (a = 0; a < AMTS.length && amt < 0; a++) for (k = 1; k < head.length; k++) if (AMTS[a].test(plainText(head[k])) && share(isNum, k) >= .6) { amt = k; break; }
+  if (amt < 0) for (k = 1; k < head.length; k++) if (share(isMoney, k) >= .6) { amt = k; break; }
+  if (amt < 0) return '';
+  return '<div class="mdrows">' + body.map(function (r) {
+    var key = r[0] || '', more = [];
+    head.forEach(function (h, j) {
+      if (j === 0 || j === amt) return; var v = r[j]; if (!plainText(v)) return;
+      // a count gets its header as a unit ("11 entries"); a second money column keeps its name
+      more.push(isNum(v) && !isMoney(v) ? v + ' ' + plainText(h).toLowerCase() : share(isNum, j) >= .6 ? plainText(h) + ' ' + v : v);
+    });
+    var sum = /^(all|total)$/i.test(plainText(key));
+    return '<div class="mdrow' + (sum ? ' sum' : '') + '"><div class="l"><b>' + key + '</b>' + (more.length ? '<span>' + more.join(' · ') + '</span>' : '') + '</div><div class="r">' + (r[amt] || '') + '</div></div>';
+  }).join('') + '</div>';
+}
+// Stop waiting for an answer: the request is abandoned (aborted where the client allows), the
+// question goes back into the box, and a chat that held nothing else is dropped.
+function askStop() {
+  var c = UI.askBusy && chatById(UI.askBusy); if (!c) return;
+  UI.askReq = (UI.askReq || 0) + 1;
+  if (UI.askAbort) { try { UI.askAbort.abort(); } catch (e) { } UI.askAbort = null; }
+  var last = c.msgs[c.msgs.length - 1];
+  if (last && last.role === 'user') { c.msgs.pop(); UI.askDraft = last.content; }
+  UI.askBusy = null;
+  if (!c.msgs.length) { S.chats = S.chats.filter(function (x) { return x.id !== c.id; }); if (UI.chatId === c.id) UI.chatId = null; }
+  mark('chats'); render();
+  var q = $('#askq'); if (q && !isTouch()) q.focus();
+}
 function chatList() { return (S.chats || []).slice().sort(function (a, b) { return (b.u || b.t || '') > (a.u || a.t || '') ? 1 : -1; }); }
 function chatById(id) { return (S.chats || []).filter(function (c) { return c.id === id; })[0] || null; }
 function chatWhen(iso) {
@@ -1286,14 +1331,18 @@ function mdLite(text) {
     if (l.indexOf('|') > -1 && i + 1 < lines.length && isSep(lines[i + 1])) {
       close();
       var head = cells(l), align = cells(lines[i + 1]).map(function (x) { return /^:-+:$/.test(x) ? ' style="text-align:center"' : /^-+:$/.test(x) ? ' style="text-align:right"' : ''; });
-      var tbl = '<table class="mdtbl"><thead><tr>' + head.map(function (c, k) { return '<th' + (align[k] || '') + '>' + inline(c) + '</th>'; }).join('') + '</tr></thead><tbody>';
+      var body = [], tbl = '';
       i += 2;
       while (i < lines.length && lines[i].trim() && lines[i].indexOf('|') > -1) {
         var row = cells(lines[i]);
-        tbl += '<tr>' + head.map(function (x, k) { return '<td' + (align[k] || '') + '>' + inline(row[k] == null ? '' : row[k]) + '</td>'; }).join('') + '</tr>';
+        body.push(head.map(function (x, k) { return inline(row[k] == null ? '' : row[k]); }));
         i++;
       }
-      out.push(tbl + '</tbody></table>');
+      // phones get the same rows as ledger rows (mdRows); the table stays for wide screens
+      var rowsHtml = mdRows(head.map(inline), body);
+      tbl = '<table class="mdtbl' + (rowsHtml ? ' has-rows' : '') + '"><thead><tr>' + head.map(function (c, k) { return '<th' + (align[k] || '') + '>' + inline(c) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        body.map(function (r) { return '<tr>' + r.map(function (v, k) { return '<td' + (align[k] || '') + '>' + v + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>';
+      out.push(tbl + rowsHtml);
       continue;
     }
     if ((m = l.match(/^\s*[-*\u2022]\s+(.*)$/))) { if (list !== 'ul') { close(); out.push('<ul>'); list = 'ul'; } out.push('<li>' + inline(m[1]) + '</li>'); }
@@ -1357,7 +1406,7 @@ function renderAsk() {
   if (!cur) {
     main += '<div class="ask-hello"><div class="ask-mark" aria-hidden="true">' + ICON.ask + '</div><h2>What would you like to know?</h2>' +
       '<p>Answers come from your full history. Ask it to log or fix an entry and it shows the change first: nothing changes until you tap Apply.</p>' +
-      '<div class="ask-starters">' + ASK_STARTERS.map(function (q) { return '<button class="chip" data-askq="' + esc(q) + '">' + esc(q) + '</button>'; }).join('') + '</div></div>';
+      '<div class="ask-starters">' + askStarters().map(function (q) { return '<button class="chip" data-askq="' + esc(q) + '">' + esc(q) + '</button>'; }).join('') + '</div></div>';
   } else {
     main += '<div class="ask-chat-hd"><button class="ask-back" data-act="chatback" aria-label="All conversations">\u2039</button><b>' + esc(cur.title || 'Conversation') + '</b><button class="chip sm ask-newchat" data-act="chatnew">New</button></div>' +
       '<div class="ask-msgs" role="log" aria-live="polite">' + (cur.msgs || []).map(function (m, i) {
@@ -1368,7 +1417,9 @@ function renderAsk() {
       (busy ? '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div class="bubble typing" aria-label="Thinking"><i></i><i></i><i></i><span class="typing-label"></span></div></div>' : '') + '</div>';
   }
   main += '<form class="ask-compose" id="askform"><textarea id="askq" rows="1" placeholder="' + (cur ? 'Ask a follow-up' : 'Ask about your money') + '" aria-label="Your question" enterkeyhint="send">' + esc(UI.askDraft || '') + '</textarea>' +
-    '<button class="ask-send" type="submit" aria-label="Send"' + (UI.askBusy ? ' disabled' : '') + '><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button></form></div>';
+    (UI.askBusy
+      ? '<button class="ask-send ask-stop" type="button" data-askstop="1" aria-label="Stop waiting for this answer" title="Stop"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5" fill="currentColor"/></svg></button>'
+      : '<button class="ask-send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>') + '</form></div>';
   return h + '<div class="ask' + (cur ? ' in-chat' : '') + '">' + side + main + '</div>';
 }
 function wireAsk() {
@@ -1380,14 +1431,17 @@ function wireAsk() {
   f.addEventListener('submit', function (e) { e.preventDefault(); askSend(q.value); });
   if (UI.chatId) askScroll();
   // While an answer is on its way the typing bubble says what is happening: the function reads
+  // while an answer is on its way the send button becomes Stop (askStop)
   // the ledger through its tools and does the sums before the model writes, which takes longer
   // than a plain reply, so the dots alone read as a hang.
   clearInterval(wireAsk.tk);
   if (UI.askBusy && document.querySelector('.typing-label')) {
-    var t0 = UI.askStarted || Date.now(), stages = [[0, ''], [2500, 'Reading your ledger'], [7000, 'Working out the numbers'], [15000, 'Writing the answer']];
+    var t0 = UI.askStarted || Date.now(), stages = [[0, ''], [600, 'Reading your ledger'], [6000, 'Working out the numbers'], [14000, 'Writing the answer'], [30000, 'Still writing']];
     var tick = function () {
       var el = document.querySelector('.typing-label'); if (!el) { clearInterval(wireAsk.tk); return; }
-      var age = Date.now() - t0, s = ''; stages.forEach(function (x) { if (age >= x[0]) s = x[1]; }); el.textContent = s;
+      var age = Date.now() - t0, s = ''; stages.forEach(function (x) { if (age >= x[0]) s = x[1]; });
+      // past 20 s the wait is counted, so a long answer never looks like a hang
+      el.textContent = s + (age >= 20000 ? ' · ' + Math.round(age / 1000) + ' s' : '');
     };
     wireAsk.tk = setInterval(tick, 1000); tick();
   }
@@ -1412,6 +1466,14 @@ function wireAsk() {
       var settle = function () { onVV(); setTimeout(onVV, 120); setTimeout(onVV, 450); };
       var noScroll = function () { if (window.scrollY) window.scrollTo(0, 0); };
       vv.addEventListener('resize', onVV); vv.addEventListener('scroll', onVV);
+  // Desktop: the chat column scrolls inside itself (app.css, min-width 1024px); its height is the
+  // window minus the column's offset from the top, measured here and kept on resize.
+  var col = document.querySelector('.ask.in-chat .ask-main'), mainTop = document.querySelector('main');
+  if (wireAsk.rs) { window.removeEventListener('resize', wireAsk.rs); wireAsk.rs = null; }
+  if (col && mainTop && !isTouch()) {
+    var setTop = function () { mainTop.style.setProperty('--ask-top', Math.round(col.getBoundingClientRect().top + window.scrollY) + 'px'); askScroll(); };
+    setTop(); wireAsk.rs = setTop; window.addEventListener('resize', setTop);
+  } else if (mainTop) mainTop.style.removeProperty('--ask-top');
       window.addEventListener('scroll', noScroll);
       q.addEventListener('focus', function () { settle(); setTimeout(askScroll, 300); });
       q.addEventListener('blur', settle);
@@ -1436,7 +1498,8 @@ function askSend(text) {
   S.chats = chatList().slice(0, 50); S.chats.forEach(function (x) { if (x.msgs && x.msgs.length > 60) x.msgs = x.msgs.slice(-60); });
   mark('chats'); render(); askScroll();
   // aiContext() runs inside the chain, so if it throws the error lands in the chat and Ask isn't left busy
-  Promise.resolve().then(function () { return aiCall({ action: 'ask', question: q, context: aiContext(), history: hist }); }).then(function (r) {
+  Promise.resolve().then(function () { return aiCall({ action: 'ask', question: q, context: aiContext(), history: hist }, ac && ac.signal); }).then(function (r) {
+    if (UI.askReq !== req) return;
     var am = { role: 'assistant', content: r.answer || '(no answer)', at: new Date().toISOString() }, ch = chgTake(r.changes);
     if (ch.length) am.changes = ch;
     // the lookups and sums the function made for this answer, shown under it (askSteps)
@@ -1445,8 +1508,12 @@ function askSend(text) {
     if (r.model) S.meta.ai.model = r.model;
   }, function (e) {
     c.msgs.push({ role: 'error', content: String(e.message || e), at: new Date().toISOString() });
+  // each request carries a number; askStop() bumps it, so a stopped request's answer is ignored
+  var req = UI.askReq = (UI.askReq || 0) + 1, ac = window.AbortController ? new AbortController() : null;
+  UI.askAbort = ac;
   }).then(function () {
-    UI.askBusy = null; c.u = new Date().toISOString(); mark('chats');
+    if (UI.askReq !== req) return;
+    UI.askBusy = null; UI.askAbort = null; c.u = new Date().toISOString(); mark('chats');
     if (UI.tab === 'ask') { render(); askScroll(); var t = $('#askq'); if (t && !isTouch()) t.focus(); }
   });
 }
@@ -1457,6 +1524,7 @@ function chgTake(list) {
   return (Array.isArray(list) ? list : []).slice(0, 20).map(function (x) {
     var c = { op: x.op, st: 'new' };
     ['id', 'd', 't', 'amt', 'cat', 'note', 'acct', 'why'].forEach(function (k) { if (x[k] != null) c[k] = x[k]; });
+    if (UI.askReq !== req) return;
     if (c.op === 'add') { if (!c.d) c.d = today(); if (!c.t) c.t = (catObj(c.cat) || {}).type || 'exp'; }
     else { var t = findTx(c.id); if (t) c.was = chgSig(t); else c.st = 'gone'; }
     return c;
@@ -1485,19 +1553,22 @@ function askSteps(m) {
 }
 function chgCard(m, i) {
   if (!m.changes || !m.changes.length) return '';
-  var open = m.changes.filter(function (c) { return c.st === 'new'; }).length;
-  return '<div class="ask-chg" role="group" aria-label="Proposed changes"><div class="ask-chg-hd"><b>' + (m.changes.length === 1 ? 'Proposed change' : m.changes.length + ' proposed changes') + '</b>' +
-    (open > 1 ? '<button class="chip sm" data-chgall="' + i + '">Apply all ' + open + '</button>' : '') + '</div>' +
+  var open = m.changes.filter(function (c) { return c.st === 'new'; }), dels = open.filter(function (c) { return c.op === 'delete'; }).length, keep = open.length - dels;
+  var all = keep > 1 ? '<button class="chip sm" data-chgall="' + i + '">Apply ' + (dels ? keep + ' (not the delete' + (dels > 1 ? 's' : '') + ')' : 'all ' + keep) + '</button>' : '';
+  return '<div class="ask-chg" role="group" aria-label="Proposed changes"><div class="ask-chg-hd"><b>' + (m.changes.length === 1 ? 'Proposed change' : m.changes.length + ' proposed changes') + '</b>' + all + '</div>' +
     m.changes.map(function (c, k) {
-      var st = c.st === 'done' ? '<span class="chg-st ok">Applied</span>' : c.st === 'skip' ? '<span class="chg-st">Skipped</span>'
+      var st = c.st === 'done' ? '<span class="chg-st ok">' + (c.op === 'delete' ? 'Deleted' : 'Applied') + '</span>' : c.st === 'skip' ? '<span class="chg-st">Skipped</span>'
         : c.st === 'gone' ? '<span class="chg-st">Not applied: that entry was changed or deleted since</span>'
-        : '<button class="chip" data-chg="' + i + ':' + k + '" aria-pressed="true">Apply</button><button class="chip" data-chgskip="' + i + ':' + k + '">Skip</button>';
+        : (c.op === 'delete' ? '<button class="chip del" data-chg="' + i + ':' + k + '">Delete</button>' : '<button class="chip on" data-chg="' + i + ':' + k + '">Apply</button>') +
+          '<button class="chip" data-chgskip="' + i + ':' + k + '">Skip</button>';
       return '<div class="chg' + (c.st !== 'new' ? ' settled' : '') + '"><p>' + chgText(c) + (c.why ? '<span class="chg-why">' + esc(c.why) + '</span>' : '') + '</p><div class="chg-act">' + st + '</div></div>';
     }).join('') + '</div>';
 }
 // One change, through the same path the Suggestions sheet uses. False when it no longer fits.
 function chgApply(c) {
   if (c.op === 'add') {
+// A delete is never one more Apply: it gets its own rose Delete button, and "Apply all" leaves
+// deletes out, so removing a real entry is always a deliberate tap on its own.
     var cat = catObj(c.cat); if (!cat || !(c.amt > 0)) return false;
     var t = { id: uid(), d: c.d || today(), t: c.t || cat.type || 'exp', amt: r2(c.amt), cat: c.cat, sub: '', note: c.note || '', tags: [], src: 'app' };
     t.acct = c.acct && wallets().indexOf(c.acct) > -1 ? c.acct : defWallet();
@@ -1521,7 +1592,9 @@ function chgRun(mi, ks) {
   var ok = 0, bad = 0;
   ks.forEach(function (k) { var c = m.changes[k]; if (!c || c.st !== 'new') return; if (chgApply(c)) { c.st = 'done'; c.ap = 1; ok++; } else { c.st = 'gone'; bad++; } });
   mark('chats'); render();
-  if (ok) toastUndo(ok === 1 ? 'Applied the change' : 'Applied ' + ok + ' changes');
+  var deleted = ks.filter(function (k) { var c = m.changes[k]; return c && c.op === 'delete' && c.ap && c.st === 'done'; }).length;
+  // a longer undo window than the usual toast: this changed the ledger from a chat
+  if (ok) toastUndo(ok === 1 ? (deleted ? 'Deleted the entry' : 'Applied the change') : 'Applied ' + ok + ' changes' + (deleted ? ' (' + deleted + ' deleted)' : ''), 8000);
   else if (bad) toast('That entry was changed or deleted since, so nothing was applied');
 }
 // What happened to an answer's proposals, for the model to see on the next question.
