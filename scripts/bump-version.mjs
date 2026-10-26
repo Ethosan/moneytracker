@@ -81,4 +81,22 @@ function updateHtmlMeta(dir, ver) {
 }
 updateHtmlMeta(rootDir, next);
 
+// --- stamp the app's own scripts and stylesheet with the version, and the service worker's cache name ---
+// A new release is then a URL the browser has never cached, so it loads on the next open instead of
+// after the 4-hour browser cache, and the changed sw.js reinstalls the worker, which shows the
+// "Updated to the latest version" toast. The pre-commit hook stages index.html and sw.js.
+function stampAssets(ver) {
+  const indexPath = join(rootDir, "index.html"), swPath = join(rootDir, "sw.js");
+  if (existsSync(indexPath)) {
+    let html = readFileSync(indexPath, "utf8");
+    html = html.replace(/\b(src|href)="((?:js\/|vendor\/|config\.js|app\.css)[^"?]*)(\?v=[^"]*)?"/g, (m, attr, path) => `${attr}="${path}?v=${ver}"`);
+    writeFileSync(indexPath, html);
+  }
+  if (existsSync(swPath)) {
+    const sw = readFileSync(swPath, "utf8").replace(/const CACHE = '[^']*';/, `const CACHE = 'ledger-${ver}';`);
+    writeFileSync(swPath, sw);
+  }
+}
+stampAssets(next);
+
 console.log(`bumped ${type}: ${current} → ${next}`);

@@ -8,5 +8,5 @@
     "bump-version": "node scripts/bump-version.mjs",
     "version:check": "node scripts/bump-version.mjs --check"
   },
-  "version": "1.6.10"
+  "version": "1.6.11"
 }
