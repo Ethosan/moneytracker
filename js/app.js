@@ -676,6 +676,7 @@ function pull() {
   });
 }
 document.addEventListener('keydown', function (e) {
+  if (e.key === 'Escape' && UI.askDrawer && !(e.target && e.target.classList && e.target.classList.contains('ask-ren'))) { askDrawer(false); return; }
   var rb = e.target && e.target.closest && e.target.closest('[role="button"]');
   if (rb && rb.tagName !== 'BUTTON' && (e.key === 'Enter' || e.key === ' ') && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); rb.click(); return; }
   var tb = e.target && e.target.closest && e.target.closest('.ins-tabs [role="tab"]');
@@ -1310,7 +1311,7 @@ function askStop() {
   UI.askBusy = null;
   if (!c.msgs.length) { S.chats = S.chats.filter(function (x) { return x.id !== c.id; }); if (UI.chatId === c.id) UI.chatId = null; }
   mark('chats'); render();
-  var q = $('#askq'); if (q && !isTouch()) q.focus();
+  var q = $('#askq'); if (q) { q.value = UI.askDraft || ''; askFit(q); var sb = document.querySelector('.ask-send[type=submit]'); if (sb) sb.disabled = !q.value.trim(); if (!isTouch()) q.focus(); }
 }
 function chatList() { return (S.chats || []).slice().sort(function (a, b) { return (b.u || b.t || '') > (a.u || a.t || '') ? 1 : -1; }); }
 function chatById(id) { return (S.chats || []).filter(function (c) { return c.id === id; })[0] || null; }
@@ -1399,6 +1400,45 @@ function hydrateMath() {
   }
   needMath().then(hydrateMath, function () { });
 }
+// The Ask tab is laid out like Oracular's chat (and Claude's or ChatGPT's): the chats in a list
+// grouped by when each was last used, beside the thread on wide screens (it folds away) and in a
+// drawer from the left on phones; the thread with your questions in grey bubbles and the answers
+// as plain text under the mark; a message box that grows with the message.
+var ASKI = (function () {
+  function s(d, w) { return '<svg viewBox="0 0 24 24" width="' + w + '" height="' + w + '" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' + d + '</svg>'; }
+  return {
+    panel: s('<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/>', 18),
+    menu: s('<path d="M4 6h16M4 12h16M4 18h16"/>', 20),
+    pen: s('<path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.4 2.6a1 1 0 0 1 3 3l-9 9a2 2 0 0 1-.85.5l-2.87.84a.5.5 0 0 1-.62-.62l.84-2.87a2 2 0 0 1 .5-.85z"/>', 18),
+    edit: s('<path d="M21.2 6.8a1 1 0 0 0-4-4L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/>', 15),
+    trash: s('<path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>', 15),
+    copy: s('<rect width="14" height="14" x="8" y="8" rx="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>', 14),
+    check: s('<path d="M20 6 9 17l-5-5"/>', 14),
+    close: s('<path d="M18 6 6 18M6 6l12 12"/>', 20),
+    up: s('<path d="M12 19V5M5 12l7-7 7 7"/>', 18),
+    stop: '<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false"><rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor"/></svg>',
+    alert: s('<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4M12 17h.01"/>', 16)
+  };
+})();
+// the chats by when each was last used, the way Claude and ChatGPT list them
+var CHAT_GROUPS = ['Today', 'Yesterday', 'Previous 7 days', 'Previous 30 days', 'Older'];
+function chatGroup(c) {
+  var d = new Date(c.u || c.t || 0); if (isNaN(d)) return 'Older';
+  var n = new Date(), age = Math.round((new Date(n.getFullYear(), n.getMonth(), n.getDate()) - new Date(d.getFullYear(), d.getMonth(), d.getDate())) / 864e5);
+  return age <= 0 ? 'Today' : age === 1 ? 'Yesterday' : age <= 7 ? 'Previous 7 days' : age <= 30 ? 'Previous 30 days' : 'Older';
+}
+// wide screens: the chat list folds away, and the choice is kept on this device
+function askSideOn() { try { return localStorage.getItem('ledger-ask-side') !== '0'; } catch (e) { return true; } }
+function askSideSet(on) { try { localStorage.setItem('ledger-ask-side', on ? '1' : '0'); } catch (e) { } }
+// phones: the chat list is a drawer with a history entry of its own, so Back closes it
+function askDrawer(open) {
+  if (!!UI.askDrawer === open) return;
+  UI.askDrawer = open;
+  if (open) { try { history.pushState({ askDrawer: 1 }, ''); } catch (e) { } }
+  else if (history.state && history.state.askDrawer) { try { history.back(); } catch (e) { } }
+  render();
+}
+window.addEventListener('popstate', function () { if (UI.askDrawer) { UI.askDrawer = false; render(); } });
 function renderAsk() {
   var h = '<header class="top"><h1>Ask</h1>' + hdRight() + '</header>';
   if (!aiOn() || store.mode !== 'cloud') {
@@ -1407,112 +1447,203 @@ function renderAsk() {
       (store.mode !== 'cloud' ? '<p class="neg">This needs sync: sign in with your Supabase account first.</p>' : '<button class="btn" data-act="ai">Turn on the AI assistant</button>') +
       '</div></section>';
   }
-  var chats = chatList(), cur = UI.chatId ? chatById(UI.chatId) : null, busy = cur && UI.askBusy === cur.id;
-  var side = '<aside class="ask-side' + (cur ? ' in-chat' : '') + '"><div class="ask-side-hd"><h2>Conversations</h2><button class="chip sm" data-act="chatnew">New chat</button></div>' +
-    (chats.length ? '<div class="ask-list">' + chats.map(function (c) {
-      var last = (c.msgs || []).filter(function (m) { return m.role === 'assistant'; }).slice(-1)[0];
-      return '<div class="ask-item' + (cur && cur.id === c.id ? ' on' : '') + '"><button class="ask-open" data-chat="' + esc(c.id) + '"><b>' + esc(c.title || 'Conversation') + '</b><span>' +
-        chatWhen(c.u || c.t) + (last ? ' \u00b7 ' + esc(last.content.replace(/[*#\n]+/g, ' ').slice(0, 70)) : '') + '</span></button>' +
-        '<button class="ask-del" data-chatdel="' + esc(c.id) + '" aria-label="Delete this conversation">\u2715</button></div>';
-    }).join('') + '</div>' : '<p class="note">Your conversations will be kept here, on every device you sign in on.</p>') + '</aside>';
-  var main = '<div class="ask-main">';
-  if (!cur) {
-    main += '<div class="ask-hello"><div class="ask-mark" aria-hidden="true">' + ICON.ask + '</div><h2>What would you like to know?</h2>' +
-      '<p>Answers come from your full history. Ask it to log or fix an entry and it shows the change first: nothing changes until you tap Apply.</p>' +
-      '<div class="ask-starters">' + askStarters().map(function (q) { return '<button class="chip" data-askq="' + esc(q) + '">' + esc(q) + '</button>'; }).join('') + '</div></div>';
-  } else {
-    main += '<div class="ask-chat-hd"><button class="ask-back" data-act="chatback" aria-label="All conversations">\u2039</button><b>' + esc(cur.title || 'Conversation') + '</b><button class="chip sm ask-newchat" data-act="chatnew">New</button></div>' +
-      '<div class="ask-msgs" role="log" aria-live="polite">' + (cur.msgs || []).map(function (m, i) {
-        if (m.role === 'user') return '<div class="ask-msg me"><div class="bubble">' + esc(m.content).replace(/\n/g, '<br>') + '</div><time>' + chatWhen(m.at) + '</time></div>';
-        if (m.role === 'error') return '<div class="ask-msg err"><div class="bubble"><b>That didn\u2019t go through.</b> ' + esc(m.content) + ' <button class="linkbtn" data-askretry="' + i + '">Try again</button></div></div>';
-        return '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div><div class="bubble">' + mdLite(m.content) + '</div>' + askSteps(m) + chgCard(m, i) + '<time>' + chatWhen(m.at) + '</time></div></div>';
-      }).join('') +
-      (busy ? '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div class="bubble typing" aria-label="Thinking"><i></i><i></i><i></i><span class="typing-label"></span></div></div>' : '') + '</div>';
-  }
-  // while an answer is on its way the send button becomes Stop (askStop)
-  main += '<form class="ask-compose" id="askform"><textarea id="askq" rows="1" placeholder="' + (cur ? 'Ask a follow-up' : 'Ask about your money') + '" aria-label="Your question" enterkeyhint="send">' + esc(UI.askDraft || '') + '</textarea>' +
-    (UI.askBusy
-      ? '<button class="ask-send ask-stop" type="button" data-askstop="1" aria-label="Stop waiting for this answer" title="Stop"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5" fill="currentColor"/></svg></button>'
-      : '<button class="ask-send" type="submit" aria-label="Send"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>') + '</form></div>';
-  return h + '<div class="ask' + (cur ? ' in-chat' : '') + '">' + side + main + '</div>';
+  var chats = chatList(), cur = UI.chatId ? chatById(UI.chatId) : null;
+  return h + '<div class="ask' + (cur ? ' in-chat' : '') + (askSideOn() ? '' : ' side-off') + (UI.askDrawer ? ' drawer-on' : '') + '" data-cur="' + esc(cur ? cur.id : '') + '">' +
+    '<aside class="ask-side" aria-label="Your chats"><div class="ask-side-in" data-region="side">' + askSide(chats, cur) + '</div></aside>' +
+    '<div class="ask-scrim" data-act="askdrawer" aria-hidden="true"></div>' +
+    '<section class="ask-main">' +
+    '<div class="ask-bar" data-region="bar">' + askBar(cur) + '</div>' +
+    '<div class="ask-scroll" data-region="thread">' + askThread(cur) + '</div>' +
+    '<div class="ask-foot"><form class="ask-compose" id="askform"><textarea id="askq" rows="1" placeholder="' + (cur ? 'Ask a follow-up' : 'Ask about your money') + '" aria-label="Your question" enterkeyhint="send">' + esc(UI.askDraft || '') + '</textarea>' +
+    '<span class="ask-send-slot" data-region="send">' + askSendBtn() + '</span></form>' +
+    '<p class="ask-fine">AI can be wrong. Nothing changes until you tap Apply.</p></div>' +
+    '</section></div>';
 }
+function askSide(chats, cur) {
+  var hd = '<div class="ask-side-hd"><b>Chats</b><span>' +
+    '<button class="ask-ib" type="button" data-act="chatnew" aria-label="New chat" title="New chat">' + ASKI.pen + '</button>' +
+    '<button class="ask-ib ask-fold" type="button" data-act="askside" aria-label="Hide the chat list" title="Hide the chat list">' + ASKI.panel + '</button>' +
+    '<button class="ask-ib ask-shut" type="button" data-act="askdrawer" aria-label="Close the chat list">' + ASKI.close + '</button></span></div>';
+  if (!chats.length) return hd + '<p class="ask-empty">Your chats are kept here, on every device you sign in on.</p>';
+  return hd + '<div class="ask-list">' + CHAT_GROUPS.map(function (g) {
+    var list = chats.filter(function (c) { return chatGroup(c) === g; }); if (!list.length) return '';
+    return '<p class="ask-grp">' + g + '</p>' + list.map(function (c) {
+      var on = !!(cur && cur.id === c.id);
+      return '<div class="ask-row' + (on ? ' on' : '') + '"><button class="ask-open" type="button" data-chat="' + esc(c.id) + '"' + (on ? ' aria-current="page"' : '') + '>' + esc(c.title || 'New chat') + '</button>' +
+        '<span class="ask-row-act"><button class="ask-ib sm" type="button" data-chatren="' + esc(c.id) + '" aria-label="Rename chat" title="Rename">' + ASKI.edit + '</button>' +
+        '<button class="ask-ib sm del" type="button" data-chatdel="' + esc(c.id) + '" aria-label="Delete chat" title="Delete">' + ASKI.trash + '</button></span></div>';
+    }).join('');
+  }).join('') + '</div><p class="ask-side-ft">' + chats.length + ' chat' + (chats.length === 1 ? '' : 's') + ' · synced to your account</p>';
+}
+function askBar(cur) {
+  return '<button class="ask-ib ask-menu" type="button" data-act="askdrawer" aria-label="Your chats" aria-expanded="' + !!UI.askDrawer + '">' + ASKI.menu + '</button>' +
+    '<button class="ask-ib ask-unfold" type="button" data-act="askside" aria-label="Show the chat list" title="Show the chat list">' + ASKI.panel + '</button>' +
+    '<div class="ask-ttl"><b>' + esc(cur ? cur.title || 'New chat' : 'New chat') + '</b><span>From your whole ledger</span></div>' +
+    '<button class="ask-ib" type="button" data-act="chatnew" aria-label="New chat" title="New chat">' + ASKI.pen + '</button>';
+}
+function askThread(cur) {
+  if (!cur) {
+    return '<div class="ask-hello"><span class="ask-logo" aria-hidden="true">' + ICON.ask + '</span><h2>What would you like to know?</h2>' +
+      '<p>Answers come from your full history. Ask it to log or fix an entry and it shows the change first.</p>' +
+      '<div class="ask-starters">' + askStarters().map(function (q) { return '<button class="ask-start" type="button" data-askq="' + esc(q) + '">' + esc(q) + '</button>'; }).join('') + '</div></div>';
+  }
+  var busy = UI.askBusy === cur.id;
+  return '<div class="ask-msgs" role="log" aria-live="polite">' + (cur.msgs || []).map(function (m, i) {
+    if (m.role === 'user') return '<div class="ask-msg me"><div class="bubble">' + esc(m.content).replace(/\n/g, '<br>') + '</div></div>';
+    if (m.role === 'error') return '<div class="ask-msg err"><span class="ask-av" aria-hidden="true">' + ASKI.alert + '</span><p><b>That didn’t go through.</b> ' + esc(m.content) + ' <button class="linkbtn" type="button" data-askretry="' + i + '">Try again</button></p></div>';
+    return '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div class="ask-body"><div class="bubble">' + mdLite(m.content) + '</div>' + chgCard(m, i) + askSteps(m, cur.id + ':' + i) +
+      '<div class="ask-tools"><button class="ask-tool" type="button" data-askcopy="' + i + '" aria-label="Copy this answer">' + ASKI.copy + '<span>Copy</span></button><time>' + chatWhen(m.at) + '</time></div></div></div>';
+  }).join('') +
+    (busy ? '<div class="ask-msg ai"><span class="ask-av" aria-hidden="true">' + ICON.ask + '</span><div class="ask-typing" aria-label="Thinking"><i></i><i></i><i></i><span class="typing-label"></span></div></div>' : '') + '</div>';
+}
+// while an answer is on its way the send button is Stop (askStop)
+function askSendBtn() {
+  return UI.askBusy
+    ? '<button class="ask-send ask-stop" type="button" data-askstop="1" aria-label="Stop waiting for this answer" title="Stop">' + ASKI.stop + '</button>'
+    : '<button class="ask-send" type="submit" aria-label="Send"' + (String(UI.askDraft || '').trim() ? '' : ' disabled') + '>' + ASKI.up + '</button>';
+}
+// A redraw while the Ask tab is showing changes only the parts that differ (the chat list, the
+// title bar, the thread, the send button) and never the message box, so a sync, an answer landing
+// or a chat switch leaves the focus, the caret and the phone's keyboard where they were. Every
+// region is compared with the markup it was last drawn from, not with the page (temml and open
+// folds change the page). False when the tab has no chat to patch (AI off): the full redraw runs.
+function askPatch(v) {
+  var root = document.querySelector('main.tab-ask .ask'), q = $('#askq'); if (!root || !q) return false;
+  var tpl = document.createElement('template'); tpl.innerHTML = v;
+  var nr = tpl.content.querySelector('.ask'); if (!nr) return false;
+  var last = askPatch.last || (askPatch.last = {}), moved = root.dataset.cur !== nr.dataset.cur;
+  root.className = nr.className; root.dataset.cur = nr.dataset.cur;
+  ['side', 'bar', 'thread', 'send'].forEach(function (k) {
+    var a = root.querySelector('[data-region="' + k + '"]'), b = nr.querySelector('[data-region="' + k + '"]'); if (!a || !b) return;
+    var html = b.innerHTML; if (last[k] === html) return;
+    var ae = document.activeElement; if (ae && ae.tagName === 'INPUT' && a.contains(ae)) return; // a chat being renamed
+    var end = k === 'thread' && a.scrollHeight - a.scrollTop - a.clientHeight < 80;
+    a.innerHTML = html; last[k] = html;
+    if (k === 'thread' && (end || moved)) a.scrollTop = a.scrollHeight;
+  });
+  var nq = nr.querySelector('#askq'); if (nq && q.placeholder !== nq.placeholder) q.placeholder = nq.placeholder;
+  var hd = document.querySelector('main.tab-ask > header.top'), nh = tpl.content.querySelector('header.top');
+  if (hd && nh && last.hd !== nh.innerHTML) { hd.innerHTML = nh.innerHTML; last.hd = nh.innerHTML; }
+  return true;
+}
+// what each region was last drawn from, right after a full redraw
+function askMark() {
+  var last = askPatch.last = {};
+  document.querySelectorAll('main.tab-ask .ask [data-region]').forEach(function (el) { last[el.dataset.region] = el.innerHTML; });
+  var hd = document.querySelector('main.tab-ask > header.top'); if (hd) last.hd = hd.innerHTML;
+}
+function askFit(q) { q.style.height = 'auto'; q.style.height = Math.min(q.scrollHeight, 168) + 'px'; }
+// once per full redraw: the message box, and where the chat sits on the screen
 function wireAsk() {
-  var q = $('#askq'), f = $('#askform'); if (!q || !f) return;
-  function fit() { q.style.height = 'auto'; q.style.height = Math.min(q.scrollHeight, 160) + 'px'; }
-  fit();
-  q.addEventListener('input', function () { UI.askDraft = q.value; fit(); });
+  var q = $('#askq'), f = $('#askform'); if (!q || !f) { if (wireAsk.off) { wireAsk.off(); wireAsk.off = null; } return; }
+  askMark(); askFit(q);
+  q.addEventListener('input', function () {
+    UI.askDraft = q.value; askFit(q);
+    var s = document.querySelector('.ask-send[type=submit]'); if (s) s.disabled = !q.value.trim();
+  });
   q.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); askSend(q.value); } });
   f.addEventListener('submit', function (e) { e.preventDefault(); askSend(q.value); });
-  if (UI.chatId) askScroll();
-  // While an answer is on its way the typing bubble says what is happening: the function reads
-  // the ledger through its tools and does the sums before the model writes, which takes longer
-  // than a plain reply, so the dots alone read as a hang.
-  clearInterval(wireAsk.tk);
+  var sc = document.querySelector('.ask-scroll'); if (sc && UI.chatId) sc.scrollTop = sc.scrollHeight;
+  if (wireAsk.off) { wireAsk.off(); wireAsk.off = null; }
+  var mainEl = document.querySelector('main'), askEl = document.querySelector('main.tab-ask .ask'), offs = [];
+  // Wide screens: the chat is a fixed-height card under the top bar and the thread scrolls inside
+  // it; its height is the window minus the card's distance from the top, measured here.
+  // (measured on every screen, a touch laptop included; only the wide layout reads it)
+  if (askEl && mainEl) {
+    var setTop = function () { mainEl.style.setProperty('--ask-top', Math.round(askEl.getBoundingClientRect().top + window.scrollY) + 'px'); };
+    // again once the tab's entrance (a 6px lift) has finished
+    setTop(); mainEl.addEventListener('animationend', setTop, { once: true });
+    window.addEventListener('resize', setTop); offs.push(function () { window.removeEventListener('resize', setTop); });
+  }
+  // Phone keyboard. Chrome on Android and Safari on iOS do not shrink the page when the on-screen
+  // keyboard opens: they shrink the visual viewport and pan it to the focused field, which slid the
+  // message box under the keys and the chat bar off the top. The Ask tab is pinned to the visual
+  // viewport instead (app.css, main.tab-ask:has(.ask)): its height and top follow visualViewport
+  // on every resize and scroll, so it always covers exactly the visible area, with the message box
+  // right above the keys. The keyboard counts as open when the viewport is well short of the
+  // tallest it has been (the tab bar then steps aside).
+  if (window.visualViewport && isTouch() && askEl && mainEl) {
+    var vv = window.visualViewport;
+    var onVV = function () {
+      var h = vv.height, t = vv.offsetTop;
+      ASK_VV.full = Math.max(ASK_VV.full || 0, h, window.innerHeight);
+      mainEl.style.setProperty('--vvh', h + 'px'); mainEl.style.setProperty('--vvt', t + 'px');
+      var a = document.querySelector('main.tab-ask .ask'), open = h < ASK_VV.full - 80;
+      if (a && open !== a.classList.contains('kb-open')) { a.classList.toggle('kb-open', open); askScroll(); }
+    };
+    var settle = function () { onVV(); setTimeout(onVV, 120); setTimeout(onVV, 450); };
+    var noScroll = function () { if (window.scrollY) window.scrollTo(0, 0); };
+    vv.addEventListener('resize', onVV); vv.addEventListener('scroll', onVV); window.addEventListener('scroll', noScroll);
+    q.addEventListener('focus', function () { settle(); setTimeout(askScroll, 300); });
+    q.addEventListener('blur', settle);
+    offs.push(function () { vv.removeEventListener('resize', onVV); vv.removeEventListener('scroll', onVV); window.removeEventListener('scroll', noScroll); });
+    onVV();
+  } else if (mainEl) { mainEl.style.removeProperty('--vvh'); mainEl.style.removeProperty('--vvt'); }
+  wireAsk.off = function () { offs.forEach(function (fn) { fn(); }); };
+}
+// after every redraw of the tab, full or patched: the folds, the typing label and the maths
+function askAfter() {
+  document.querySelectorAll('.ask-steps[data-askstep]').forEach(function (d) {
+    if (d.dataset.w) return; d.dataset.w = '1';
+    d.addEventListener('toggle', function () { (UI.askOpen = UI.askOpen || {})[d.dataset.askstep] = d.open; });
+  });
+  // While an answer is on its way the typing line says what is happening: the function reads the
+  // ledger through its tools and does the sums before the model writes, which takes longer than a
+  // plain reply, so the dots alone read as a hang.
+  clearInterval(askAfter.tk);
   if (UI.askBusy && document.querySelector('.typing-label')) {
     var t0 = UI.askStarted || Date.now(), stages = [[0, ''], [600, 'Reading your ledger'], [6000, 'Working out the numbers'], [14000, 'Writing the answer'], [30000, 'Still writing']];
     var tick = function () {
-      var el = document.querySelector('.typing-label'); if (!el) { clearInterval(wireAsk.tk); return; }
+      var el = document.querySelector('.typing-label'); if (!el) { clearInterval(askAfter.tk); return; }
       var age = Date.now() - t0, s = ''; stages.forEach(function (x) { if (age >= x[0]) s = x[1]; });
       // past 20 s the wait is counted, so a long answer never looks like a hang
       el.textContent = s + (age >= 20000 ? ' · ' + Math.round(age / 1000) + ' s' : '');
     };
-    wireAsk.tk = setInterval(tick, 1000); tick();
+    askAfter.tk = setInterval(tick, 1000); tick();
   }
-  // Phone keyboard. Chrome on Android and Safari on iOS do not shrink the page when the
-  // on-screen keyboard opens: they shrink the visual viewport and pan it to the focused field,
-  // which slid the compose bar under the keys and the chat header off the top. The chat is
-  // pinned to the visual viewport instead (app.css, main.tab-ask:has(.ask.in-chat)): its height
-  // and top offset follow visualViewport on every resize and scroll, so it always covers exactly
-  // the visible area, with the compose bar at the bottom edge above the keys. The keyboard counts
-  // as open when the viewport is well short of the tallest it has been (the tab bar steps aside).
-  if (wireAsk.off) { wireAsk.off(); wireAsk.off = null; }
-  // Desktop: the chat column scrolls inside itself (app.css, min-width 1024px); its height is the
-  // window minus the column's offset from the top, measured here and kept on resize.
-  var col = document.querySelector('.ask.in-chat .ask-main'), mainTop = document.querySelector('main');
-  if (wireAsk.rs) { window.removeEventListener('resize', wireAsk.rs); wireAsk.rs = null; }
-  if (col && mainTop && !isTouch()) {
-    var setTop = function () { mainTop.style.setProperty('--ask-top', Math.round(col.getBoundingClientRect().top + window.scrollY) + 'px'); askScroll(); };
-    setTop(); wireAsk.rs = setTop; window.addEventListener('resize', setTop);
-  } else if (mainTop) mainTop.style.removeProperty('--ask-top');
-  if (window.visualViewport && isTouch()) {
-    var vv = window.visualViewport, askEl = document.querySelector('.ask.in-chat'), mainEl = document.querySelector('main');
-    if (askEl && mainEl) {
-      var onVV = function () {
-        var h = vv.height, t = vv.offsetTop;
-        ASK_VV.full = Math.max(ASK_VV.full || 0, h, window.innerHeight);
-        mainEl.style.setProperty('--vvh', h + 'px'); mainEl.style.setProperty('--vvt', t + 'px');
-        var open = h < ASK_VV.full - 80;
-        if (open !== askEl.classList.contains('kb-open')) { askEl.classList.toggle('kb-open', open); askScroll(); }
-      };
-      var settle = function () { onVV(); setTimeout(onVV, 120); setTimeout(onVV, 450); };
-      var noScroll = function () { if (window.scrollY) window.scrollTo(0, 0); };
-      vv.addEventListener('resize', onVV); vv.addEventListener('scroll', onVV);
-      window.addEventListener('scroll', noScroll);
-      q.addEventListener('focus', function () { settle(); setTimeout(askScroll, 300); });
-      q.addEventListener('blur', settle);
-      wireAsk.off = function () { vv.removeEventListener('resize', onVV); vv.removeEventListener('scroll', onVV); window.removeEventListener('scroll', noScroll); };
-      onVV();
-    } else if (mainEl) { mainEl.style.removeProperty('--vvh'); mainEl.style.removeProperty('--vvt'); }
-  }
+  hydrateMath();
 }
-// the tallest the visual viewport has been with the chat open: the keyboard is open when it is well short of it
+// the tallest the visual viewport has been with the Ask tab open: the keyboard is open when it is well short of it
 var ASK_VV = { full: 0 };
 window.addEventListener('orientationchange', function () { ASK_VV.full = 0; });
-function askScroll() { requestAnimationFrame(function () { var msgs = document.querySelector('.ask-msgs'); if (msgs) { msgs.scrollTop = msgs.scrollHeight; } else { window.scrollTo(0, document.documentElement.scrollHeight); } }); }
+function askScroll() { requestAnimationFrame(function () { var sc = document.querySelector('.ask-scroll'); if (sc) sc.scrollTop = sc.scrollHeight; }); }
+// Rename in place: the chat's row becomes a text box; Enter or leaving it keeps the name, Escape doesn't.
+function askRename(id) {
+  var c = chatById(id), btn = document.querySelector('.ask-open[data-chat="' + id + '"]'); if (!c || !btn) return;
+  var inp = document.createElement('input'), done = false;
+  inp.className = 'ask-ren'; inp.value = c.title || ''; inp.maxLength = 80; inp.setAttribute('aria-label', 'Chat name');
+  btn.closest('.ask-row').classList.add('editing'); btn.replaceWith(inp); inp.focus(); inp.select();
+  function commit(save) {
+    if (done) return; done = true;
+    var v = inp.value.trim(); if (save && v && v !== c.title) { c.title = v; mark('chats'); }
+    if (askPatch.last) askPatch.last.side = null; inp.blur(); render();
+  }
+  inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); commit(true); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); commit(false); } });
+  inp.addEventListener('blur', function () { commit(true); });
+}
+// Copy an answer as plain text (no markdown stars), with a moment of "Copied" on the button
+function askCopy(text, btn) {
+  var txt = String(text || '').replace(/\*\*(.+?)\*\*/g, '$1').replace(/^#{1,6}\s+/gm, '');
+  var ok = function () { btn.innerHTML = ASKI.check + '<span>Copied</span>'; clearTimeout(btn.tm); btn.tm = setTimeout(function () { btn.innerHTML = ASKI.copy + '<span>Copy</span>'; }, 1500); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(ok, function () { toast('Couldn’t copy that'); });
+  else toast('Couldn’t copy that');
+}
 function askSend(text) {
   var q = String(text || '').trim(); if (!q || UI.askBusy) return;
   if (!aiReady()) { toast('Turn on the AI assistant first'); return; }
   var now = new Date().toISOString(), c = UI.chatId && chatById(UI.chatId);
-  if (!c) { c = { id: uid(), title: q.length > 52 ? q.slice(0, 51) + '\u2026' : q, t: now, msgs: [] }; S.chats.push(c); UI.chatId = c.id; }
+  if (!c) { c = { id: uid(), title: q.length > 52 ? q.slice(0, 51) + '…' : q, t: now, msgs: [] }; S.chats.push(c); UI.chatId = c.id; }
   var hist = (c.msgs || []).filter(function (m) { return m.role === 'user' || m.role === 'assistant'; }).slice(-10).map(function (m) { return { role: m.role, content: m.content + chgRecap(m) }; });
   c.msgs.push({ role: 'user', content: q, at: now }); c.u = now;
   UI.askDraft = ''; UI.askBusy = c.id; UI.askStarted = Date.now();
+  // the message box stays (askPatch), so it is emptied here
+  var box = $('#askq'); if (box) { box.value = ''; askFit(box); }
   // each request carries a number; askStop() bumps it, so a stopped request's answer is ignored
   var req = UI.askReq = (UI.askReq || 0) + 1, ac = window.AbortController ? new AbortController() : null;
   UI.askAbort = ac;
   // keep the history bounded: 50 conversations, 60 messages each
   S.chats = chatList().slice(0, 50); S.chats.forEach(function (x) { if (x.msgs && x.msgs.length > 60) x.msgs = x.msgs.slice(-60); });
-  mark('chats'); render(); askScroll();
+  mark('chats'); render(); askScroll(); if (box && !isTouch()) box.focus();
   // aiContext() runs inside the chain, so if it throws the error lands in the chat and Ask isn't left busy
   Promise.resolve().then(function () { return aiCall({ action: 'ask', question: q, context: aiContext(), history: hist }, ac && ac.signal); }).then(function (r) {
     if (UI.askReq !== req) return;
@@ -1528,7 +1659,7 @@ function askSend(text) {
   }).then(function () {
     if (UI.askReq !== req) return;
     UI.askBusy = null; UI.askAbort = null; c.u = new Date().toISOString(); mark('chats');
-    if (UI.tab === 'ask') { render(); askScroll(); var t = $('#askq'); if (t && !isTouch()) t.focus(); }
+    if (UI.tab === 'ask') { render(); if (UI.chatId === c.id) askScroll(); }
   });
 }
 // Proposed changes from an answer. Each keeps what the entry looked like when it was proposed
@@ -1561,10 +1692,10 @@ function chgText(c) {
 }
 // What the answer was worked out from: each lookup and sum the function made, folded away under
 // the reply. Every figure in the answer came from one of these, never from the model's own adding.
-function askSteps(m) {
+function askSteps(m, key) {
   if (!m.steps || !m.steps.length) return '';
-  var n = m.steps.length;
-  return '<details class="ask-steps"><summary>Worked out from ' + n + ' lookup' + (n === 1 ? '' : 's') + '</summary><ul>' + m.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></details>';
+  var n = m.steps.length, open = key && UI.askOpen && UI.askOpen[key];
+  return '<details class="ask-steps"' + (key ? ' data-askstep="' + esc(key) + '"' : '') + (open ? ' open' : '') + '><summary>Worked out from ' + n + ' lookup' + (n === 1 ? '' : 's') + '</summary><ul>' + m.steps.map(function (s) { return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></details>';
 }
 // A delete is never one more Apply: it gets its own rose Delete button, and "Apply all" leaves
 // deletes out, so removing a real entry is always a deliberate tap on its own.
@@ -2565,18 +2696,21 @@ function render() {
   }
   // Startup redraws several times (saved copy, cloud data, sync, rates, the AI check). Only
   // arriving somewhere new replays entrance animations; a redraw that changes nothing is skipped.
-  var viewKey = [UI.tab, UI.month, UI.insView, UI.acct, UI.chatId].join('|'), arrive = viewKey !== render.key, html = v + nav();
+  // (a chat switch on Ask is not an arrival: askPatch swaps the thread and keeps the message box)
+  var viewKey = [UI.tab, UI.month, UI.insView, UI.acct].join('|'), arrive = viewKey !== render.key, html = v + nav();
+  var syncText = store.mode === 'cloud' ? 'Synced' : store.mode === 'local' ? 'On this device' : store.mode === 'cloud-offline' ? 'Offline, will sync' : store.mode === 'error' ? 'Sync problem' : '';
   render.key = viewKey; render.arrive = arrive;
-  if (!arrive && html === render.html && !failed) { setSync(store.mode === 'cloud' ? 'Synced' : store.mode === 'local' ? 'On this device' : store.mode === 'cloud-offline' ? 'Offline, will sync' : store.mode === 'error' ? 'Sync problem' : ''); return; }
+  if (!arrive && html === render.html && !failed) { setSync(syncText); return; }
+  if (!arrive && !failed && UI.tab === 'ask' && askPatch(v)) { render.html = html; setSync(syncText); askAfter(); return; }
   render.html = html;
   $('#app').innerHTML = '<main class="tab-' + UI.tab + (arrive ? ' arrive' : '') + '">' + v + '</main>' + nav();
   if (failed) { setSync(store.mode === 'cloud' ? 'Synced' : ''); return; }
-  setSync(store.mode === 'cloud' ? 'Synced' : store.mode === 'local' ? 'On this device' : store.mode === 'cloud-offline' ? 'Offline, will sync' : store.mode === 'error' ? 'Sync problem' : '');
+  setSync(syncText);
   document.querySelectorAll('[data-fold]').forEach(function (d) {
     d.addEventListener('toggle', function () { UI.folds[d.dataset.fold] = d.open; });
   });
   if (UI.tab === 'insights') drawInsights();
-  if (UI.tab === 'ask') { wireAsk(); hydrateMath(); }
+  if (UI.tab === 'ask') { wireAsk(); askAfter(); } else if (wireAsk.off) { wireAsk.off(); wireAsk.off = null; }
   var cu = arrive && document.querySelector('[data-count]');
   if (cu && window.requestAnimationFrame && !(window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) {
     var target = +cu.dataset.count, t0 = performance.now();
@@ -6291,7 +6425,7 @@ function onClick(e) {
   if (t.closest('[data-close]')) { closeSheet(); return; }
   var b;
   if ((b = t.closest('[data-tab][data-acct]'))) { UI.acct = b.dataset.acct; }
-  if ((b = t.closest('[data-tab]'))) { UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
+  if ((b = t.closest('[data-tab]'))) { if (UI.askDrawer) { UI.askDrawer = false; if (history.state && history.state.askDrawer) history.back(); } UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-gapfind]'))) { gapSheet(b.dataset.gapfind, +b.dataset.gapamt); return; }
   if ((b = t.closest('[data-countgap]'))) { countGapSheet(null); return; }
@@ -6306,7 +6440,9 @@ function onClick(e) {
   if ((b = t.closest('[data-lens]'))) { UI.lensTag = b.dataset.lens; render(); return; }
   if ((b = t.closest('[data-tagsheet]'))) { tagSheet(b.dataset.tagsheet); return; }
   if ((b = t.closest('[data-askq]'))) { askSend(b.dataset.askq); return; }
-  if ((b = t.closest('[data-chat]'))) { UI.chatId = b.dataset.chat; UI.askDraft = ''; render(); return; }
+  if ((b = t.closest('[data-chat]'))) { UI.chatId = b.dataset.chat; if (UI.askDrawer) askDrawer(false); else render(); return; }
+  if ((b = t.closest('[data-chatren]'))) { askRename(b.dataset.chatren); return; }
+  if ((b = t.closest('[data-askcopy]'))) { var cpc = chatById(UI.chatId), cpm = cpc && cpc.msgs[+b.dataset.askcopy]; if (cpm) askCopy(cpm.content, b); return; }
   if ((b = t.closest('[data-chg]'))) { var chp = b.dataset.chg.split(':'); chgRun(+chp[0], [+chp[1]]); return; }
   if ((b = t.closest('[data-chgall]'))) { // every open change except deletes, which are one tap each
     var am = UI.chatId && chatById(UI.chatId), amm = am && am.msgs[+b.dataset.chgall];
@@ -6385,8 +6521,9 @@ function onClick(e) {
     else if (a === 'suggest') suggestSheet();
     else if (a === 'applock') lockSheet();
     else if (a === 'convert') convertSheet();
-    else if (a === 'chatnew') { UI.chatId = null; UI.askDraft = ''; render(); var aq = $('#askq'); if (aq) aq.focus(); }
-    else if (a === 'chatback') { UI.chatId = null; render(); window.scrollTo(0, 0); }
+    else if (a === 'chatnew') { UI.chatId = null; if (UI.askDrawer) askDrawer(false); else render(); var aq = $('#askq'); if (aq && !isTouch()) aq.focus(); }
+    else if (a === 'askside') { askSideSet(!askSideOn()); render(); }
+    else if (a === 'askdrawer') askDrawer(!UI.askDrawer);
     else if (a === 'ai') aiSheet();
     else if (a === 'next') { UI.month = addMonth(UI.month, 1); render(); }
     else if (a === 'add-tx') txSheet();
