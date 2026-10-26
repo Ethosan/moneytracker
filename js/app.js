@@ -1300,17 +1300,26 @@ function mdRows(head, body) {
     return '<div class="mdrow' + (sum ? ' sum' : '') + '"><div class="l"><b>' + key + '</b>' + (more.length ? '<span>' + more.join(' · ') + '</span>' : '') + '</div><div class="r">' + (r[amt] || '') + '</div></div>';
   }).join('') + '</div>';
 }
-// Stop waiting for an answer: the request is abandoned (aborted where the client allows), the
-// question goes back into the box, and a chat that held nothing else is dropped.
-function askStop() {
-  var c = UI.askBusy && chatById(UI.askBusy); if (!c) return;
+// Forget the answer on its way: the request is abandoned (aborted where the client allows) and
+// its number bumped, so whatever comes back is ignored.
+function askCancel() {
   UI.askReq = (UI.askReq || 0) + 1;
   if (UI.askAbort) { try { UI.askAbort.abort(); } catch (e) { } UI.askAbort = null; }
-  var last = c.msgs[c.msgs.length - 1];
-  if (last && last.role === 'user') { c.msgs.pop(); UI.askDraft = last.content; }
   UI.askBusy = null;
-  if (!c.msgs.length) { S.chats = S.chats.filter(function (x) { return x.id !== c.id; }); if (UI.chatId === c.id) UI.chatId = null; }
-  mark('chats'); render();
+}
+// Stop waiting for an answer: the question goes back into the box, and a chat that held nothing
+// else is dropped. It still works when the waiting chat has been deleted meanwhile.
+function askStop() {
+  if (!UI.askBusy) return;
+  var c = chatById(UI.askBusy);
+  askCancel();
+  if (c) {
+    var last = c.msgs[c.msgs.length - 1];
+    if (last && last.role === 'user') { c.msgs.pop(); UI.askDraft = last.content; }
+    if (!c.msgs.length) { S.chats = S.chats.filter(function (x) { return x.id !== c.id; }); if (UI.chatId === c.id) UI.chatId = null; }
+    mark('chats');
+  }
+  render();
   var q = $('#askq'); if (q) { q.value = UI.askDraft || ''; askFit(q); var sb = document.querySelector('.ask-send[type=submit]'); if (sb) sb.disabled = !q.value.trim(); if (!isTouch()) q.focus(); }
 }
 function chatList() { return (S.chats || []).slice().sort(function (a, b) { return (b.u || b.t || '') > (a.u || a.t || '') ? 1 : -1; }); }
@@ -1498,7 +1507,7 @@ function askThread(cur) {
 }
 // while an answer is on its way the send button is Stop (askStop)
 function askSendBtn() {
-  return UI.askBusy
+  return UI.askBusy && UI.askBusy === UI.chatId
     ? '<button class="ask-send ask-stop" type="button" data-askstop="1" aria-label="Stop waiting for this answer" title="Stop">' + ASKI.stop + '</button>'
     : '<button class="ask-send" type="submit" aria-label="Send"' + (String(UI.askDraft || '').trim() ? '' : ' disabled') + '>' + ASKI.up + '</button>';
 }
@@ -1610,7 +1619,8 @@ window.addEventListener('orientationchange', function () { ASK_VV.full = 0; });
 function askScroll() { requestAnimationFrame(function () { var sc = document.querySelector('.ask-scroll'); if (sc) sc.scrollTop = sc.scrollHeight; }); }
 // Rename in place: the chat's row becomes a text box; Enter or leaving it keeps the name, Escape doesn't.
 function askRename(id) {
-  var c = chatById(id), btn = document.querySelector('.ask-open[data-chat="' + id + '"]'); if (!c || !btn) return;
+  var c = chatById(id), btn = [].filter.call(document.querySelectorAll('.ask-open'), function (b) { return b.dataset.chat === id; })[0];
+  if (!c || !btn) return;
   var inp = document.createElement('input'), done = false;
   inp.className = 'ask-ren'; inp.value = c.title || ''; inp.maxLength = 80; inp.setAttribute('aria-label', 'Chat name');
   btn.closest('.ask-row').classList.add('editing'); btn.replaceWith(inp); inp.focus(); inp.select();
@@ -1630,7 +1640,9 @@ function askCopy(text, btn) {
   else toast('Couldn’t copy that');
 }
 function askSend(text) {
-  var q = String(text || '').trim(); if (!q || UI.askBusy) return;
+  var q = String(text || '').trim(); if (!q) return;
+  // one question at a time: the answer on its way belongs to another chat
+  if (UI.askBusy) { var bc = chatById(UI.askBusy); toast('One question at a time: still answering ' + (bc ? '\u201c' + (bc.title || 'a chat') + '\u201d' : 'the last one')); return; }
   if (!aiReady()) { toast('Turn on the AI assistant first'); return; }
   var now = new Date().toISOString(), c = UI.chatId && chatById(UI.chatId);
   if (!c) { c = { id: uid(), title: q.length > 52 ? q.slice(0, 51) + '…' : q, t: now, msgs: [] }; S.chats.push(c); UI.chatId = c.id; }
@@ -1642,8 +1654,9 @@ function askSend(text) {
   // each request carries a number; askStop() bumps it, so a stopped request's answer is ignored
   var req = UI.askReq = (UI.askReq || 0) + 1, ac = window.AbortController ? new AbortController() : null;
   UI.askAbort = ac;
-  // keep the history bounded: 50 conversations, 60 messages each
-  S.chats = chatList().slice(0, 50); S.chats.forEach(function (x) { if (x.msgs && x.msgs.length > 60) x.msgs = x.msgs.slice(-60); });
+  // keep the history bounded: 50 conversations, 60 messages each (this chat's own once its
+  // answer is in, so a question that is stopped costs it nothing)
+  S.chats = chatList().slice(0, 50); S.chats.forEach(function (x) { if (x !== c && x.msgs && x.msgs.length > 60) x.msgs = x.msgs.slice(-60); });
   mark('chats'); render(); askScroll(); if (box && !isTouch()) box.focus();
   // aiContext() runs inside the chain, so if it throws the error lands in the chat and Ask isn't left busy
   Promise.resolve().then(function () { return aiCall({ action: 'ask', question: q, context: aiContext(), history: hist }, ac && ac.signal); }).then(function (r) {
@@ -1659,7 +1672,9 @@ function askSend(text) {
     c.msgs.push({ role: 'error', content: String(e.message || e), at: new Date().toISOString() });
   }).then(function () {
     if (UI.askReq !== req) return;
-    UI.askBusy = null; UI.askAbort = null; c.u = new Date().toISOString(); mark('chats');
+    UI.askBusy = null; UI.askAbort = null; c.u = new Date().toISOString();
+    if (c.msgs.length > 60) c.msgs = c.msgs.slice(-60);
+    mark('chats');
     if (UI.tab === 'ask') { render(); if (UI.chatId === c.id) askScroll(); }
   });
 }
@@ -6458,6 +6473,7 @@ function onClick(e) {
   }
   if ((b = t.closest('[data-chatdel]'))) {
     var gone = chatById(b.dataset.chatdel); if (!gone) return;
+    if (UI.askBusy === gone.id) askCancel();
     S.chats = S.chats.filter(function (c) { return c.id !== gone.id; }); if (UI.chatId === gone.id) UI.chatId = null;
     mark('chats'); render(); toastUndo('Deleted \u201c' + (gone.title || 'conversation') + '\u201d'); return;
   }
