@@ -105,8 +105,9 @@ exactly as listed, emoji included, and match the type (spending categories for e
 20 changes. Leave the block out entirely when there is nothing to change.`;
 
 // Mistral unless AI_PROVIDER says anthropic or only the Anthropic key is set. The Ask model is
-// Mistral Medium (1.6.2): Small got every sum right through the tools but not the reasoning (it
-// took "22% of income" from the totals as the subscriptions share). Small stays the fallback.
+// Mistral Large (Ethan's call, 26 Oct 2026): Small got every sum right through the tools but not
+// the reasoning (it took "22% of income" from the totals as the subscriptions share). Small stays
+// the fallback if Large is refused.
 // The ANTHROPIC_API_KEY stored on 2026-10-08 is rejected by the API as invalid; with a working
 // key and AI_PROVIDER=anthropic, Claude answers and Mistral is the fallback if Claude fails.
 function provider() {
@@ -115,7 +116,7 @@ function provider() {
   return "mistral";
 }
 const MISTRAL_FALLBACK = "mistral-small-latest";
-const mistralModel = () => Deno.env.get("MISTRAL_MODEL") || "mistral-medium-latest";
+const mistralModel = () => Deno.env.get("MISTRAL_MODEL") || "mistral-large-latest";
 const claudeModel = () => Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5-5";
 const needKey = (name: string) => { const k = Deno.env.get(name); if (!k) throw new Error(`${name} is not set in the function's secrets.`); return k; };
 // on a policy decline the API retries on a fallback model inside the same call
