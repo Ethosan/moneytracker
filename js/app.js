@@ -1512,7 +1512,8 @@ function askPatch(v) {
   var tpl = document.createElement('template'); tpl.innerHTML = v;
   var nr = tpl.content.querySelector('.ask'); if (!nr) return false;
   var last = askPatch.last || (askPatch.last = {}), moved = root.dataset.cur !== nr.dataset.cur;
-  root.className = nr.className; root.dataset.cur = nr.dataset.cur;
+  // kb-open belongs to the keyboard watcher (wireAsk), not to the markup
+  root.className = nr.className + (root.classList.contains('kb-open') ? ' kb-open' : ''); root.dataset.cur = nr.dataset.cur;
   ['side', 'bar', 'thread', 'send'].forEach(function (k) {
     var a = root.querySelector('[data-region="' + k + '"]'), b = nr.querySelector('[data-region="' + k + '"]'); if (!a || !b) return;
     var html = b.innerHTML; if (last[k] === html) return;

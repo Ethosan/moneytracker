@@ -908,8 +908,9 @@ body:has(main.tab-ask .ask) #fbw-root .fbw-btn{display:none}
   body:has(main.tab-ask .ask) .toast,body:has(main.tab-ask .ask) .toast[popover]{bottom:calc(200px + env(safe-area-inset-bottom,0px))}
   /* the drawer: over everything, the tab bar included, while it is open */
   .ask-side{position:fixed;top:0;bottom:0;left:0;z-index:41;width:min(84vw,340px);padding-top:env(safe-area-inset-top,0px);
-    transform:translateX(-102%);transition:transform .26s cubic-bezier(.32,.72,0,1);box-shadow:0 0 40px rgba(10,12,17,.18)}
-  .ask.drawer-on .ask-side{transform:none}
+    transform:translateX(-102%);transition:transform .26s cubic-bezier(.32,.72,0,1)}
+  /* the shadow only while open: closed, it showed as a grey band down the left edge */
+  .ask.drawer-on .ask-side{transform:none;box-shadow:0 0 40px rgba(10,12,17,.18)}
   .ask-scrim{position:fixed;inset:0;z-index:40;background:rgba(10,12,17,.4);opacity:0;pointer-events:none;transition:opacity .2s}
   .ask.drawer-on .ask-scrim{opacity:1;pointer-events:auto}
   main.tab-ask:has(.ask.drawer-on){z-index:12}
