@@ -88,6 +88,8 @@ import { numbersIn, unknownNumbers } from "../supabase/functions/ledger-ai/agent
 
 test("numbersIn picks figures and skips dates, times, years, small counts and ids", () => {
   assert.deepEqual(numbersIn("On 2026-10-24 at 9:30 you spent $2,827.41 (25 rows, 3 months) in 2026; id a1b2c3 x5; 59% of $569.18"), [2827.41, 59, 569.18]);
+  // a small whole number is a count or a day, unless it is written as money
+  assert.deepEqual(numbersIn("20 rides at about $20 each, $ 7 tip"), [20, 7]);
 });
 
 test("unknownNumbers allows rounding to the written decimals and sign changes, flags the rest", () => {

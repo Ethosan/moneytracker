@@ -42,12 +42,13 @@ function clip(s: string) { return s.length > RESULT_CHARS ? s.slice(0, RESULT_CH
 export function numbersIn(text: string): number[] {
   const s = String(text || "").replace(/\d{4}-\d{2}(-\d{2})?/g, " ").replace(/\b\d{1,2}:\d{2}\b/g, " ");
   const out: number[] = [];
-  const re = /(?<![A-Za-z0-9_.])(\d[\d,]*(?:\.\d+)?)(?![A-Za-z0-9_])/g;
+  const re = /(?<![A-Za-z0-9_.])(\$\s?)?(\d[\d,]*(?:\.\d+)?)(?![A-Za-z0-9_])/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(s))) {
-    const v = Number(m[1].replace(/,/g, ""));
+    const v = Number(m[2].replace(/,/g, ""));
     if (!Number.isFinite(v)) continue;
-    if (Number.isInteger(v) && (v <= 31 || (v >= 1900 && v <= 2100))) continue;
+    // "$20" is money even when small; a bare 20 is a count or a day
+    if (!m[1] && Number.isInteger(v) && (v <= 31 || (v >= 1900 && v <= 2100))) continue;
     out.push(v);
   }
   return out;
