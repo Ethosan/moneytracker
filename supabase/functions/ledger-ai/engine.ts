@@ -63,6 +63,7 @@ export function whenMade(x: any): number | null {
 // time on either side the day's entries count as before (the old end-of-day rule).
 export function afterCount(c: any, e: any): boolean {
   if (!c || !e || !e.d || !c.d) return false;
+  if (e.gapOf && e.gapOf === c.id) return false; // logged by the gap finder for this count: inside its stretch
   if (e.d > c.d) return true;
   if (e.d < c.d) return false;
   const tc = whenMade(c), te = whenMade(e);

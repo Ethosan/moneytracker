@@ -61,3 +61,10 @@ test('the balance after the count: counted minus what was paid after it, never m
   const since = flows.filter((f) => D.afterCount(count, f)).reduce((n, f) => n + f.amt, 0);
   assert.equal(2500 + since, 1285);
 });
+
+test('an entry the gap finder logged for a count stays inside that count, even though it was saved after it', () => {
+  const gap = { id: idAt(T('14:31')), d: DAY, gapOf: count.id, amt: -100 };
+  assert.equal(D.afterCount(count, gap), false);
+  assert.equal(D.afterCount({ id: 'other', d: DAY }, gap), false, 'a different count on the same day: no time on it, old rule');
+  assert.equal(D.afterCount({ id: idAt(T('10:00')), d: DAY }, gap), true, 'a different count with a time: the moment decides');
+});

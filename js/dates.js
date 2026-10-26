@@ -62,6 +62,8 @@ function whenMade(x) {
 // side the day's entries count as before (the old end-of-day rule).
 function afterCount(c, e) {
   if (!c || !e || !e.d || !c.d) return false;
+  // an entry the gap finder logged for this count belongs inside its stretch, whenever it was saved
+  if (e.gapOf && e.gapOf === c.id) return false;
   if (e.d > c.d) return true;
   if (e.d < c.d) return false;
   var tc = whenMade(c), te = whenMade(e);

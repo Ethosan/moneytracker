@@ -80,3 +80,8 @@ test("balance_counts sorts two counts on one day by their moment", () => {
   assert.equal(r.counts[0].same_day_entries.find((e) => e.note === "Hotel experience").side, "after");
   assert.equal(r.counts[1].same_day_entries.find((e) => e.note === "Hotel experience").side, "before");
 });
+
+test("a gap entry logged for a count is inside that count, whenever it was saved", () => {
+  assert.equal(afterCount(count, { d: DAY, id: idAt(T("14:31")), gapOf: count.id }), false);
+  assert.equal(afterCount(count, { d: DAY, id: idAt(T("14:31")), gapOf: "someother" }), true);
+});

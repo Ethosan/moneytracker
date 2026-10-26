@@ -22,7 +22,7 @@ function countLabel(c) { var t = c && whenMade(c); return dayLabel(c.d) + (t != 
 // The same for the assistant: "2026-10-26 at 14:32"
 function countStamp(c) { var t = c && whenMade(c); return c.d + (t != null ? ' at ' + new Date(t).toTimeString().slice(0, 5) : ''); }
 // Is wallet flow or move f (a day plus the entry it came from) after count c?
-function flowAfter(c, f) { return afterCount(c, { d: f.d, id: f.ref && f.ref.id, at: f.ref && f.ref.at }); }
+function flowAfter(c, f) { var r = f.ref || {}; return afterCount(c, { d: f.d, id: r.id, at: r.at, gapOf: r.gapOf }); }
 // A new entry dated a count's day gets a time just before that count, so it sits inside the count's stretch.
 function stampBefore(t, c) { var at = besideCount(c, -1); if (at) t.at = at; return t; }
 // Put an entry on the asked side ('before' or 'after') of the balance count made on its day, if there was one.
@@ -4795,7 +4795,7 @@ function markMove(m) { if (m.kind === 'tx') markMonth(monthOf(m.ref.d)); else ma
 function pushTx(t) { var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m); }
 function applyGapFix(G, n, f) {
   if (f.kind === 'link' || f.kind === 'move') { f.m.ref.acct = n; markMove(f.m); return (f.kind === 'link' ? 'Linked to ' : 'Moved to ') + n; }
-  if (f.kind === 'xfer') { pushTx(stampBefore({ id: uid(), d: G.check.d, t: 'xfer', amt: r2(f.amt), from: f.from, to: f.to, note: 'Found from a balance count', src: 'app' }, G.check)); return 'Transfer logged'; }
+  if (f.kind === 'xfer') { pushTx(stampBefore({ id: uid(), d: G.check.d, t: 'xfer', amt: r2(f.amt), from: f.from, to: f.to, note: 'Found from a balance count', src: 'app', gapOf: G.check.id }, G.check)); return 'Transfer logged'; }
   if (f.kind === 'dup') { removeTx(f.m.ref); return 'Removed the copy'; }
   if (f.kind === 'date') { moveEntryDate(f.m, f.to, f.at); return 'Moved to ' + dayLabel(f.to); }
   if (f.kind === 'side') { f.m.ref.at = f.at; markMove(f.m); return 'Now counted as ' + (f.dir > 0 ? 'after' : 'before') + ' the count'; }
