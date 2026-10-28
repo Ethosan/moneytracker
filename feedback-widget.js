@@ -58,6 +58,7 @@
     ".fbw-backdrop.fbw-open{opacity:1;pointer-events:auto}",
     ".fbw-modal{position:fixed;z-index:2147483647;top:50%;left:50%;width:calc(100% - 32px);max-width:440px;max-height:calc(100% - 48px);overflow-y:auto;background:#fff;color:#1a1a1a;border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.15);transform:translate(-50%,-50%) scale(.92);opacity:0;pointer-events:none;transition:transform .22s cubic-bezier(.16,1,.3,1),opacity .18s ease-out}",
     ".fbw-modal.fbw-open{transform:translate(-50%,-50%) scale(1);opacity:1;pointer-events:auto}",
+    ".fbw-modal:focus{outline:none}",
     "@media (prefers-color-scheme:dark){.fbw-modal{background:#1c1c1e;color:#f0f0f0}}",
     ".fbw-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 0}",
     ".fbw-title{font-size:17px;font-weight:700;letter-spacing:-.01em}",
@@ -110,6 +111,8 @@
   modal.setAttribute("role", "dialog");
   modal.setAttribute("aria-modal", "true");
   modal.setAttribute("aria-labelledby", "fbw-title");
+  // focusable itself, so a touch screen can open the form without putting the cursor in a field
+  modal.tabIndex = -1;
 
   var isOpen = false;
   var lastFocus = null;
@@ -180,7 +183,10 @@
     backdrop.classList.add("fbw-open");
     modal.classList.add("fbw-open");
     btn.setAttribute("aria-expanded", "true");
-    setTimeout(function () { textarea.focus(); }, 50);
+    // a mouse and keyboard start in the message; a touch screen focuses the form itself, so the
+    // on-screen keyboard waits for a tap in the field instead of covering the form as it opens
+    var touch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
+    setTimeout(function () { (touch ? modal : textarea).focus({ preventScroll: true }); }, 50);
   }
 
   function close() {

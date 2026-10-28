@@ -858,8 +858,8 @@ details.morepat>summary span{flex-basis:100%;font-size:13px;font-weight:400;colo
 .mdrow.sum{border-top:1px solid var(--ink);margin-top:2px}.mdrow.sum .l b{font-weight:700}
 .latex{color:inherit}
 .latex.disp{display:block;margin:2px 0 8px;overflow-x:auto}
-/* the feedback widget's floating button would sit on the Send button */
-body:has(main.tab-ask .ask) #fbw-root .fbw-btn{display:none}
+/* the feedback widget's floating button covered the screen; Settings → Help opens the form instead */
+#fbw-root .fbw-btn{display:none}
 @media (hover:hover) and (pointer:fine){
   .ask-ib:hover{background:var(--sunk);color:var(--ink)}
   .ask-ib.del:hover{background:var(--loss-soft);color:var(--loss)}

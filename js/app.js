@@ -1969,6 +1969,7 @@ var GICON = {
   chart: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 7h6v6" /> <path d="m22 7-8.5 8.5-5-5L2 17" /></svg></span>',
   bulb: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" /> <path d="M9 18h6" /> <path d="M10 22h4" /></svg></span>',
   ask: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092 10 10 0 1 0-4.777-4.719" /></svg></span>',
+  chat: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg></span>',
   lock: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /> <path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg></span>',
   download: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3" /> <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /> <path d="m7 10 5 5 5-5" /></svg></span>',
   rotate: '<span class="gicon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /> <path d="M3 3v5h5" /></svg></span>',
@@ -2642,6 +2643,7 @@ function renderMore() {
   var h = '<header class="top"><h1>Settings</h1>' + hdRight() + '</header>';
   h += '<section class="blk"><h2>Help</h2><div class="panel">' +
     '<button class="row" data-act="help">' + GICON.book + '<div class="l"><b>Guide and welcome tour</b><span>How everything works, step by step</span></div><div class="r">›</div></button>' +
+    '<button class="row" data-act="feedback">' + GICON.chat + '<div class="l"><b>Send feedback</b><span>A bug, an idea, anything</span></div><div class="r">›</div></button>' +
     '</div></section>';
   h += '<section class="blk"><h2>Import and export</h2><div class="panel">' +
     '<button class="row" data-act="stmt"><div class="l"><b>Grab or bank statement</b><span>Excel, CSV, PDF or pasted text, including PayLater</span></div><div class="r">›</div></button>' +
@@ -6534,6 +6536,8 @@ function onClick(e) {
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
     else if (a === 'help') helpSheet();
+    // the shared feedback widget's own button is hidden (app.css), so open it through that button
+    else if (a === 'feedback') { var fbw = $('#fbw-root .fbw-btn'); if (fbw) fbw.click(); else toast('Feedback didn’t load. Check your connection and reload.'); }
     else if (a === 'tour') { closeSheet(); tourSheet(0); }
     else if (a === 'suggest') suggestSheet();
     else if (a === 'applock') lockSheet();
