@@ -1,6 +1,6 @@
 // Keeps the app opening offline. Pages and scripts: try the network, fall back to the cached copy.
 // The import and maths libraries in vendor/ are large and rarely used, so they are cached on first use instead.
-const CACHE = 'ledger-1.6.14'; // rewritten by scripts/bump-version.mjs on every release
+const CACHE = 'ledger-1.6.15'; // rewritten by scripts/bump-version.mjs on every release
 const SHELL = ['./', './index.html', './app.css', './js/mm-import.js', './js/dates.js', './js/google-signin.js', './js/app.js', './config.js', './vendor/supabase-js.min.js', './vendor/591.supabase.js', './vendor/chart.umd.min.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
   './icons/icon-512-maskable.png', './icons/apple-touch-icon.png',
   './fonts/Geist-Regular.woff2', './fonts/Geist-Medium.woff2', './fonts/Geist-SemiBold.woff2', './fonts/Geist-Bold.woff2'];

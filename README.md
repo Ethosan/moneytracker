@@ -26,7 +26,7 @@ A personal finance tracker that installs to your phone like a native app. Track 
 | **Hosting** | Cloudflare Pages, connected to this repository; every push to `main` deploys. No build step: the build command copies the app files into `dist/` (see `MIGRATION.md`) |
 | **Data** | Supabase (Postgres, Auth, row level security) plus the `ledger-ai` Edge Function |
 | **Run locally** | Serve the repository root with any static server, for example `npx serve .`, then open the printed address. `npm test` runs the tests. |
-| **Source** | [gitlab.com/eatentam/moneytracker](https://gitlab.com/eatentam/moneytracker) (moved from GitHub on 17 Oct 2026) |
+| **Source** | [gitlab.com/eatentam/moneytracker](https://gitlab.com/eatentam/moneytracker) (on GitLab since 17 Oct 2026). Read-only mirror: [github.com/Ethosan/moneytracker](https://github.com/Ethosan/moneytracker), which GitLab updates on every push |
 
 Settings (names only; the values live in `config.js` and Supabase secrets):
 
