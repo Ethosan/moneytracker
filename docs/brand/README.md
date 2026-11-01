@@ -9,3 +9,12 @@ The look 20bucks already has, read from the live app at v1.4.1 (cool grey · one
 | Type | Geist 400–700, self-hosted in `fonts/`, tabular figures |
 
 Nothing in this folder is new artwork: every colour, font and file it names is already in the app.
+
+## Repo avatar and social preview
+
+| File | Where it's used |
+|---|---|
+| `docs/brand/avatar.png` | GitLab project avatar (Settings > General), 512×512 |
+| `docs/brand/social-preview.png` | GitHub social preview (github.com/Ethosan/moneytracker, Settings > Social preview), 1280×640 |
+
+Every one of these repos follows the same spec: a 512×512 PNG avatar with the project's own mark on its own background to every edge, since GitLab and GitHub round it themselves; and, for repos mirrored to GitHub, a 1280×640 social preview with the avatar tile, the name and the repo description, no URL. Both are made from the mark, not new artwork.
