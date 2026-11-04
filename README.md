@@ -64,6 +64,7 @@ Phone / browser ── static files (Cloudflare Pages) ── service worker kee
 | `js/dates.js` | Date helpers (month-end rules, statement date parsing) |
 | `js/mm-import.js` | Money Manager import mapper |
 | `js/google-signin.js` | Google sign-in button |
+| `js/whatsnew.js` | The release log behind the small "What's new" link at the foot of Settings |
 | `supabase/schema.sql` | Tables and row level security policies |
 | `supabase/functions/ledger-ai/` | The AI assistant's Edge Function; it holds the API key |
 | `sw.js` | Offline cache |
@@ -72,6 +73,8 @@ Phone / browser ── static files (Cloudflare Pages) ── service worker kee
 | `vendor/` | Third-party libraries, served locally: sign-in, charts, spreadsheet and PDF import, maths |
 | `tests/` | Unit tests (`npm test`) |
 | `docs/screenshots/` | The screenshots above |
+
+What's new: `js/whatsnew.js` lists every release, newest first, in plain words for users. Every feature release adds an entry at the top; fixes go in as one "Bug fixes and polish." line. It opens from the version link at the foot of Settings and is never shown unasked.
 
 The browser only ever holds the public anon key. Every row is locked to its owner by row level security, and the AI provider's key lives in Supabase as a secret, never in this repository.
 

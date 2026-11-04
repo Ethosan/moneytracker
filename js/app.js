@@ -2676,7 +2676,19 @@ function renderMore() {
     (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="signout"><div class="l"><b>Sign out</b><span>' + esc(store.email || '') + '</span></div><div class="r">›</div></button>' : '') +
     '</div></section>';
   h += '<p class="note">' + (store.mode === 'cloud' ? 'Synced to your Supabase database. A copy is kept on this phone so it works offline.' : 'Saved in this browser only. Add your Supabase keys in config.js to sync.') + '</p>';
+  // quiet on purpose: the release log is there for anyone curious, never pushed at you
+  h += '<button class="wn-link" data-act="whatsnew">' + esc(appVersion() ? 'v' + appVersion() + ' · What’s new' : 'What’s new') + '</button>';
   return h;
+}
+function appVersion() { var m = document.querySelector('meta[name=app-version]'); return m ? m.content : ''; }
+function whatsNewSheet() {
+  var log = window.WHATS_NEW || [];
+  var body = '<p class="note" style="margin-top:0">What has changed in 20bucks, newest first.</p>' + log.map(function (r) {
+    var when = new Date(r.d + 'T00:00:00').toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' });
+    return '<section class="wn"><p class="wn-meta">' + esc(when) + (r.v ? ' · v' + esc(r.v) : '') + '</p><h4>' + esc(r.title) + '</h4><ul>' +
+      r.items.map(function (it) { return '<li>' + esc(it) + '</li>'; }).join('') + '</ul></section>';
+  }).join('');
+  openSheet('What’s new', body);
 }
 function cycleLabel(c) { return { 1: 'monthly', 3: 'quarterly', 6: 'every 6 months', 12: 'yearly' }[c] || 'every ' + c + ' months'; }
 function subSuggestions() {
@@ -2757,6 +2769,7 @@ function openSheet(title, body, onReady) {
   if (sheetScope) sheetScope.abort();
   var tb = $('#toast'); if (tb && tb.parentNode === dlg) document.body.appendChild(tb); // keep it out of the content being replaced
   dlg.innerHTML = '<div class="hd"><h3>' + esc(title) + '</h3><button data-close>Close</button></div><div class="bd">' + body + '</div>';
+  dlg.setAttribute('aria-label', title);
   if (!dlg.open) dlg.showModal();
   sheetScope = new AbortController();
   if (onReady) onReady(dlg);
@@ -6536,6 +6549,7 @@ function onClick(e) {
     else if (a === 'showmov') { UI.fcat = ''; UI.fsub = ''; UI.filter = 'mov'; render(); }
     else if (a === 'health') healthSheet();
     else if (a === 'help') helpSheet();
+    else if (a === 'whatsnew') whatsNewSheet();
     // the shared feedback widget's own button is hidden (app.css), so open it through that button
     else if (a === 'feedback') { var fbw = $('#fbw-root .fbw-btn'); if (fbw) fbw.click(); else toast('Feedback didn’t load. Check your connection and reload.'); }
     else if (a === 'tour') { closeSheet(); tourSheet(0); }

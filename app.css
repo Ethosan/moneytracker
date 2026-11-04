@@ -155,6 +155,15 @@ dialog.sheet::backdrop{background:rgba(8,12,24,.5);backdrop-filter:blur(2px)}
 .sheet .hd h3{margin:8px 0 0;font:700 20px "Geist",sans-serif;letter-spacing:-.02em}
 .sheet .hd button{background:var(--surface);border:0;font-size:14px;font-weight:600;color:var(--muted);padding:7px 14px;border-radius:999px;margin-top:8px}
 .sheet .bd{padding:6px 18px calc(24px + env(safe-area-inset-bottom,0px))}
+/* What's new: a quiet text link at the foot of Settings, and its sheet */
+.wn-link{display:block;margin:10px auto 0;min-height:44px;padding:0 14px;background:none;border:0;border-radius:999px;font:inherit;font-size:12.5px;color:var(--muted);cursor:pointer}
+@media (hover:hover){.wn-link:hover{color:var(--ink)}}
+.wn{margin:18px 0 0;padding-top:16px;border-top:1px solid var(--line)}
+.wn:first-of-type{border-top:0;padding-top:4px}
+.wn-meta{margin:0;font-size:12.5px;color:var(--muted)}
+.wn h4{margin:3px 0 6px;font:600 16px/1.35 "Geist",sans-serif;letter-spacing:-.01em}
+.wn ul{margin:0;padding-left:18px}
+.wn li{margin:5px 0;font-size:14px;line-height:1.5;overflow-wrap:anywhere}
 .seg{display:flex;background:var(--sunk);border-radius:999px;padding:4px;margin-bottom:14px}
 .seg button{flex:1;border:0;background:none;padding:9px 6px;border-radius:999px;font-size:14px;font-weight:500;color:var(--muted)}
 .seg button[aria-pressed="true"]{background:var(--raised);color:var(--ink);font-weight:700;box-shadow:var(--shadow)}
