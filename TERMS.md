@@ -12,7 +12,7 @@ What you enter stays yours. You give us permission to store it and show it to th
 
 ## AI suggestions
 
-Transaction categories are suggested by AI (Mistral AI) from the merchant name and amount. Suggestions can be wrong. Always review them.
+The AI assistant (DeepSeek, whose servers are in China; see the privacy policy for what it is sent) suggests fixes to entries, such as a category, from the note and amount, and answers questions about your money. Suggestions and answers can be wrong. Always review them.
 
 ## Fair use
 

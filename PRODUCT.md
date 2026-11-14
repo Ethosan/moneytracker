@@ -32,7 +32,7 @@ A tracker shaped around one person's real money life in Singapore, not a generic
 - Used about equally on phone (installed to the home screen as an app) and on laptop in a browser. Phone: logging right after paying, quick checks of the month. Laptop: statement imports, cleanup, deeper review.
 - Hosted on Netlify from this repo; data in the owner's Supabase (`ledger_docs` table, row level security). Works offline and syncs later; edits from phone and laptop merge.
 - Inputs: manual entries (with an amount calculator), Grab and bank statements (Excel, CSV, PDF or pasted text, including OCBC/DBS layouts), Money Manager exports, CSV round trips through a spreadsheet, JSON backups.
-- Optional AI assistant through the owner's `ledger-ai` Supabase function (Mistral now, possibly Claude later): a weekly review of new entries and questions about spending.
+- Optional AI assistant through the owner's `ledger-ai` Supabase function (DeepSeek since 14 Nov 2026, servers in China; Mistral or Claude as alternatives): a weekly review of new entries and questions about spending.
 
 ## Capabilities and Constraints
 

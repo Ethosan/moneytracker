@@ -14,11 +14,16 @@
 // an account for anyone and an open function lets a stranger spend the key.
 //
 // Secrets (Supabase dashboard -> Edge Functions -> Secrets):
-//   MISTRAL_API_KEY     to use Mistral (the default when it is set)
+//   LLM_API_KEY         to use DeepSeek (the default whenever it is set)
+//   LLM_BASE_URL        optional, default https://api.deepseek.com
+//   LLM_MODEL_ASK       optional, default deepseek-v4-pro (LLM_MODEL sets both jobs)
+//   LLM_MODEL_REVIEW    optional, default deepseek-flash
+//   MISTRAL_API_KEY     to use Mistral (the default when there is no LLM_API_KEY)
 //   ANTHROPIC_API_KEY   to use Claude
-//   AI_PROVIDER         optional: "mistral" or "anthropic", to choose when both keys are set
-//   MISTRAL_MODEL       optional, default mistral-small-latest
-//   ANTHROPIC_MODEL     optional, default claude-opus-5-5
+//   AI_PROVIDER         optional: "deepseek", "mistral" or "anthropic", to choose when several keys are set
+//   MISTRAL_MODEL       optional, default mistral-large-latest
+//   ANTHROPIC_MODEL     optional, default claude-sonnet-5-5
+// Which provider and model each job gets, and the fallbacks, are in providers.ts.
 //   AI_DAILY_LIMIT      optional, AI calls per day for all accounts together (default 300)
 //   AI_ALLOWED_IDS      comma-separated user ids allowed to call this function when
 //                       OPEN_TO_ALL is false (Supabase dashboard -> Authentication -> Users
@@ -28,8 +33,10 @@
 import { createClient } from "npm:@supabase/supabase-js@2.117.3";
 import Anthropic from "npm:@anthropic-ai/sdk@0.132.1";
 import { loadLedger, overview, runTool, TOOLS, plainCat } from "./engine.ts";
-import { mistralAgent, claudeAgent } from "./agent.ts";
+import { mistralAgent, deepseekAgent, claudeAgent } from "./agent.ts";
 import type { Turn, Run, Outcome } from "./agent.ts";
+import { firstThatAnswers, NAME_OF, KEY_OF, deepseekModel, deepseekBase, deepseekExtra, modelRefused, DEEPSEEK_FALLBACK, MISTRAL_FALLBACK, mistralModel, claudeModel } from "./providers.ts";
+import type { Provider } from "./providers.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -125,43 +132,51 @@ from here (fees, investment mirrors, transfers), so tell the owner to change tho
 exactly as listed, emoji included, and match the type (spending categories for exp, income categories for inc). At most
 20 changes. Leave the block out entirely when there is nothing to change.`;
 
-// Mistral unless AI_PROVIDER says anthropic or only the Anthropic key is set. The Ask model is
-// Mistral Large (Ethan's call, 26 Oct 2026): Small got every sum right through the tools but not
-// the reasoning (it took "22% of income" from the totals as the subscriptions share). Small stays
-// the fallback if Large is refused.
+// DeepSeek whenever LLM_API_KEY is set (14 Nov 2026: Ethan is leaving Mistral), unless
+// AI_PROVIDER names another; providers.ts holds the choice, the models and the fallback order.
+// Ask on DeepSeek is deepseek-v4-pro, in Mistral Large's place: Large was Ethan's call on 26 Oct
+// 2026 because Small got every sum right through the tools but not the reasoning (it took "22% of
+// income" from the totals as the subscriptions share). Flash answers if Pro is refused, as Small
+// did for Large. If DeepSeek fails outright, Mistral answers while its key is still set.
 // The ANTHROPIC_API_KEY stored on 2026-10-08 is rejected by the API as invalid; with a working
-// key and AI_PROVIDER=anthropic, Claude answers and Mistral is the fallback if Claude fails.
-function provider() {
-  const want = (Deno.env.get("AI_PROVIDER") || "").toLowerCase();
-  if (want === "anthropic" || (!Deno.env.get("MISTRAL_API_KEY") && Deno.env.get("ANTHROPIC_API_KEY"))) return "anthropic";
-  return "mistral";
-}
-const MISTRAL_FALLBACK = "mistral-small-latest";
-const mistralModel = () => Deno.env.get("MISTRAL_MODEL") || "mistral-large-latest";
-const claudeModel = () => Deno.env.get("ANTHROPIC_MODEL") || "claude-sonnet-5-5";
+// key and AI_PROVIDER=anthropic, Claude answers and DeepSeek (or Mistral) is the fallback.
+const env = (k: string) => Deno.env.get(k);
 const needKey = (name: string) => { const k = Deno.env.get(name); if (!k) throw new Error(`${name} is not set in the function's secrets.`); return k; };
 // on a policy decline the API retries on a fallback model inside the same call
 const claudeExtras = { output_config: { effort: "low" }, betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" };
+// one log line per answer: job, provider, model, rounds and tokens (never the text or a key)
+const logUse = (job: string, p: Provider, model: string, u: { input: number; output: number; cached: number } | undefined, rounds = 1) =>
+  console.log(`ledger-ai ${job}: ${NAME_OF[p]} ${model}, ${rounds} round${rounds === 1 ? "" : "s"}` + (u ? `, ${u.input} tokens in (${u.cached} cached), ${u.output} out` : ""));
 
-// The review pass: one plain completion that must come back as JSON.
-async function completeJson(system: string, prompt: string) {
-  const messages: Turn[] = [{ role: "user", content: prompt }];
-  if (provider() === "anthropic") {
-    needKey("ANTHROPIC_API_KEY");
-    const client = new Anthropic();
-    const response = await client.beta.messages.create({ model: claudeModel(), max_tokens: 16000, system, messages, ...claudeExtras } as any);
-    if (response.stop_reason === "refusal") throw new Error("The model declined this request.");
-    return { text: response.content.map((b: any) => (b.type === "text" ? b.text : "")).join(""), model: response.model, cut: response.stop_reason === "max_tokens" };
-  }
-  const key = needKey("MISTRAL_API_KEY"), model = mistralModel();
-  const r = await fetch("https://api.mistral.ai/v1/chat/completions", {
+// An OpenAI-style completion that must come back as JSON (Mistral and DeepSeek both take json_object).
+async function chatJson(url: string, label: string, key: string, model: string, extra: Record<string, unknown>, system: string, prompt: string) {
+  const r = await fetch(url, {
     method: "POST",
     headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model, messages: [{ role: "system", content: system }, ...messages], temperature: 0.2, max_tokens: 2000, response_format: { type: "json_object" } }),
+    body: JSON.stringify({ model, messages: [{ role: "system", content: system }, { role: "user", content: prompt }], temperature: 0.2, max_tokens: 2000, response_format: { type: "json_object" }, ...extra }),
   });
-  if (!r.ok) throw new Error(`Mistral ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  if (!r.ok) throw new Error(`${label} ${r.status}: ${(await r.text()).slice(0, 300)}`);
   const data = await r.json();
-  return { text: String(data.choices?.[0]?.message?.content ?? ""), model, cut: data.choices?.[0]?.finish_reason === "length" };
+  const u = data.usage || {};
+  return { text: String(data.choices?.[0]?.message?.content ?? ""), model, cut: data.choices?.[0]?.finish_reason === "length",
+    usage: { input: Number(u.prompt_tokens) || 0, output: Number(u.completion_tokens) || 0, cached: Number(u.prompt_cache_hit_tokens ?? u.prompt_tokens_details?.cached_tokens) || 0 } };
+}
+
+// The review pass: one plain completion that must come back as JSON.
+async function completeJson(p: Provider, system: string, prompt: string) {
+  if (p === "anthropic") {
+    needKey(KEY_OF.anthropic);
+    const client = new Anthropic();
+    const messages: Turn[] = [{ role: "user", content: prompt }];
+    const response = await client.beta.messages.create({ model: claudeModel(env), max_tokens: 16000, system, messages, ...claudeExtras } as any);
+    if (response.stop_reason === "refusal") throw new Error("The model declined this request.");
+    return { text: response.content.map((b: any) => (b.type === "text" ? b.text : "")).join(""), model: response.model, cut: response.stop_reason === "max_tokens", usage: undefined };
+  }
+  if (p === "deepseek") {
+    const base = deepseekBase(env);
+    return chatJson(base + "/chat/completions", "DeepSeek", needKey(KEY_OF.deepseek), deepseekModel(env, "review"), deepseekExtra(base), system, prompt);
+  }
+  return chatJson("https://api.mistral.ai/v1/chat/completions", "Mistral", needKey(KEY_OF.mistral), mistralModel(env), {}, system, prompt);
 }
 
 function firstJson(text: string) {
@@ -242,7 +257,8 @@ function takeChanges(text: string, L: { ids: Set<string>; byId: Map<string, { t:
 // Usage caps: the AI spends the owner's API credits and the app is shared. Each call is recorded
 // by the ai_take_call() database function, so the caps hold across cold starts and copies of this
 // function: CALL_LIMIT per account per hour, and DAILY_LIMIT for all accounts together (the
-// AI_DAILY_LIMIT secret overrides it). A monthly spending limit in the Mistral console is the backstop.
+// AI_DAILY_LIMIT secret overrides it). The backstop is at the provider: DeepSeek is prepaid, so
+// the balance topped up there is the most it can spend (Mistral had a monthly spending limit).
 const CALL_LIMIT = 120;
 const DAILY_LIMIT = Number(Deno.env.get("AI_DAILY_LIMIT")) || 300;
 // Fallback cap kept in memory, used only if the database function can't be reached.
@@ -323,7 +339,8 @@ Deno.serve(async (req) => {
         ? "\nThe owner's usual patterns, from their own past entries. Notes (note, usual type, usual amount, usual category, times seen):\n" + histNotes.map((h) => JSON.stringify(h)).join("\n") + (histCats.length ? "\nCategories (category, usual type, times seen):\n" + histCats.map((h) => JSON.stringify(h)).join("\n") : "")
         : "";
       const prompt = `Allowed categories: ${JSON.stringify(cats)}${catTypes ? `\nCategory types (income or spending, as the owner set them): ${catTypes}` : ""}\nEntries:\n${items.map((x) => JSON.stringify(x)).join("\n")}${histBlock}`;
-      const out = await completeJson(REVIEW_SYSTEM, prompt);
+      const { out, used } = await firstThatAnswers(env, "review", (p) => completeJson(p, REVIEW_SYSTEM, prompt));
+      logUse("review", used, out.model, out.usage);
       const parsed = firstJson(out.text);
       // An unreadable or cut-off reply is an error, not "nothing found": the app then keeps these
       // entries for the next review instead of marking them as checked.
@@ -338,7 +355,7 @@ Deno.serve(async (req) => {
           ...(typeof f.cat === "string" && catSet.has(f.cat) ? { cat: f.cat } : {}),
           ...(typeof f.amt === "number" && f.amt > 0 && f.amt < 1e7 ? { amt: Math.round(f.amt * 100) / 100 } : {}),
         }));
-      return json({ findings, provider: provider(), model: out.model });
+      return json({ findings, provider: used, model: out.model });
     }
     if (body.action === "ask") {
       const question = String(body.question || "").slice(0, 1000).trim();
@@ -379,7 +396,7 @@ Deno.serve(async (req) => {
       // the configured Mistral model, then Small if that one is refused (an alias retired, a
       // model not on the plan), so a model name never takes Ask down
       const viaMistral = async () => {
-        const key = needKey("MISTRAL_API_KEY"), model = mistralModel();
+        const key = needKey(KEY_OF.mistral), model = mistralModel(env);
         try { return await mistralAgent({ fetchImpl: fetch, key, model, system: ASK_SYSTEM, messages, tools: TOOLS, run }); }
         catch (e) {
           if (model === MISTRAL_FALLBACK || !/Mistral 4\d\d/.test(e instanceof Error ? e.message : "")) throw e;
@@ -390,21 +407,32 @@ Deno.serve(async (req) => {
           return out;
         }
       };
-      let used = provider(), out: Outcome;
-      if (used === "anthropic") {
-        try {
-          needKey("ANTHROPIC_API_KEY");
-          out = await claudeAgent({ create: (p) => new Anthropic().beta.messages.create({ ...p, ...claudeExtras } as any), model: claudeModel(), system: ASK_SYSTEM, messages, tools: TOOLS, run });
-        } catch (e) {
-          // Claude down, over quota or declining: the Mistral path answers instead, and says so
-          if (!Deno.env.get("MISTRAL_API_KEY")) throw e;
-          const why = (e instanceof Error ? e.message : String(e)).replace(/\s+/g, " ").slice(0, 90);
-          console.error("Claude failed, answering with Mistral:", why);
-          used = "mistral"; lastRows = null;
-          out = await viaMistral();
-          out.steps.unshift(`Claude was unavailable (${why}); answered with Mistral`);
+      // DeepSeek Pro, then Flash if Pro is refused (a model name retired or not on the account)
+      const viaDeepSeek = async () => {
+        const key = needKey(KEY_OF.deepseek), model = deepseekModel(env, "ask"), base = deepseekBase(env), extra = deepseekExtra(base);
+        try { return await deepseekAgent({ fetchImpl: fetch, base, extra, key, model, system: ASK_SYSTEM, messages, tools: TOOLS, run }); }
+        catch (e) {
+          if (model === DEEPSEEK_FALLBACK || !modelRefused(e)) throw e;
+          console.error(`${model} refused, answering with ${DEEPSEEK_FALLBACK}:`, e instanceof Error ? e.message.slice(0, 200) : e);
+          lastRows = null;
+          const out = await deepseekAgent({ fetchImpl: fetch, base, extra, key, model: DEEPSEEK_FALLBACK, system: ASK_SYSTEM, messages, tools: TOOLS, run });
+          out.steps.unshift(`${model} was unavailable; answered with ${DEEPSEEK_FALLBACK}`);
+          return out;
         }
-      } else out = await viaMistral();
+      };
+      const viaClaude = () => {
+        needKey(KEY_OF.anthropic);
+        return claudeAgent({ create: (p) => new Anthropic().beta.messages.create({ ...p, ...claudeExtras } as any), model: claudeModel(env), system: ASK_SYSTEM, messages, tools: TOOLS, run });
+      };
+      // the chosen provider; if it is down, out of credit or declining, the next one with a key
+      // answers instead, and the steps say so
+      const asked = await firstThatAnswers(env, "ask", (p): Promise<Outcome & { usage?: { input: number; output: number; cached: number } }> => {
+        lastRows = null;
+        return p === "deepseek" ? viaDeepSeek() : p === "mistral" ? viaMistral() : viaClaude();
+      });
+      const used = asked.used, out = asked.out;
+      out.steps.unshift(...asked.skipped);
+      logUse("ask", used, out.model, out.usage, out.rounds);
 
       const byId = new Map<string, { t: string; cat: string; d?: string }>(L.tx.filter((x) => x.id && L.editable.has(x.id)).map((x) => [x.id as string, { t: x.t, cat: x.cat || "", d: x.d }]));
       const countDays = new Set<string>(L.checks.map((c: any) => String(c && c.d || "")).filter(Boolean));

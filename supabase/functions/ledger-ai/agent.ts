@@ -1,7 +1,8 @@
 // The tool-calling loop for the Ask chat: the model reads the ledger through engine.ts's tools
-// and does its arithmetic there, round after round, until it answers in words. One loop per
-// provider (Mistral's function calling, Anthropic's tool use); both take the fetch/client to use
-// so tests can stand in a fake model (tests/ledger-ai-agent.test.mjs).
+// and does its arithmetic there, round after round, until it answers in words. Two loops: the
+// OpenAI-style one (DeepSeek, the default, and Mistral) and Anthropic's tool use; both take the
+// fetch/client to use so tests can stand in a fake model (tests/ledger-ai-agent.test.mjs,
+// tests/ledger-ai-deepseek.test.mjs).
 //
 // Every answer is audited before it goes out: each figure in it is matched against the numbers
 // the model was given (the snapshot, the totals, every tool result). A figure that came from
@@ -105,34 +106,62 @@ function finish(a: Audit, text: string, steps: string[], canRepair: boolean): { 
   return { ask: null, unverified: bad };
 }
 
-export async function mistralAgent(o: { fetchImpl: typeof fetch; key: string; model: string; system: string; messages: Turn[]; tools: Tool[]; run: Run }): Promise<Outcome> {
+// Token counts over every round of one answer, for the function's log (the snapshot is resent
+// each round, so `cached` shows whether the provider's prompt cache is taking it).
+export type Usage = { input: number; output: number; cached: number };
+function addUsage(u: Usage, x: any) {
+  if (!x || typeof x !== "object") return;
+  u.input += Number(x.prompt_tokens) || 0;
+  u.output += Number(x.completion_tokens) || 0;
+  // DeepSeek reports prompt_cache_hit_tokens; OpenAI-style servers prompt_tokens_details.cached_tokens
+  u.cached += Number(x.prompt_cache_hit_tokens ?? x.prompt_tokens_details?.cached_tokens) || 0;
+}
+
+// The OpenAI-style /chat/completions loop (tools / tool_calls), shared by Mistral and DeepSeek.
+// `label` names the provider in errors ("DeepSeek 402: ..."), `extra` is merged into every request
+// body (DeepSeek's thinking switch), and `toolName` puts the tool's name on each tool message,
+// which Mistral's format has and OpenAI's (DeepSeek's) does not.
+export async function chatAgent(o: { fetchImpl: typeof fetch; url: string; label: string; key: string; model: string; extra?: Record<string, unknown>; toolName?: boolean; system: string; messages: Turn[]; tools: Tool[]; run: Run }): Promise<Outcome & { usage: Usage }> {
   const msgs: Record<string, unknown>[] = [{ role: "system", content: o.system }, ...o.messages];
   const tools = o.tools.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } }));
-  const steps: string[] = [], audit = startAudit(o.messages);
+  const steps: string[] = [], audit = startAudit(o.messages), usage: Usage = { input: 0, output: 0, cached: 0 };
   for (let round = 1; ; round++) {
     const last = round > MAX_ROUNDS + (audit.repaired ? 2 : 0);
-    const r = await o.fetchImpl("https://api.mistral.ai/v1/chat/completions", {
+    const r = await o.fetchImpl(o.url, {
       method: "POST",
       headers: { Authorization: `Bearer ${o.key}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ model: o.model, messages: msgs, temperature: 0.1, max_tokens: 6000, tools, tool_choice: last ? "none" : "auto" }),
+      body: JSON.stringify({ model: o.model, messages: msgs, temperature: 0.1, max_tokens: 6000, tools, tool_choice: last ? "none" : "auto", ...(o.extra || {}) }),
     });
-    if (!r.ok) throw new Error(`Mistral ${r.status}: ${(await r.text()).slice(0, 300)}`);
+    if (!r.ok) throw new Error(`${o.label} ${r.status}: ${(await r.text()).slice(0, 300)}`);
     const data = await r.json();
+    addUsage(usage, data.usage);
     const choice = data.choices?.[0], m = choice?.message || {};
     const calls: any[] = Array.isArray(m.tool_calls) ? m.tool_calls : [];
     if (calls.length && !last) {
-      msgs.push({ role: "assistant", content: m.content || "", tool_calls: calls });
+      // a thinking model's reasoning must go back with its tool calls; with thinking off there is none
+      msgs.push({ role: "assistant", content: m.content || "", tool_calls: calls, ...(typeof m.reasoning_content === "string" ? { reasoning_content: m.reasoning_content } : {}) });
       for (const tc of calls) {
         const name = tc.function?.name || "";
-        msgs.push({ role: "tool", name, content: callTool(o.run, name, tc.function?.arguments, steps, audit.known), tool_call_id: tc.id });
+        const content = callTool(o.run, name, tc.function?.arguments, steps, audit.known);
+        msgs.push(o.toolName ? { role: "tool", name, content, tool_call_id: tc.id } : { role: "tool", tool_call_id: tc.id, content });
       }
       continue;
     }
     const text = ensureText(String(m.content ?? ""), steps), cut = choice?.finish_reason === "length";
     const f = finish(audit, text, steps, !last && !cut);
     if (f.ask) { msgs.push({ role: "assistant", content: text }, { role: "user", content: f.ask }); continue; }
-    return { text, model: o.model, cut, steps, rounds: round, unverified: f.unverified };
+    return { text, model: o.model, cut, steps, rounds: round, unverified: f.unverified, usage };
   }
+}
+
+export function mistralAgent(o: { fetchImpl: typeof fetch; key: string; model: string; system: string; messages: Turn[]; tools: Tool[]; run: Run }) {
+  return chatAgent({ ...o, url: "https://api.mistral.ai/v1/chat/completions", label: "Mistral", toolName: true });
+}
+
+// DeepSeek: `base` is LLM_BASE_URL or https://api.deepseek.com, `extra` its thinking switch
+// (providers.ts deepseekExtra).
+export function deepseekAgent(o: { fetchImpl: typeof fetch; base: string; extra: Record<string, unknown>; key: string; model: string; system: string; messages: Turn[]; tools: Tool[]; run: Run }) {
+  return chatAgent({ ...o, url: o.base.replace(/\/+$/, "") + "/chat/completions", label: "DeepSeek", toolName: false });
 }
 
 // Anthropic's shape: tool_use blocks in the reply, tool_result blocks in the next user turn.

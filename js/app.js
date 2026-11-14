@@ -1920,11 +1920,18 @@ function lockSheet() {
     draw();
   });
 }
+// Who the AI's answers come from, by the model that last answered; DeepSeek is the default
+// before anything has answered (the ledger-ai function's default since 1.8.0).
+function aiVendor(model) {
+  if (model && /claude/i.test(model)) return 'Anthropic';
+  if (model && /^(mistral|magistral|ministral|codestral|devstral|pixtral|open-mi)/i.test(model)) return 'Mistral AI';
+  return 'DeepSeek, whose servers are in China,';
+}
 function aiSheet() {
   var ai = S.meta.ai || {}, on = aiOn(), cloud = store.mode === 'cloud';
   var who = ai.model ? esc(ai.model) : 'the AI';
   var body = '<p style="margin-top:0">Once a week, new entries are sent to ' + who + ' to spot likely mistakes; anything it finds waits in Suggestions for you to approve. You can also ask it about your spending in the Ask tab, or ask it to log or fix entries; it shows each change and only makes it when you tap Apply.</p>' +
-    '<p>What it sees: the weekly review sends only the new entries’ dates, amounts, categories and notes. A question in Ask sends your whole history so the answer has context: every transaction with its notes, wallets and tags, who you split bills with, people balances, investment and poker entries, PayLater bills and balance counts. Your email isn’t sent. It goes to ' + (ai.model && /claude/i.test(ai.model) ? 'Anthropic' : 'Mistral AI') + ' through a Supabase function that holds the API key.</p>' +
+    '<p>What it sees: the weekly review sends the new entries’ dates, amounts, categories and notes, with your usual amount and category for notes you’ve used before. A question in Ask sends a summary of every month and the entries it looks up to answer, and it can look up any of your history: every transaction with its notes, wallets and tags, who you split bills with, people balances, investment and poker entries, PayLater bills and balance counts. Your email isn’t sent. It goes to ' + aiVendor(ai.model) + ' through a Supabase function that holds the API key.</p>' +
     (!cloud ? '<p class="neg">This needs sync: sign in with your Supabase account first.</p>' : '') +
     '<div class="seg" id="aion"><button data-on="1" aria-pressed="' + on + '">On</button><button data-on="0" aria-pressed="' + !on + '">Off</button></div>' +
     (on ? '<div class="kv" style="margin-top:12px"><span>Last review</span><span>' + (ai.lastRun ? dayYear(ai.lastRun) : 'Not yet') + '</span>' +

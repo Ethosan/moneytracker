@@ -3,6 +3,10 @@
 // release; fixes go in as one "Bug fixes and polish." line (what was fixed belongs in the commit log).
 // `v` is the version range the entry spans; releases before 1.3 had no version number, so it is empty.
 var WHATS_NEW = [
+  { d: '2026-11-14', v: '1.8.0', title: 'The AI assistant moves to DeepSeek', items: [
+    'The weekly review and Ask are now answered by DeepSeek instead of Mistral AI. DeepSeek’s servers are in China; the privacy policy lists exactly what the assistant sends. It stays off until you turn it on.',
+    'Ask still works out every sum with the app’s own rules and checks each figure before you see it.'
+  ] },
   { d: '2026-11-04', v: '1.7.0', title: 'What’s new', items: [
     'This list: what has changed in 20bucks, newest first, from the version link at the foot of Settings.'
   ] },

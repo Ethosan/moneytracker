@@ -8,7 +8,7 @@ A personal finance tracker that installs to your phone like a native app. Track 
 ![PWA](https://img.shields.io/badge/PWA-5A0FC8?logo=pwa&logoColor=white)
 ![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=white)
 ![Cloudflare Pages](https://img.shields.io/badge/Cloudflare_Pages-F38020?logo=cloudflarepages&logoColor=white)
-![Mistral AI](https://img.shields.io/badge/Mistral_AI-FA520F?logo=mistralai&logoColor=white)
+![DeepSeek](https://img.shields.io/badge/DeepSeek-4D6BFE?logoColor=white)
 
 <p align="center">
   <img src="docs/screenshots/month.png" width="24%" alt="Month overview: $966 spent so far in October, on pace for $1,302 against a usual $1,498, and spending by category">
@@ -31,7 +31,7 @@ A personal finance tracker that installs to your phone like a native app. Track 
 Settings (names only; the values live in `config.js` and Supabase secrets):
 
 - **App (`config.js`, public):** `supabaseUrl`, `supabaseAnonKey`, `googleClientId`
-- **Edge Function secrets:** `MISTRAL_API_KEY` or `ANTHROPIC_API_KEY`, `AI_PROVIDER`, `AI_ALLOWED_IDS`; optional `MISTRAL_MODEL`, `ANTHROPIC_MODEL`, `AI_DAILY_LIMIT`
+- **Edge Function secrets:** `LLM_API_KEY` (DeepSeek), or `MISTRAL_API_KEY` / `ANTHROPIC_API_KEY`, `AI_PROVIDER`, `AI_ALLOWED_IDS`; optional `LLM_BASE_URL`, `LLM_MODEL_ASK`, `LLM_MODEL_REVIEW`, `LLM_MODEL`, `MISTRAL_MODEL`, `ANTHROPIC_MODEL`, `AI_DAILY_LIMIT`
 
 ## Features
 
@@ -54,7 +54,7 @@ Phone / browser ── static files (Cloudflare Pages) ── service worker kee
       │
       ├──▶ Supabase Auth       email code or Google sign-in
       ├──▶ Supabase Postgres   ledger_docs: one JSON document per month and per list, row level security
-      └──▶ Edge Function       ledger-ai ──▶ Mistral (or Anthropic Claude)   only when the assistant is on
+      └──▶ Edge Function       ledger-ai ──▶ DeepSeek (or Mistral, Anthropic Claude)   only when the assistant is on
 ```
 
 | Path | Purpose |
@@ -134,7 +134,7 @@ npx supabase login
 npx supabase functions deploy ledger-ai --project-ref <project-ref> --use-api
 ```
 
-Then in **Supabase → Edge Functions → Secrets** add `MISTRAL_API_KEY`, or `ANTHROPIC_API_KEY` with `AI_PROVIDER=anthropic`. Optional overrides: `MISTRAL_MODEL`, `ANTHROPIC_MODEL`. `OPEN_TO_ALL` at the top of the function is `true`, so every signed-in account can use the assistant, capped at 120 calls an hour each and 300 a day for all accounts together (change the daily number with the `AI_DAILY_LIMIT` secret). The caps are counted in the database by `ai_take_call()` (in `supabase/schema.sql`), so they hold across restarts. Set it to `false` to restrict the assistant to the accounts on the `AI_ALLOWED_IDS` allowlist: your user id from **Authentication → Users** (the UUID), comma-separated for a small team. Set a monthly spending limit with your AI provider as a safety net: for Mistral, **Admin → Administration → Workspaces →** your workspace **→ Settings → Monthly spending limit** (there is none by default).
+Then in **Supabase → Edge Functions → Secrets** add `LLM_API_KEY`, a DeepSeek API key: DeepSeek is then the default, with `deepseek-v4-pro` answering Ask and `deepseek-flash` doing the weekly review (thinking off for both). DeepSeek's servers are in China, and the assistant sends personal finance data (see `PRIVACY.md` for exactly what). Optional overrides: `LLM_MODEL_ASK`, `LLM_MODEL_REVIEW` (or `LLM_MODEL` for both; a Mistral or Claude name there is ignored), `LLM_BASE_URL` (default `https://api.deepseek.com`). To use Mistral or Claude instead, add `MISTRAL_API_KEY` or `ANTHROPIC_API_KEY` and set `AI_PROVIDER` to `mistral` or `anthropic`; with several keys set, a provider that fails hands the question to the next (DeepSeek, then Mistral). Optional model overrides for those: `MISTRAL_MODEL`, `ANTHROPIC_MODEL`. `OPEN_TO_ALL` at the top of the function is `true`, so every signed-in account can use the assistant, capped at 120 calls an hour each and 300 a day for all accounts together (change the daily number with the `AI_DAILY_LIMIT` secret). The caps are counted in the database by `ai_take_call()` (in `supabase/schema.sql`), so they hold across restarts. Set it to `false` to restrict the assistant to the accounts on the `AI_ALLOWED_IDS` allowlist: your user id from **Authentication → Users** (the UUID), comma-separated for a small team. Keep a spending cap at the AI provider as a safety net: DeepSeek is prepaid, so the balance you top up is the most it can spend (turn on its low-balance alert); for Mistral, **Admin → Administration → Workspaces →** your workspace **→ Settings → Monthly spending limit** (there is none by default).
 
 ## Custom domain (optional)
 

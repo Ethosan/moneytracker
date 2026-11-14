@@ -14,10 +14,10 @@ We don't sell your data, show ads, or track you across other sites.
 
 ## The AI assistant
 
-The AI assistant is off until you turn it on in **Settings → AI assistant**. When it's on, requests go to **Mistral AI** (or **Anthropic**, if the owner switches provider) through a Supabase Edge Function that holds the API key. Your email address isn't sent.
+The AI assistant is off until you turn it on in **Settings → AI assistant**. When it's on, requests go to **DeepSeek** through a Supabase Edge Function that holds the API key. **DeepSeek's servers are in China**, so what is listed below is sent there and handled under DeepSeek's own terms and privacy policy. This is personal finance data: leave the assistant off if you don't want it to leave the app. Your email address and sign-in details aren't sent. If DeepSeek is down, the same request can go to **Mistral AI** instead while the owner still has a Mistral key, and the owner can switch the assistant to **Anthropic**.
 
-- **Weekly review:** the entries added since the last review (date, type, amount, category and note), your category list, and your usual amount, type and category for those notes, worked out from your other entries.
-- **Ask:** your question, the last ten messages of that conversation, and your whole history so the answer has context: every transaction with its notes, wallets and tags, the names of people you split bills with and what they owe, investment, prop firm and poker entries, PayLater bills, balance counts, subscriptions, budgets and wallet balances.
+- **Weekly review:** the entries added since the last review (date, type, amount, category and note), your category list with each category's type, and, for notes you have used before, your usual type, amount and category and how often you used them, worked out from your other entries.
+- **Ask:** your question and the last ten messages of that chat, plus a summary the app makes from your data: for every month, spending by category, income by source, what friends paid back and what you saved; your budgets and subscriptions; the people you split bills with and what each owes; your wallet balances, the last balance count and any gaps it left unexplained; totals for each prop firm, broker, crypto account and poker, and your latest 40 prop firm and poker entries with their notes; and what you owe on PayLater. The function adds exact monthly and yearly totals worked out from your ledger, and the entries the assistant looks up to answer, with their date, amount, category, note, wallet, tags and who a bill was split with. It can look up any entry in your history, including balance counts, PayLater bills, people and investment entries, so treat everything you have logged as something that may be sent.
 
 Answers and suggested changes are AI-generated and can be wrong. Nothing in your ledger changes until you tap Apply.
 
@@ -25,7 +25,7 @@ Answers and suggested changes are AI-generated and can be wrong. Nothing in your
 
 - **Supabase:** database, sign-in, and receipt photo storage. Data lives in your own Supabase project.
 - **Cloudflare:** hosting.
-- **Mistral AI** or **Anthropic:** only if you turn on the AI assistant.
+- **DeepSeek** (servers in China): only if you turn on the AI assistant. **Mistral AI** or **Anthropic** only as a fallback or if the owner switches provider.
 - **Google:** only if you sign in with Google.
 - **Google Fonts:** the page's typefaces load from Google.
 
