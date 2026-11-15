@@ -126,6 +126,8 @@ Needs Node 22 or newer (the Ask engine tests load TypeScript directly) and nothi
 
 The money maths in `js/money.js` has its own tests (`tests/money.test.js`). Ask's engine (`supabase/functions/ledger-ai/engine.ts`) keeps a separate copy of the same rules, because the Edge Function can't load a browser script, so `tests/money-parity.test.mjs` runs one ledger through both and fails if any total differs. It also runs a Money Manager export through `js/mm-import.js` and checks the result the same way. Change a money rule in one place and the parity test tells you to change the other.
 
+`tests/money-extremes.test.mjs` names the extreme cases one by one: amounts saved as text, negative, infinite or beyond S$100 billion, split shares above the bill, categories and people called `constructor` or `__proto__`, old stored rows the app never re-saved, 120,000 transactions checked to the exact cent, the calculator's limits, and Apply refusing a bad proposed change. `tests/money-fuzz.test.mjs` throws 1,500 random messy ledgers at the app and at Ask's engine. They must agree on every total, keep their own arithmetic, never crash, and never touch JavaScript's built-in objects. It is seeded: `FUZZ_SEED=<n> FUZZ_RUNS=<n> node --test tests/money-fuzz.test.mjs` repeats a failure or searches further.
+
 ## AI assistant (optional)
 
 Off until enabled in **Settings → AI assistant**. Once a week it sends entries added since its last review (date, type, amount, category and note), plus the type of each category and your usual patterns for those notes and categories, worked out from your older entries, and puts anything it flags in Suggestions for you to approve. Questions you ask in the **Ask** tab send your full history so the answer has context.

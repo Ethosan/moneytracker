@@ -26,23 +26,52 @@ export const mine = (x: Tx) => (x.t === "exp" && x.split && x.split.mine >= 0 ? 
 const norm = (s: unknown) => plainCat(String(s ?? "")).replace(/[\p{Extended_Pictographic}‍️]/gu, "").replace(/\s+/g, " ").trim().toLowerCase();
 const sum = (a: number[]) => r2(a.reduce((x, y) => x + y, 0));
 
+// ---- cleaning stored rows, the way the app does on load (js/money.js cleanTx, cleanDebts, cleanLedger) ----
+// The documents come straight from the database, and the app's own cleaning only reaches them when it
+// next saves that month, so old, imported or hand-edited rows are cleaned here by the same rules.
+// tests/money-fuzz.test.mjs checks that the two agree on thousands of messy ledgers.
+// an amount beyond S$100 billion is a typo, never money, and past it sums stop being exact to the cent: 0, as in the app
+export const MAX_AMOUNT = 1e11;
+export const num = (v: unknown) => { const n = typeof v === "number" ? v : parseFloat(v as string); return Number.isFinite(n) && Math.abs(n) <= MAX_AMOUNT ? r2(n) : 0; };
+const isObj = (x: unknown): x is Record<string, any> => !!x && typeof x === "object" && !Array.isArray(x);
+const list = (x: unknown): any[] => (Array.isArray(x) ? x : []);
+export function cleanTx(t: any): boolean {
+  if (!isObj(t) || typeof t.d !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(t.d)) return false;
+  t.amt = Math.abs(num(t.amt)); if (!t.amt) return false;
+  t.tags = Array.isArray(t.tags) ? t.tags.filter((g: unknown) => typeof g === "string") : [];
+  if (t.split && typeof t.split === "object") { t.split.mine = Math.min(num(t.split.mine), t.amt); if (!t.split.person) delete t.split; }
+  else delete t.split;
+  return true;
+}
+export const cleanDebts = (l: unknown) => list(l).filter((e) => e && typeof e === "object" && e.d).map((e) => { e.amt = num(e.amt); return e; });
+export const cleanLedger = (l: unknown) => cleanDebts(l).filter((e) => e.f === "bal" || e.amt > 0);
+// Totals keyed by names the owner typed live in objects with no prototype: a category, note or person
+// called "__proto__" or "constructor" is just a name, and never reaches Object.prototype (which a warm
+// Edge Function worker shares between requests).
+const bag = <T>() => Object.create(null) as Record<string, T>;
+// a People entry's name as a key: a missing name is "" in the app too, shown as "(no name)"
+const personKey = (p: unknown) => (p == null ? "" : String(p));
+const own = (o: any, k: string) => (o != null && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined);
+
 // The documents as the app stores them (meta, ledger, debts, bills, checks, one tx-YYYY-MM per month).
 export function loadLedger(doc: Record<string, any>): Ledger {
-  const tx: Tx[] = Object.keys(doc).filter((k) => k.startsWith("tx-")).flatMap((k) => (doc[k] && doc[k].items) || [])
-    .filter((x: Tx) => x && typeof x.d === "string" && Number.isFinite(x.amt))
+  const tx: Tx[] = Object.keys(doc).filter((k) => k.startsWith("tx-")).flatMap((k) => list(doc[k] && doc[k].items))
+    .filter(cleanTx)
     .sort((a: Tx, b: Tx) => (a.d < b.d ? -1 : a.d > b.d ? 1 : 0));
-  const meta = doc.meta || {};
-  const cats = new Map<string, Cat>(((meta.cats || []) as any[]).filter((c) => c && c.name).map((c) => [String(c.name), { name: String(c.name), type: c.type === "inc" ? "inc" : "exp", kind: c.kind }]));
+  const meta = isObj(doc.meta) ? doc.meta : {};
+  // the first category of a name counts, as in the app (catKind)
+  const cats = new Map<string, Cat>();
+  for (const c of list(meta.cats)) if (c && c.name && !cats.has(String(c.name))) cats.set(String(c.name), { name: String(c.name), type: c.type === "inc" ? "inc" : "exp", kind: c.kind });
   // rows a proposed change may touch: real spending or income with an id, not fee rows or
   // investment mirrors (the app keeps those in step with their source)
   const editable = new Set<string>(tx.filter((x) => x.id && !x.feeOf && !x.propOf && (x.t === "exp" || x.t === "inc")).map((x) => x.id as string));
-  const wallets = new Set<string>(((meta.accounts || []) as any[]).filter((a) => a && a.name && !a.liability).map((a) => String(a.name)));
+  const wallets = new Set<string>(list(meta.accounts).filter((a) => a && a.name && !a.liability).map((a) => String(a.name)));
   return {
     tx, meta, cats, editable, wallets,
-    led: (doc.ledger && doc.ledger.entries) || [],
-    debts: (doc.debts && doc.debts.entries) || [],
-    bills: (doc.bills && doc.bills.entries) || [],
-    checks: (doc.checks && doc.checks.entries) || [],
+    led: cleanLedger(doc.ledger && doc.ledger.entries),
+    debts: cleanDebts(doc.debts && doc.debts.entries),
+    bills: list(doc.bills && doc.bills.entries).filter(isObj),
+    checks: list(doc.checks && doc.checks.entries).filter(isObj),
   };
 }
 
@@ -83,8 +112,8 @@ export function fmtTime(ms: number | null, tz?: string): string | null {
 export function monthSummary(L: Ledger, month: string) {
   const rows = L.tx.filter((x) => x.d.slice(0, 7) === month);
   let spend = 0, earned = 0, other = 0, reimb = 0;
-  const byCat: Record<string, { total: number; count: number }> = {};
-  const byNote: Record<string, { total: number; count: number; category: string; note: string }> = {};
+  const byCat = bag<{ total: number; count: number }>();
+  const byNote = bag<{ total: number; count: number; category: string; note: string }>();
   for (const x of rows) {
     if (x.t === "exp") {
       const v = mine(x), c = plainCat(x.cat) || "(no category)";
@@ -129,7 +158,7 @@ export function overview(L: Ledger, today: string) {
     out.push(`Totals over ${span}: income ${ti}, net spent ${ts}, saved ${tv}. A share of income over this period divides by this income ${ti}, nothing else.`);
     out.push(`Averages per month over ${span}: income ${r2(ai)}, net spent ${r2(as)}, saved ${r2(av)}${ai > 0.005 ? ` (${Math.round((av / ai) * 100)}% of income)` : ""}.`);
   }
-  const years: Record<string, { spent: number; income: number }> = {};
+  const years = bag<{ spent: number; income: number }>();
   for (const x of L.tx) { const y = x.d.slice(0, 4); years[y] = years[y] || { spent: 0, income: 0 }; if (x.t === "exp") years[y].spent += mine(x); else if (x.t === "inc") years[y].income += x.amt; }
   for (const y of Object.keys(years).sort()) out.push(`Year ${y}: spent ${r2(years[y].spent)}, income ${r2(years[y].income)}`);
   const v = venueSummary(L);
@@ -146,11 +175,11 @@ export function overview(L: Ledger, today: string) {
 // + money taken out - money paid in between the two.
 export const cashBasis = (L: Ledger) => (L.meta.basis || "cash") === "cash";
 export function venueSummary(L: Ledger, account?: string) {
-  const venues = L.meta.venues || {};
+  const venues = isObj(L.meta.venues) ? L.meta.venues : {};
   const names = [...new Set(L.led.filter((e: any) => e && e.venue).map((e: any) => String(e.venue)))];
   const want = account ? norm(account) : "";
   return names.filter((k) => !want || norm(k).includes(want)).sort().map((k) => {
-    const type = (venues[k] && venues[k].type) || "broker", closed = !!(venues[k] && venues[k].closed);
+    const vk = own(venues, k), type = (vk && vk.type) || "broker", closed = !!(vk && vk.closed);
     const all = L.led.filter((e: any) => e && e.venue === k);
     // the owner's own flows plus every balance, oldest first; a balance on the same day as a flow comes after it
     const es = all.filter((e: any) => !e.who || e.who === "me" || e.f === "bal")
@@ -199,7 +228,7 @@ const GROUPS = ["none", "month", "year", "day", "category", "subcategory", "note
 // as a date would otherwise match all time, and type "expense" would match nothing at all.
 function checkParams(p: SearchParams) {
   for (const k of ["from", "to"] as const) if (p[k] != null && String(p[k]) !== "" && !okDate(p[k])) throw new Error(`${k} must be YYYY-MM-DD or YYYY-MM, not "${p[k]}".`);
-  const t = TYPE_WORDS[String(p.type ?? "").trim().toLowerCase()];
+  const t = own(TYPE_WORDS, String(p.type ?? "").trim().toLowerCase());
   if (!t) throw new Error(`type must be exp, inc, xfer, adj or all, not "${p.type}".`);
   if (p.group_by != null && String(p.group_by) !== "" && !GROUPS.includes(String(p.group_by))) throw new Error(`group_by must be one of ${GROUPS.join(", ")}, not "${p.group_by}".`);
   return t === "all" ? null : t;
@@ -245,7 +274,7 @@ export function searchTransactions(L: Ledger, p: SearchParams) {
   let groups: { key: string; total: number; count: number }[] | undefined;
   const gb = p.group_by && p.group_by !== "none" ? keyOf[p.group_by] : null;
   if (gb) {
-    const g: Record<string, { total: number; count: number }> = {};
+    const g = bag<{ total: number; count: number }>();
     for (const x of rows) { const k = gb(x); (g[k] = g[k] || { total: 0, count: 0 }).total += amount(x); g[k].count++; }
     groups = Object.keys(g).map((k) => ({ key: k, total: r2(g[k].total), count: g[k].count }))
       .sort((a, b) => (p.group_by === "month" || p.group_by === "year" || p.group_by === "day" ? (a.key < b.key ? -1 : 1) : b.total - a.total)).slice(0, 60);
@@ -259,7 +288,7 @@ export function searchTransactions(L: Ledger, p: SearchParams) {
     ...(x.tags && x.tags.length ? { tags: x.tags } : {}), ...(x.id && L.editable.has(x.id) ? { id: x.id } : {}),
   }));
   // what kinds of thing matched: a note search for "Grab" spans rides, food orders and a subscription
-  const spanMap: Record<string, { total: number; count: number }> = {};
+  const spanMap = bag<{ total: number; count: number }>();
   for (const x of rows) { const k = plainCat(x.cat) || "(no category)"; (spanMap[k] = spanMap[k] || { total: 0, count: 0 }).total += amount(x); spanMap[k].count++; }
   const catSpan = Object.keys(spanMap).sort((a, b) => spanMap[b].total - spanMap[a].total).slice(0, 8).map((k) => ({ category: k, total: r2(spanMap[k].total), count: spanMap[k].count }));
   // ready-made markdown, so the model pastes the numbers instead of retyping them
@@ -299,10 +328,12 @@ export const RESULT_BUDGET = 22000;  // characters; agent.ts clips anything abov
 export function calculate(expr: string): number {
   const s = String(expr || "").replace(/[\s,$]/g, "").replace(/×/g, "*").replace(/÷/g, "/").replace(/−/g, "-");
   if (!s || !/^[0-9+\-*/^%().]+$/.test(s)) throw new Error("Only numbers, + - * / ^ % and brackets are allowed.");
-  let i = 0;
+  // the parser recurses: keep expressions to a size a question needs, with a clear message past it
+  if (s.length > 2000) throw new Error("The expression is too long; work it out in steps.");
+  let i = 0, depth = 0;
   const peek = () => s[i], next = () => s[i++];
   const num = (): number => {
-    if (peek() === "(") { next(); const v = add(); if (next() !== ")") throw new Error("Unbalanced brackets."); return v; }
+    if (peek() === "(") { if (++depth > 100) throw new Error("Too many nested brackets."); next(); const v = add(); if (next() !== ")") throw new Error("Unbalanced brackets."); depth--; return v; }
     // a sign binds looser than ^, so -2^2 is -(2^2) = -4 as in ordinary arithmetic
     if (peek() === "-") { next(); return -pow(); }
     if (peek() === "+") { next(); return pow(); }
@@ -323,9 +354,9 @@ export function calculate(expr: string): number {
 // The smaller sections: people, PayLater, subscriptions, budgets, balance counts.
 export function accountSummary(L: Ledger, kind: string) {
   if (kind === "people") {
-    const per: Record<string, { balance: number; entries: { d: string; amt: number; note: string }[] }> = {};
-    for (const x of L.debts) { if (!x || !x.person) continue; const o = per[x.person] = per[x.person] || { balance: 0, entries: [] }; o.balance += x.amt; o.entries.push({ d: x.d, amt: r2(x.amt), note: x.note || "" }); }
-    return { note: "positive balance: they owe me", people: Object.keys(per).map((n) => ({ person: n, balance: r2(per[n].balance), entries: per[n].entries.sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-30) })) };
+    const per = bag<{ balance: number; entries: { d: string; amt: number; note: string }[] }>();
+    for (const x of L.debts) { const o = per[personKey(x.person)] = per[personKey(x.person)] || { balance: 0, entries: [] }; o.balance += x.amt; o.entries.push({ d: x.d, amt: r2(x.amt), note: x.note || "" }); }
+    return { note: "positive balance: they owe me", people: Object.keys(per).map((n) => ({ person: n || "(no name)", balance: r2(per[n].balance), entries: per[n].entries.sort((a, b) => (a.d < b.d ? -1 : 1)).slice(-30) })) };
   }
   if (kind === "paylater") return { bills: L.bills.map((b: any) => ({ provider: b.prov || "GrabPay Later", from: b.from, instalments: b.n || 1, fee: b.fee || 0, payments: (b.payments || []).map((p: any) => ({ d: p.d, amt: r2(p.amt) })) })) };
   if (kind === "subscriptions") return { subscriptions: (L.meta.subs || []).map((s: any) => ({ name: s.name, amount: s.amt, every_months: s.cycle || 1, next: s.next || null, active: s.active !== false })), monthly_total_active: sum((L.meta.subs || []).filter((s: any) => s.active !== false).map((s: any) => Number(s.amt || 0) / (s.cycle || 1))) };

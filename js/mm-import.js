@@ -17,6 +17,9 @@ var MM = (function () {
   };
   var STOP = ['owe', 'owes', 'borrow', 'from', 'lend', 'me', 'money', 'pay', 'back', 'anytime', 'during', 'ns',
     'will', 'on', 'cny', 'i', 'to', 'the', 'for'];
+  // Lookups by a name from the file read own keys only: a category called "constructor" is not Object.
+  function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined; }
+  function bag() { return Object.create(null); }
   // SheetJS 0.18 truncates astral XML entities (emoji) to 16 bits; restore them.
   function fixMoji(s) {
     var o = '';
@@ -82,7 +85,7 @@ var MM = (function () {
   // rows: array of arrays incl. header row. mpt: the app's person tag (or null), passed in because
   // this file cannot see app.js's personTag(); calling it from here threw on every spending row.
   function map(rows, XLSX, mpt) {
-    var out = { tx: [], ledger: [], debts: [], venues: {}, cats: {}, skipped: 0, headers: [] };
+    var out = { tx: [], ledger: [], debts: [], venues: bag(), cats: bag(), skipped: 0, headers: [] };
     var n = 0;
     function id() { n++; return 'mm' + n; }
     var L = layout(rows);
@@ -101,11 +104,11 @@ var MM = (function () {
       if (!d || !(amt > 0)) { out.skipped++; continue; }
       amt = Math.round(amt * 100) / 100;
       if (type === 'Expense' || type === 'Income') {
-        var c = CAT_MAP[cat] || cat;
+        var c = own(CAT_MAP, cat) || cat;
         var t = type === 'Expense' ? 'exp' : 'inc';
         var tags = [];
         if (mpt && (c === '💝 Dates' || String(note || '').toLowerCase().indexOf(mpt.toLowerCase()) > -1) && tags.indexOf(mpt) < 0) tags.push(mpt);
-        out.cats[c] = { name: c, type: t, kind: t === 'inc' ? (INC_KIND[c] || 'other') : undefined };
+        out.cats[c] = { name: c, type: t, kind: t === 'inc' ? (own(INC_KIND, c) || 'other') : undefined };
         out.tx.push({ id: id(), d: d, t: t, amt: amt, cat: c, sub: sub, note: note, tags: tags, src: 'mm' });
       } else if (type === 'Transfer-Out') {
         var from = acct, to = cat;
@@ -115,9 +118,9 @@ var MM = (function () {
           var pn = propName(note);
           out.venues[pn] = { name: pn, type: 'prop' };
           out.ledger.push({ id: id(), d: d, venue: pn, f: 'in', amt: amt, note: note, src: 'mm' });
-        } else if (VENUES[to] || VENUES[from]) {
-          var isIn = !!VENUES[to];
-          var v = VENUES[isIn ? to : from];
+        } else if (own(VENUES, to) || own(VENUES, from)) {
+          var isIn = !!own(VENUES, to);
+          var v = own(VENUES, isIn ? to : from);
           out.venues[v[0]] = { name: v[0], type: v[1] };
           out.ledger.push({ id: id(), d: d, venue: v[0], f: isIn ? 'in' : 'out', amt: amt, note: note, src: 'mm' });
         } else if (to === 'Misplaced balancer') {

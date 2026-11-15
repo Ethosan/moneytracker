@@ -110,7 +110,7 @@ function checkMonths(doc) {
     assert.equal(e.other_income, inc.other, `${at}: other income (Earned screen)`);
     assert.equal(e.income_total, inc.total, `${at}: income total`);
     // categories: the engine names them without the emoji, so group the app's the same way
-    const byCat = {};
+    const byCat = Object.create(null);
     for (const [c, v] of Object.entries(a.byCat)) { const k = plainCat(c) || "(no category)"; byCat[k] = (byCat[k] || 0) + v; }
     assert.deepEqual(Object.fromEntries(e.by_category.map((c) => [c.category, c.total])), Object.fromEntries(Object.entries(byCat).map(([k, v]) => [k, r2(v)])), `${at}: by category`);
   }

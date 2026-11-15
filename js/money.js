@@ -10,6 +10,37 @@ var Money = (function () {
   'use strict';
   function r2(n) { return Math.round(n * 100) / 100; }
   function sum(a, f) { var s = 0; for (var i = 0; i < a.length; i++) s += f ? f(a[i]) : a[i]; return s; }
+  // A stored amount, rounded to cents: text is read; anything unreadable, infinite or beyond S$100 billion
+  // (a typo or a pasted card number, never real money, and past it sums stop being exact to the cent) is 0.
+  var MAX_AMOUNT = 1e11;
+  function num(v) { var n = typeof v === 'number' ? v : parseFloat(v); return isFinite(n) && Math.abs(n) <= MAX_AMOUNT ? r2(n) : 0; }
+
+  // ---- cleaning stored rows before they are added up ----
+  // Saved data can be old, imported or edited by hand, so every sum reads rows through these first
+  // (app.js normalize() on load; engine.ts loadLedger mirrors them). They change the row in place,
+  // the way normalize always has, and say whether it can count at all.
+  // A transaction: a real YYYY-MM-DD date, a positive amount in cents (a sign is dropped: the type
+  // says which way money went), tags a list, and a split share no larger than the bill.
+  function cleanTx(t) {
+    if (!t || typeof t !== 'object' || typeof t.d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(t.d)) return false;
+    t.amt = Math.abs(num(t.amt)); if (!t.amt) return false;
+    t.tags = Array.isArray(t.tags) ? t.tags.filter(function (g) { return typeof g === 'string'; }) : [];
+    if (t.split && typeof t.split === 'object') { t.split.mine = Math.min(num(t.split.mine), t.amt); if (!t.split.person) delete t.split; }
+    else delete t.split;
+    return true;
+  }
+  // People entries: dated, the amount a number (signed: positive means they owe you).
+  function cleanDebts(list) {
+    return (Array.isArray(list) ? list : []).filter(function (e) { return e && typeof e === 'object' && e.d; })
+      .map(function (e) { e.amt = num(e.amt); return e; });
+  }
+  // Investment entries: the same, and money in or out must be more than zero (a balance may be 0).
+  function cleanLedger(list) { return cleanDebts(list).filter(function (e) { return e.f === 'bal' || e.amt > 0; }); }
+
+  // Totals keyed by names the owner typed (categories, tags, people) live in objects with no
+  // prototype, so a category called "constructor" or "__proto__" is just a name and adds up like any other.
+  function bag() { return Object.create(null); }
+  function own(o, k) { return o != null && Object.prototype.hasOwnProperty.call(o, k) ? o[k] : undefined; }
 
   // What a transaction actually cost you: if you paid for others, only your share counts as
   // spending. The rest is money owed to you, tracked under People.
@@ -17,14 +48,15 @@ var Money = (function () {
 
   // An income category's kind: 'earned' (work), 'reimb' (friends paying you back) or 'other'.
   function catKind(cats, name) {
-    for (var i = 0; i < (cats || []).length; i++) if (cats[i].name === name) return cats[i].kind || 'other';
+    if (!Array.isArray(cats)) return 'other';
+    for (var i = 0; i < cats.length; i++) if (cats[i] && cats[i].name === name) return cats[i].kind || 'other';
     return 'other';
   }
 
   // One month's rows: spent (own share), by category and tag, income by kind, and
   // net = spent - reimbursed, saved = earned + other - net. Not rounded: callers round for display.
   function monthStats(rows, cats, personTag) {
-    var o = { spend: 0, earned: 0, other: 0, reimb: 0, person: 0, byCat: {}, byTag: {} };
+    var o = { spend: 0, earned: 0, other: 0, reimb: 0, person: 0, byCat: bag(), byTag: bag() };
     (rows || []).forEach(function (t) {
       if (t.t === 'exp') {
         var v = ea(t);
@@ -41,7 +73,7 @@ var Money = (function () {
 
   // Income for one month's rows, without paybacks: by category, work, other and total.
   function incomeBy(rows, cats) {
-    var by = {}, work = 0, other = 0;
+    var by = bag(), work = 0, other = 0;
     (rows || []).forEach(function (t) {
       if (t.t !== 'inc') return; var k = catKind(cats, t.cat); if (k === 'reimb') return;
       by[t.cat] = r2((by[t.cat] || 0) + t.amt); if (k === 'earned') work += t.amt; else other += t.amt;
@@ -56,13 +88,13 @@ var Money = (function () {
   // Cash basis (prop firms and poker always; brokers and crypto unless meta.basis says otherwise):
   // result = taken out - paid in, and a balance logged before any deposit is capital carried in,
   // so it counts as paid in. Otherwise: last balance - opening balance + taken out - paid in between.
-  function venueType(meta, v) { var vs = (meta && meta.venues) || {}; return (vs[v] && vs[v].type) || 'broker'; }
-  function isClosed(meta, v) { var vs = (meta && meta.venues) || {}; return !!(vs[v] && vs[v].closed); }
+  function venueType(meta, v) { var x = own(meta && meta.venues, v); return (x && x.type) || 'broker'; }
+  function isClosed(meta, v) { var x = own(meta && meta.venues, v); return !!(x && x.closed); }
   function cashBasis(meta) { return ((meta && meta.basis) || 'cash') === 'cash'; }
   function venuePnl(ledger, v, meta) {
     var type = venueType(meta, v);
     var all = (ledger || []).filter(function (e) { return e.venue === v; });
-    var partners = {};
+    var partners = bag();
     all.forEach(function (e) { if (e.who && e.who !== 'me' && e.f !== 'bal') partners[e.who] = r2((partners[e.who] || 0) + (e.f === 'in' ? e.amt : -e.amt)); });
     var es = all.filter(function (e) { return !e.who || e.who === 'me' || e.f === 'bal'; }).sort(function (a, b) {
       return a.d < b.d ? -1 : a.d > b.d ? 1 : (a.f === 'bal') - (b.f === 'bal');
@@ -101,16 +133,43 @@ var Money = (function () {
 
   // Each person's balance from the People entries: positive means they owe you. Not rounded.
   function personBalances(debts) {
-    var ppl = {}; (debts || []).forEach(function (d) { ppl[d.person] = (ppl[d.person] || 0) + d.amt; });
+    var ppl = bag(); (debts || []).forEach(function (d) { var k = d.person == null ? '' : String(d.person); ppl[k] = (ppl[k] || 0) + d.amt; });
     return ppl;
+  }
+
+  // Can a change Ask proposed be applied? The server checks every proposal, but chats are stored and
+  // replayed, so Apply checks again before anything touches the ledger: a real date, spending or
+  // income, an amount above 0 and below S$10 million (the server's limit), a category that exists and
+  // is of the entry's type, and a note of text. cur is the entry an edit changes; cats the categories.
+  function realDate(d) {
+    if (typeof d !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return false;
+    var x = new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)));
+    return x.toISOString().slice(0, 10) === d;
+  }
+  function changeOk(c, cur, cats) {
+    if (!c || typeof c !== 'object') return false;
+    if (c.op !== 'add' && c.op !== 'edit' && c.op !== 'delete') return false;
+    if (c.op !== 'add' && !cur) return false;
+    if (c.op === 'delete') return true;
+    if (c.d != null && !realDate(c.d)) return false;
+    if (c.t != null && c.t !== 'exp' && c.t !== 'inc') return false;
+    if (c.amt != null && !(typeof c.amt === 'number' && c.amt > 0 && c.amt < 1e7)) return false;
+    if (c.note != null && typeof c.note !== 'string') return false;
+    if (c.op === 'add' && (c.amt == null || c.cat == null)) return false;
+    var name = c.cat != null ? c.cat : cur && cur.cat, cat = null;
+    for (var i = 0; Array.isArray(cats) && i < cats.length; i++) if (cats[i] && cats[i].name === name) { cat = cats[i]; break; }
+    if (c.cat != null && !cat) return false;
+    var t = c.t || (cur && cur.t) || (cat && cat.type);
+    if (cat && cat.type && t && cat.type !== t) return false; // spending filed under an income category, or the reverse
+    return true;
   }
 
   // A subscription's cost per month.
   function monthlyEquiv(s) { return s.amt / (s.cycle || 1); }
 
   return {
-    r2: r2, sum: sum, ea: ea, catKind: catKind, monthStats: monthStats, incomeBy: incomeBy, tagSpend: tagSpend,
+    r2: r2, sum: sum, num: num, cleanTx: cleanTx, cleanDebts: cleanDebts, cleanLedger: cleanLedger, ea: ea, catKind: catKind, monthStats: monthStats, incomeBy: incomeBy, tagSpend: tagSpend,
     venueType: venueType, isClosed: isClosed, cashBasis: cashBasis, venuePnl: venuePnl,
-    personBalances: personBalances, monthlyEquiv: monthlyEquiv
+    personBalances: personBalances, monthlyEquiv: monthlyEquiv, changeOk: changeOk
   };
 })();

@@ -31,6 +31,9 @@ function stampSide(t, side) { if (!side) return; var ck = checksSorted().filter(
 function localZone() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Singapore'; } catch (e) { return 'Asia/Singapore'; } }
 function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
 function sum(a, f) { return Money.sum(a, f); }
+// A map keyed by names the owner typed (categories, notes, people, wallets): no prototype, so a name
+// like "constructor" or "__proto__" is counted like any other and never reaches Object.prototype.
+function bag() { return Object.create(null); }
 // Every change is recorded as one history entry holding the previous version of just the
 // parts that changed (a month of transactions, People, PayLater...). Undo steps back
 // through them in order; undoing is itself recorded, so it can be redone.
@@ -187,7 +190,7 @@ function freshMeta() {
 }
 var S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [], chats: [] };
 var SCHEMA = 3;
-function num(v) { var n = typeof v === 'number' ? v : parseFloat(v); return isFinite(n) ? r2(n) : 0; }
+function num(v) { return Money.num(v); }
 // Runs on every load and after every sync. It only ever repairs shape (missing
 // fields, text amounts, rows filed under the wrong month, repeated ids); it
 // never decides what your money means, so it is safe to run as often as needed.
@@ -348,26 +351,22 @@ function normalize() {
   // transactions: one bucket per month, ids unique, amounts numeric and positive
   var seen = {}, fixed = {}, moved = 0;
   Object.keys(S.tx).forEach(function (k) {
-    (S.tx[k] || []).forEach(function (t) {
+    (Array.isArray(S.tx[k]) ? S.tx[k] : []).forEach(function (t) {
       if (!t || !t.d || !/^\d{4}-\d{2}-\d{2}$/.test(t.d)) return;
       if (!t.id || seen[t.id]) t.id = uid();
       seen[t.id] = 1;
-      t.amt = Math.abs(num(t.amt)); if (!t.amt) return;
-      t.tags = Array.isArray(t.tags) ? t.tags : [];
+      if (!Money.cleanTx(t)) return; // amount in cents and positive, tags a list, split share within the bill
       t.sub = cleanSub(t.sub);
-      if (t.split) { t.split.mine = Math.min(num(t.split.mine), t.amt); if (!t.split.person) delete t.split; }
       if (monthOf(t.d) !== k) moved++;
       (fixed[monthOf(t.d)] = fixed[monthOf(t.d)] || []).push(t);
     });
   });
   S.tx = fixed;
+  S.ledger = Money.cleanLedger(S.ledger); S.debts = Money.cleanDebts(S.debts);
   ['ledger', 'debts'].forEach(function (k) {
     var ids = {};
-    S[k] = S[k].filter(function (e) { return e && e.d; }).map(function (e) {
-      if (!e.id || ids[e.id]) e.id = uid(); ids[e.id] = 1; e.amt = num(e.amt); return e;
-    });
+    S[k].forEach(function (e) { if (!e.id || ids[e.id]) e.id = uid(); ids[e.id] = 1; });
   });
-  S.ledger = S.ledger.filter(function (e) { return e.f === 'bal' || e.amt > 0; });
   if (!catObj('\u2753 Unaccounted')) m.cats.push({ name: '\u2753 Unaccounted', type: 'exp' });
   allTx().forEach(function (t) { rememberSub(t.cat, t.sub); });
   if (!m.walletsV1) {
@@ -414,17 +413,29 @@ function allTx() { var a = []; Object.keys(S.tx).forEach(function (k) { a = a.co
 function catObj(name) { for (var i = 0; i < S.meta.cats.length; i++) if (S.meta.cats[i].name === name) return S.meta.cats[i]; return null; }
 function incKind(name) { return Money.catKind(S.meta.cats, name); }
 function cleanSub(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+// Subcategories per category name, stored as a plain object (it is saved as JSON). Read and write it by
+// own key only: a category called "constructor" or "__proto__" would otherwise get JavaScript's
+// built-ins back instead of a list, and the app failed to start.
+function subList(cat) { var o = S.meta.subcats; return o && Object.prototype.hasOwnProperty.call(o, cat) && Array.isArray(o[cat]) ? o[cat] : null; }
+// A venue's settings by name, the same way: own keys only, created as an own property when asked.
+function venueMeta(v, make) {
+  var o = S.meta.venues;
+  if (Object.prototype.hasOwnProperty.call(o, v)) return o[v];
+  if (!make) return null;
+  return venueSet(v, make);
+}
+function venueSet(v, x) { Object.defineProperty(S.meta.venues, v, { value: x, enumerable: true, writable: true, configurable: true }); return x; }
+function setSubs(cat, list) { S.meta.subcats = S.meta.subcats || {}; Object.defineProperty(S.meta.subcats, cat, { value: list, enumerable: true, writable: true, configurable: true }); }
 function rememberSub(cat, sub) {
   sub = cleanSub(sub); if (!cat || !sub) return;
-  S.meta.subcats = S.meta.subcats || {};
-  var a = S.meta.subcats[cat] = S.meta.subcats[cat] || [];
+  var a = subList(cat); if (!a) { a = []; setSubs(cat, a); }
   if (a.indexOf(sub) < 0) { a.push(sub); a.sort(function (x, y) { return x.localeCompare(y); }); }
 }
-function subsFor(cat) { return (S.meta.subcats && S.meta.subcats[cat]) ? S.meta.subcats[cat].slice() : []; }
+function subsFor(cat) { var a = subList(cat); return a ? a.slice() : []; }
 function removeKnownSub(cat, sub) {
-  if (!S.meta.subcats || !S.meta.subcats[cat]) return;
-  S.meta.subcats[cat] = S.meta.subcats[cat].filter(function (x) { return x !== sub; });
-  if (!S.meta.subcats[cat].length) delete S.meta.subcats[cat];
+  var a = subList(cat); if (!a) return;
+  a = a.filter(function (x) { return x !== sub; });
+  if (a.length) setSubs(cat, a); else delete S.meta.subcats[cat];
 }
 function cashBasis() { return Money.cashBasis(S.meta); }
 function isClosed(v) { return Money.isClosed(S.meta, v); }
@@ -524,8 +535,10 @@ function mergeMeta(local, remote) {
   m.venues = v;
   m.subcats = JSON.parse(JSON.stringify(local.subcats || {}));
   Object.keys(remote.subcats || {}).forEach(function (c) {
-    if (base && !(local.subcats || {})[c]) return;
-    m.subcats[c] = mergeBy(m.subcats[c] || [], remote.subcats[c], function (x) { return x; }).sort();
+    var has = function (o) { return o && Object.prototype.hasOwnProperty.call(o, c) && Array.isArray(o[c]); };
+    if (base && !has(local.subcats)) return;
+    if (!Array.isArray(remote.subcats[c])) return;
+    Object.defineProperty(m.subcats, c, { value: mergeBy(has(m.subcats) ? m.subcats[c] : [], remote.subcats[c], function (x) { return x; }).sort(), enumerable: true, writable: true, configurable: true });
   });
   return m;
 }
@@ -819,7 +832,7 @@ function wireLogin() {
 function monthStats(m) { return Money.monthStats(S.tx[m] || [], S.meta.cats, personTag()); }
 function tagSpend(m, tag) { return Money.tagSpend(S.tx[m] || [], tag); }
 function priorAvg(m) {
-  var acc = {}, n = 0, net = 0;
+  var acc = bag(), n = 0, net = 0;
   for (var k = 1; k <= 3; k++) {
     var pm = addMonth(m, -k); if (!S.tx[pm] || !S.tx[pm].length) continue; n++;
     var st = monthStats(pm); Object.keys(st.byCat).forEach(function (c) { acc[c] = (acc[c] || 0) + st.byCat[c]; }); net += st.net;
@@ -974,10 +987,10 @@ function noteKey(n) { return String(n || '').trim().toLowerCase(); }
 function sugDay(d) { return d.slice(0, 4) === today().slice(0, 4) ? dayLabel(d) : dayYear(d); } // the year only when it isn't this one
 // For each note you have logged, what you usually pay and which category you usually pick.
 function noteHabits() {
-  var g = {};
+  var g = bag();
   allTx().forEach(function (t) {
     if (t.t !== 'exp' || t.feeOf || t.propOf || !t.note) return;
-    var o = g[noteKey(t.note)] || (g[noteKey(t.note)] = { amts: [], cats: {}, n: 0 });
+    var o = g[noteKey(t.note)] || (g[noteKey(t.note)] = { amts: [], cats: bag(), n: 0 });
     o.amts.push(t.amt); o.cats[t.cat] = (o.cats[t.cat] || 0) + 1; o.n++;
   });
   Object.keys(g).forEach(function (k) {
@@ -993,7 +1006,7 @@ function noteHabits() {
 // sounds like an expense) from a real slip. Everything comes from the owner's own
 // entries; nothing is fixed in advance.
 function usualPatterns(entries) {
-  var wantN = {}, wantC = {}, gn = {}, gc = {}, skip = {};
+  var wantN = bag(), wantC = bag(), gn = bag(), gc = bag(), skip = bag();
   entries.forEach(function (t) {
     if (t.note) { var k = noteKey(t.note); if (!(k in wantN)) wantN[k] = t.note.trim(); }
     if (t.cat && !(t.cat in wantC)) wantC[t.cat] = 1;
@@ -1006,12 +1019,12 @@ function usualPatterns(entries) {
     if (t.note) {
       var k = noteKey(t.note);
       if (k in wantN) {
-        var o = gn[k] || (gn[k] = { note: wantN[k], amts: [], types: {}, cats: {}, n: 0 });
+        var o = gn[k] || (gn[k] = { note: wantN[k], amts: [], types: bag(), cats: bag(), n: 0 });
         o.amts.push(t.amt); o.types[t.t] = (o.types[t.t] || 0) + 1; o.cats[t.cat || ''] = (o.cats[t.cat || ''] || 0) + 1; o.n++;
       }
     }
     if (t.cat && (t.cat in wantC)) {
-      var c = gc[t.cat] || (gc[t.cat] = { cat: t.cat, types: {}, n: 0 });
+      var c = gc[t.cat] || (gc[t.cat] = { cat: t.cat, types: bag(), n: 0 });
       c.types[t.t] = (c.types[t.t] || 0) + 1; c.n++;
     }
   });
@@ -1176,7 +1189,7 @@ function aiContext() {
   if (S.meta.budgets.length) L.push('Monthly budgets: ' + S.meta.budgets.map(function (b) { return b.key.slice(4) + ' ' + b.amt; }).join(', '));
   var subs = S.meta.subs.filter(function (x) { return x.active !== false; });
   if (subs.length) L.push('Subscriptions: ' + subs.map(function (x) { return x.name + ' ' + x.amt + ' ' + cycleLabel(x.cycle); }).join(', '));
-  var ppl = {}; S.debts.forEach(function (d) { ppl[d.person] = r2((ppl[d.person] || 0) + d.amt); });
+  var ppl = bag(); S.debts.forEach(function (d) { ppl[d.person] = r2((ppl[d.person] || 0) + d.amt); });
   var owed = Object.keys(ppl).filter(function (n) { return Math.abs(ppl[n]) > 0.005; });
   if (owed.length) L.push('People balances (positive means they owe me): ' + owed.map(function (n) { return n + ' ' + ppl[n]; }).join(', '));
   // income by source, month by month, all months, so "where did I earn money" can be broken down
@@ -1679,7 +1692,7 @@ function chgCard(m, i) {
 // One change, through the same path the Suggestions sheet uses. False when it no longer fits.
 function chgApply(c) {
   if (c.op === 'add') {
-    var cat = catObj(c.cat); if (!cat || !(c.amt > 0)) return false;
+    var cat = catObj(c.cat); if (!cat || !Money.changeOk(c, null, S.meta.cats)) return false;
     var t = { id: uid(), d: c.d || today(), t: c.t || cat.type || 'exp', amt: r2(c.amt), cat: c.cat, sub: '', note: c.note || '', tags: [], src: 'app' };
     t.acct = c.acct && wallets().indexOf(c.acct) > -1 ? c.acct : defWallet();
     stampSide(t, c.count_side);
@@ -1689,6 +1702,7 @@ function chgApply(c) {
   }
   var x = findTx(c.id), w = c.was;
   if (!x || !w || JSON.stringify(chgSig(x)) !== JSON.stringify(w)) return false;
+  if (!Money.changeOk(c, x, S.meta.cats)) return false; // checked again: a stored chat is replayed as it was saved
   if (c.op === 'delete') { applyDoubt({ t: x, fix: { remove: true } }); return true; }
   if (c.cat != null && !catObj(c.cat)) return false;
   applyDoubt({ t: x, fix: { apply: function (y) {
@@ -1957,7 +1971,7 @@ function paceLine(m, st, avg) {
     (usual > 0 ? ', against your usual ' + money(usual, 0) : '') + '</span></div>';
 }
 function frequentNotes() {
-  var since = addDays(today(), -60), g = {};
+  var since = addDays(today(), -60), g = bag();
   allTx().forEach(function (t) {
     if (t.t !== 'exp' || !t.note || t.d < since || t.split || t.propOf) return;
     var k = t.note.trim().toLowerCase(), o = g[k] || (g[k] = { n: 0, t: t });
@@ -1976,7 +1990,7 @@ function earnHero(m, quick) {
   var cur = incomeBy(m), prev = [1, 2, 3].map(function (k) { return incomeBy(addMonth(m, -k)); }).filter(function (x) { return x.total > 0; });
   // compare work income only: gifts and bonuses are one-offs and would distort "usual"
   var usual = prev.length ? r2(sum(prev, function (x) { return x.work; }) / prev.length) : null;
-  var avgBy = {}; prev.forEach(function (x) { Object.keys(x.by).forEach(function (c) { avgBy[c] = (avgBy[c] || 0) + x.by[c] / prev.length; }); });
+  var avgBy = bag(); prev.forEach(function (x) { Object.keys(x.by).forEach(function (c) { avgBy[c] = (avgBy[c] || 0) + x.by[c] / prev.length; }); });
   var cats = Object.keys(cur.by).sort(function (a, b) { return cur.by[b] - cur.by[a]; });
   var h = '<div class="hero earn">' + heroToggle() + '<div class="lbl">Earned in ' + monthLabel(m, true) + '</div>' +
     '<div class="big"><small>$</small><span data-count="' + Math.round(cur.total) + '">' + Math.round(cur.total).toLocaleString('en-SG') + '</span></div>' +
@@ -2203,7 +2217,7 @@ function movementRows() {
       sub: (t.from || '?') + ' \u2192 ' + (t.to || '?'), right: money(t.amt), av: '\u21c4',
       attr: 'data-edit-xfer="' + esc(t.id) + '"', text: (t.note || '') + ' ' + (t.from || '') + ' ' + (t.to || '') });
   });
-  var lumps = {};
+  var lumps = bag();
   S.bills.forEach(function (b) {
     (b.payments || []).forEach(function (pm) {
       if (!pm.payId) return;
@@ -2283,10 +2297,10 @@ function filterSheet() {
 }
 function catFilterSheet(openCat) {
   var scope = UI.all ? allTx() : (S.tx[UI.month] || []);
-  var cats = {};
+  var cats = bag();
   scope.forEach(function (t) {
     if (t.t !== 'exp' && t.t !== 'inc') return;
-    var c = cats[t.cat] = cats[t.cat] || { n: 0, amt: 0, subs: {} };
+    var c = cats[t.cat] = cats[t.cat] || { n: 0, amt: 0, subs: bag() };
     c.n++; c.amt += ea(t);
     var sb = cleanSub(t.sub) || '(no subcategory)';
     var o = c.subs[sb] = c.subs[sb] || { n: 0, amt: 0 }; o.n++; o.amt += ea(t);
@@ -2640,8 +2654,8 @@ function whatsNewSheet() {
 }
 function cycleLabel(c) { return { 1: 'monthly', 3: 'quarterly', 6: 'every 6 months', 12: 'yearly' }[c] || 'every ' + c + ' months'; }
 function subSuggestions() {
-  var have = {}; S.meta.subs.forEach(function (s) { have[s.name.toLowerCase()] = 1; });
-  var g = {};
+  var have = bag(); S.meta.subs.forEach(function (s) { have[s.name.toLowerCase()] = 1; });
+  var g = bag();
   allTx().forEach(function (t) {
     if (t.t !== 'exp' || t.cat !== '🗓 Subscriptions' || !t.note) return;
     var k = t.note.trim(); if (have[k.toLowerCase()]) return;
@@ -2803,7 +2817,7 @@ function maybeFirstRun() {
 
 // Notes you have written before, most used and most recent first.
 function noteIndex() {
-  var g = {};
+  var g = bag();
   allTx().forEach(function (t) {
     var n = (t.note || '').trim(); if (n.length < 2) return;
     var k = n.toLowerCase(), o = g[k] || (g[k] = { note: n, n: 0, last: '', tx: t });
@@ -2859,7 +2873,7 @@ function txSheet(existing, asNew) {
     var all = S.meta.cats.filter(function (c) { return c.type === t.t; }).map(function (c) { return c.name; }), list = all;
     if (!showAllCats && all.length > 8) {
       // the six you have used most in the last four months, plus whatever is already picked
-      var since = addDays(today(), -120), n = {};
+      var since = addDays(today(), -120), n = bag();
       allTx().forEach(function (x) { if (x.t === t.t && x.d >= since && x.cat) n[x.cat] = (n[x.cat] || 0) + 1; });
       list = all.slice().sort(function (a, b) { return (n[b] || 0) - (n[a] || 0) || all.indexOf(a) - all.indexOf(b); }).slice(0, 6);
       if (t.cat && list.indexOf(t.cat) < 0) list.push(t.cat);
@@ -3392,7 +3406,7 @@ function ledgerSheet(opts) {
       if (!(a >= 0) || (e.f !== 'bal' && !(a > 0))) { toast('Enter an amount'); return; }
       if (sel.value === '__new') {
         var nm = $('#nvn', el).value.trim(); if (!nm) { toast('Name the account'); return; }
-        S.meta.venues[nm] = { name: nm, type: newType }; mark('meta'); e.venue = nm;
+        venueSet(nm, { name: nm, type: newType }); mark('meta'); e.venue = nm;
       }
       if (!e.venue) { toast('Choose an account'); return; }
       e.amt = r2(a); e.note = $('#note', el).value.trim(); e.d = $('#dt', el).value || today();
@@ -3424,7 +3438,7 @@ function venueSheet(v) {
   body += '<label class="f" style="margin-top:18px">Group</label><div class="seg" id="vty">' + [['broker', 'Broker'], ['prop', 'Prop firm'], ['poker', 'Poker'], ['crypto', 'Crypto']].map(function (x) { return '<button data-ty="' + x[0] + '" aria-pressed="' + (ty === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>' +
     '<label class="f">Status</label><div class="seg" id="vcl"><button data-cl="0" aria-pressed="' + !isClosed(v) + '">Still using</button><button data-cl="1" aria-pressed="' + isClosed(v) + '">Closed</button></div>';
   openSheet(v, body, function (el) {
-    function vm() { return S.meta.venues[v] || (S.meta.venues[v] = { name: v, type: ty }); }
+    function vm() { return venueMeta(v) || venueMeta(v, { name: v, type: ty }); }
     $('#vty', el).addEventListener('click', function (e) { var b = e.target.closest('[data-ty]'); if (!b) return; vm().type = b.dataset.ty; mark('meta'); render(); venueSheet(v); });
     $('#vcl', el).addEventListener('click', function (e) { var b = e.target.closest('[data-cl]'); if (!b) return; vm().closed = b.dataset.cl === '1'; mark('meta'); render(); venueSheet(v); });
     $('#addv', el).addEventListener('click', function () { ledgerSheet({ venue: v }); });
@@ -3609,10 +3623,10 @@ function renameCat(oldName, newName) {
   });
   S.inbox.forEach(function (r) { if (r.cat === oldName) r.cat = newName; });
   S.meta.budgets.forEach(function (b) { if (b.key === 'cat:' + oldName) b.key = 'cat:' + newName; });
-  if (S.meta.subcats[oldName]) {
-    var keep = S.meta.subcats[newName] || [];
-    S.meta.subcats[oldName].forEach(function (x) { if (keep.indexOf(x) < 0) keep.push(x); });
-    S.meta.subcats[newName] = keep.sort(function (a, b) { return a.localeCompare(b); });
+  if (subList(oldName)) {
+    var keep = (subList(newName) || []).slice();
+    subList(oldName).forEach(function (x) { if (keep.indexOf(x) < 0) keep.push(x); });
+    setSubs(newName, keep.sort(function (a, b) { return a.localeCompare(b); }));
     delete S.meta.subcats[oldName];
   }
   var old = catObj(oldName);
@@ -3772,7 +3786,8 @@ function applyImport(res) {
   S.ledger = S.ledger.filter(function (e) { return e.src !== 'mm'; }).concat(res.ledger);
   S.debts = S.debts.filter(function (e) { return e.src !== 'mm'; }).concat(res.debts);
   Object.keys(res.cats).forEach(function (k) { if (!catObj(k)) S.meta.cats.push(res.cats[k]); });
-  Object.keys(res.venues).forEach(function (k) { if (!S.meta.venues[k]) S.meta.venues[k] = res.venues[k]; });
+  // an own property even for a name like "__proto__", so it is stored as a venue, never as a prototype
+  Object.keys(res.venues).forEach(function (k) { if (!Object.prototype.hasOwnProperty.call(S.meta.venues, k)) Object.defineProperty(S.meta.venues, k, { value: res.venues[k], enumerable: true, writable: true, configurable: true }); });
   mark('meta'); mark('ledger'); mark('debts');
   old.concat(Object.keys(S.tx)).forEach(markMonth);
   var months = Object.keys(S.tx).sort(); if (months.length) UI.month = months[months.length - 1];
@@ -4007,7 +4022,7 @@ function csvImportSheet() {
               .map(function (x) { return keep[x.id] ? Object.assign({}, x, keep[x.id]) : x; });
             diff.add.forEach(function (e) { S.ledger.push(e); });
             S.ledger.forEach(function (e) {
-              if (e.group) { if (!S.meta.venues[e.venue]) S.meta.venues[e.venue] = { name: e.venue, type: /prop|poker|crypto/.test(e.group) ? e.group : 'broker' }; delete e.group; }
+              if (e.group) { venueMeta(e.venue, { name: e.venue, type: /prop|poker|crypto/.test(e.group) ? e.group : 'broker' }); delete e.group; }
             });
             mark('ledger'); mark('meta');
           } else {
@@ -4222,7 +4237,7 @@ function flowsSince(c) {
 // agrees with the balance check.
 function accountBalances() {
   var lc = lastCheck(), since = lc ? lc.d : null, lines = (lc && lc.lines) || {};
-  var accs = wallets(), bal = {}, touched = {};
+  var accs = wallets(), bal = bag(), touched = bag();
   accs.forEach(function (n) { bal[n] = lines[n] != null ? +lines[n] : null; });
   var noWallet = 0, noWalletN = 0, people = 0;
   if (lc) walletMoves(lc).forEach(function (m) {
@@ -4376,7 +4391,7 @@ function walletFlows(n) {
     if (x.acct !== n || x.txId || x.ledgerId) return;
     out.push({ d: x.d, ref: x, amt: -x.amt, title: x.k === 'settle' ? 'Settled up with ' + x.person : x.amt > 0 ? (x.k === 'paid' ? 'Paid ' + x.person + ' back' : 'Lent to ' + x.person) : x.person + ' paid you', sub: x.note || 'People', attr: 'data-person="' + esc(x.person) + '"', av: '\u21c4', kind: 'xfer' });
   });
-  var lumps = {};
+  var lumps = bag();
   S.bills.forEach(function (b) {
     (b.payments || []).forEach(function (p) {
       if (p.from !== n) return; var k = p.payId || p.id;
@@ -5938,7 +5953,7 @@ function dataMonths() {
   return out;
 }
 function catColorMap() {
-  var tot = {}; allTx().forEach(function (t) { if (t.t === 'exp') tot[t.cat] = (tot[t.cat] || 0) + ea(t); });
+  var tot = bag(); allTx().forEach(function (t) { if (t.t === 'exp') tot[t.cat] = (tot[t.cat] || 0) + ea(t); });
   var order = Object.keys(tot).sort(function (a, b) { return tot[b] - tot[a]; }), pal = isDark() ? COVE_D : COVE_L, map = {};
   order.forEach(function (c, i) { map[c] = i < 5 ? pal[i] : pal[7]; });
   return { map: map, top: order.slice(0, 5) };
@@ -5989,13 +6004,13 @@ function inTrend(t) { return trendKind() === 'inc' ? t.t === 'inc' && incKind(t.
 function trendAmt(t) { return t.t === 'exp' ? ea(t) : t.amt; }
 function trendData() {
   var ms = trendMonths(), ix = {}; ms.forEach(function (m, i) { ix[m] = i; });
-  var cats = {};
+  var cats = bag();
   allTx().forEach(function (t) {
     if (!inTrend(t) || ix[monthOf(t.d)] == null) return;
-    var c = cats[t.cat] = cats[t.cat] || { name: t.cat, m: ms.map(function () { return 0; }), subs: {}, notes: {} };
+    var c = cats[t.cat] = cats[t.cat] || { name: t.cat, m: ms.map(function () { return 0; }), subs: bag(), notes: bag() };
     var v = trendAmt(t), i = ix[monthOf(t.d)], sb = cleanSub(t.sub) || 'No subcategory';
     c.m[i] += v;
-    var s = c.subs[sb] = c.subs[sb] || { name: sb, m: ms.map(function () { return 0; }), notes: {} }; s.m[i] += v;
+    var s = c.subs[sb] = c.subs[sb] || { name: sb, m: ms.map(function () { return 0; }), notes: bag() }; s.m[i] += v;
     var n = (t.note || '').trim().toLowerCase();
     if (n) [c.notes, s.notes].forEach(function (bag) { var o = bag[n] = bag[n] || { note: t.note.trim(), n: 0, amt: 0 }; o.n++; o.amt += v; });
   });
@@ -6141,7 +6156,7 @@ function lensTag() {
 }
 function lensData(tag) {
   var ms = trendMonths(), ix = {}; ms.forEach(function (m, i) { ix[m] = i; });
-  var L = { tag: tag, months: ms, m: ms.map(function () { return 0; }), days: ms.map(function () { return {}; }), cats: {}, wd: [0, 0, 0, 0, 0, 0, 0].map(function () { return { days: {}, amt: 0 }; }), items: [], covered: 0 };
+  var L = { tag: tag, months: ms, m: ms.map(function () { return 0; }), days: ms.map(function () { return {}; }), cats: bag(), wd: [0, 0, 0, 0, 0, 0, 0].map(function () { return { days: {}, amt: 0 }; }), items: [], covered: 0 };
   var all = ms.map(function () { return 0; });
   allTx().forEach(function (t) {
     if (t.t !== 'exp' || ix[monthOf(t.d)] == null) return;
@@ -6280,7 +6295,7 @@ function renderOverview() {
   more += '<section class="blk"><h2>Every day, last 20 weeks</h2>' + heatmap(byDay) + '<p class="note">Darker means more spent. Empty squares are days with nothing logged; if you know you spent, that is where a gap hides.</p></section>';
 
   // category table
-  var cc = catColorMap(), catT = {}; exps.forEach(function (t) { catT[t.cat] = (catT[t.cat] || 0) + ea(t); });
+  var cc = catColorMap(), catT = bag(); exps.forEach(function (t) { catT[t.cat] = (catT[t.cat] || 0) + ea(t); });
   var lastM = ms[ms.length - 1], prevAvg = priorAvg(lastM) || {}, lastSt = monthStats(lastM);
   // a month in progress compares with what you usually spend by today, like Month does
   var ovDay = +today().slice(8, 10), ovNow = lastM === monthOf(today()) ? Math.min(1, ovDay / new Date(+lastM.slice(0, 4), +lastM.slice(5, 7), 0).getDate()) : 1;
@@ -6291,7 +6306,7 @@ function renderOverview() {
     }).join('') + '</div></section>';
 
   // top places
-  var pl = {}; exps.forEach(function (t) { var n = normNote(t.note); if (!n || n.length < 3) return; var o = pl[n] || (pl[n] = { n: t.note, amt: 0, c: 0 }); o.amt += ea(t); o.c++; });
+  var pl = bag(); exps.forEach(function (t) { var n = normNote(t.note); if (!n || n.length < 3) return; var o = pl[n] || (pl[n] = { n: t.note, amt: 0, c: 0 }); o.amt += ea(t); o.c++; });
   var tops = Object.keys(pl).map(function (k) { return pl[k]; }).filter(function (o) { return o.c > 1; }).sort(function (a, b) { return b.amt - a.amt; }).slice(0, 10);
   if (tops.length) more += '<section class="blk"><h2>Where the money repeats</h2><div class="panel">' + tops.map(function (o) {
     return '<div class="row"><div class="l"><b>' + esc(o.n) + '</b><span>' + o.c + ' times, ' + money(o.amt / o.c) + ' each on average</span></div><div class="r">' + money(o.amt, 0) + '</div></div>';
@@ -6301,7 +6316,7 @@ function renderOverview() {
   more += '<section class="blk"><h2>Largest purchases</h2><div class="panel">' + bigs.map(txRow).join('') + '</div></section>';
 
   // income sources
-  var incs = {}; tx.filter(function (t) { return t.t === 'inc'; }).forEach(function (t) { incs[t.cat] = (incs[t.cat] || 0) + t.amt; });
+  var incs = bag(); tx.filter(function (t) { return t.t === 'inc'; }).forEach(function (t) { incs[t.cat] = (incs[t.cat] || 0) + t.amt; });
   var incK = Object.keys(incs).sort(function (a, b) { return incs[b] - incs[a]; });
   if (incK.length) more += chartBlock('c6', incK[0] + ' is your biggest source of money in', 'Total over this period. Paybacks included', incK.length * 34 + 30, '');
 
@@ -6382,7 +6397,7 @@ function drawOverview() {
   var wa = wd.map(function (v, i) { return wn[i] ? r2(v / wn[i]) : 0; }), mx = Math.max.apply(null, wa);
   mk('c5', { type: 'bar', data: { labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], datasets: [Object.assign({ label: 'Average', data: wa, backgroundColor: wa.map(function (v) { return v === mx ? pal[0] : (isDark() ? '#2B3346' : '#CDD5E4'); }) }, bar)] }, options: base(false) });
   // c6 income sources
-  var incs = {}; allTx().filter(function (t) { return t.t === 'inc' && ms.indexOf(monthOf(t.d)) > -1; }).forEach(function (t) { incs[t.cat] = (incs[t.cat] || 0) + t.amt; });
+  var incs = bag(); allTx().filter(function (t) { return t.t === 'inc' && ms.indexOf(monthOf(t.d)) > -1; }).forEach(function (t) { incs[t.cat] = (incs[t.cat] || 0) + t.amt; });
   var ik = Object.keys(incs).sort(function (a, b) { return incs[b] - incs[a]; });
   mk('c6', { type: 'bar', data: { labels: ik, datasets: [Object.assign({ label: 'Total', data: ik.map(function (k) { return r2(incs[k]); }), backgroundColor: ik.map(function (k) { return incKind(k) === 'earned' ? cssv('--gain') : incKind(k) === 'reimb' ? (isDark() ? '#3A4D94' : '#A9BBFF') : pal[3]; }) }, bar)] }, options: base(false, true) });
   // c7 cumulative trading
