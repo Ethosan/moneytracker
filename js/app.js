@@ -12,6 +12,9 @@ function money(n, dp) {
   var s = Math.abs(n).toLocaleString('en-SG', { minimumFractionDigits: d, maximumFractionDigits: d });
   return (n < 0 ? '−' : '') + '$' + s;
 }
+// The Month hero's big figure in whole dollars. A minus goes before the $ the way money() writes it
+// ("−$7", not "$-7"); the count-up animation runs to the figure without its sign.
+function heroBig(v) { var n = Math.round(v); return '<div class="big">' + (n < 0 ? '−' : '') + '<small>$</small><span data-count="' + Math.abs(n) + '">' + Math.abs(n).toLocaleString('en-SG') + '</span></div>'; }
 function tone(n) { return n > 0.005 ? 'pos' : n < -0.005 ? 'neg' : ''; }
 function signed(n, dp) { return n == null ? '–' : (n > 0 ? '+' : '') + money(n, dp); }
 function monthLabel(m, short) { var i = +m.slice(5, 7) - 1; return short ? MN[i] : ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'][i] + ' ' + m.slice(0, 4); }
@@ -23,7 +26,7 @@ function countLabel(c) { var t = c && whenMade(c); return dayLabel(c.d) + (t != 
 // The same for the assistant: "2026-10-26 at 14:32"
 function countStamp(c) { var t = c && whenMade(c); return c.d + (t != null ? ' at ' + new Date(t).toTimeString().slice(0, 5) : ''); }
 // Is wallet flow or move f (a day plus the entry it came from) after count c?
-function flowAfter(c, f) { var r = f.ref || {}; return afterCount(c, { d: f.d, id: r.id, at: r.at, gapOf: r.gapOf }); }
+function flowAfter(c, f) { return Money.flowAfter(c, f); }
 // A new entry dated a count's day gets a time just before that count, so it sits inside the count's stretch.
 function stampBefore(t, c) { var at = besideCount(c, -1); if (at) t.at = at; return t; }
 // Put an entry on the asked side ('before' or 'after') of the balance count made on its day, if there was one.
@@ -1993,7 +1996,7 @@ function earnHero(m, quick) {
   var avgBy = bag(); prev.forEach(function (x) { Object.keys(x.by).forEach(function (c) { avgBy[c] = (avgBy[c] || 0) + x.by[c] / prev.length; }); });
   var cats = Object.keys(cur.by).sort(function (a, b) { return cur.by[b] - cur.by[a]; });
   var h = '<div class="hero earn">' + heroToggle() + '<div class="lbl">Earned in ' + monthLabel(m, true) + '</div>' +
-    '<div class="big"><small>$</small><span data-count="' + Math.round(cur.total) + '">' + Math.round(cur.total).toLocaleString('en-SG') + '</span></div>' +
+    heroBig(cur.total) +
     '<div class="sub">' + money(cur.work, 0) + ' from work, ' + money(cur.other, 0) + ' gifts and bonuses</div>';
   if (usual != null) {
     var pct = usual > 0 ? Math.min(100, cur.work / usual * 100) : 0;
@@ -2055,7 +2058,7 @@ function renderHome() {
   if (UI.homeMode === 'earn') h += earnHero(m, quick);
   else {
   h += '<div class="hero">' + heroToggle() + '<div class="lbl">Spent in ' + monthLabel(m, true) + ', after paybacks</div>' +
-    '<div class="big"><small>$</small><span data-count="' + Math.round(st.net) + '">' + Math.round(st.net).toLocaleString('en-SG') + '</span></div>' +
+    heroBig(st.net) +
     '<div class="sub">' + money(st.spend, 0) + ' out, ' + money(st.reimb, 0) + ' paid back by friends</div>' + paceLine(m, st, avg);
   if (cats.length) {
     // tape: person-tagged share drawn as its own hatched segment
@@ -4214,23 +4217,10 @@ function themeSheet() {
 }
 
 // ---------- balance checks ----------
-function flowsSince(c) {
-  // net change to your money after count c, up to today. An entry dated the count day is after the
-  // count only if it was logged after the count was saved (afterCount in dates.js).
-  var n = 0, b = today();
-  allTx().forEach(function (t) {
-    if (!afterCount(c, t) || t.d > b || t.t === 'xfer' || t.propOf) return; // transfers leave your total unchanged; prop mirrors carry no cash
-    n += t.t === 'exp' ? -t.amt : t.amt; // full amount: the cash really did leave
-  });
-  S.ledger.forEach(function (e) { if (afterCount(c, e) && e.d <= b && e.f !== 'bal') n += e.f === 'out' ? e.amt : -e.amt; });
-  S.debts.forEach(function (e) {
-    // Balances created by a split purchase or by investing someone's capital carry no
-    // cash of their own: the transaction or ledger entry already moved the money.
-    if (e.txId || e.ledgerId) return;
-    if (afterCount(c, e) && e.d <= b) n -= e.amt;
-  });
-  return n;
-}
+// The ledger as js/money.js reads it: every transaction, investment entries, People entries, PayLater bills.
+function moneyData() { return { tx: allTx(), ledger: S.ledger, debts: S.debts, bills: S.bills }; }
+// Net change to your money after count c, up to today (money.js flowsSince).
+function flowsSince(c) { return Money.flowsSince(c, moneyData(), today()); }
 // Each account's balance = what you counted last time + everything since that names it. "Since"
 // means after the moment of the count: an entry dated the count day but logged later is after it.
 // Money that moved without naming an account is shown separately, so the total still
@@ -4373,48 +4363,18 @@ function deleteWallet(n, into) {
 // ---------- wallet page ----------
 // Everything that moved money in or out of one wallet, as signed amounts.
 function walletFlows(n) {
-  var out = [];
-  allTx().forEach(function (t) {
-    if (t.t === 'xfer') {
-      if (t.from === n) out.push({ d: t.d, ref: t, amt: -t.amt, title: t.note || 'Transfer', sub: 'To ' + t.to, attr: 'data-edit-xfer="' + esc(t.id) + '"', av: '\u21c4', kind: 'xfer' });
-      if (t.to === n) out.push({ d: t.d, ref: t, amt: t.amt, title: t.note || 'Transfer', sub: 'From ' + t.from, attr: 'data-edit-xfer="' + esc(t.id) + '"', av: '\u21c4', kind: 'xfer' });
-      return;
-    }
-    if (t.pm === 'later' || t.acct !== n || t.propOf) return;
-    out.push({ d: t.d, ref: t, amt: t.t === 'exp' ? -t.amt : t.amt, title: t.note || plain(t.cat), sub: plain(t.cat) + (t.sub ? ' \u00b7 ' + t.sub : ''), attr: 'data-edit-tx="' + esc(t.id) + '"', av: avatar(t.cat), kind: t.t });
+  return Money.walletFlows(moneyData(), n).map(function (f) {
+    var t = f.ref;
+    if (f.src === 'xfer-out' || f.src === 'xfer-in') return { d: f.d, ref: t, amt: f.amt, title: t.note || 'Transfer', sub: f.src === 'xfer-out' ? 'To ' + t.to : 'From ' + t.from, attr: 'data-edit-xfer="' + esc(t.id) + '"', av: '\u21c4', kind: 'xfer' };
+    if (f.src === 'tx') return { d: f.d, ref: t, amt: f.amt, title: t.note || plain(t.cat), sub: plain(t.cat) + (t.sub ? ' \u00b7 ' + t.sub : ''), attr: 'data-edit-tx="' + esc(t.id) + '"', av: avatar(t.cat), kind: t.t };
+    if (f.src === 'inv') return { d: f.d, ref: t, amt: f.amt, title: t.venue + (t.f === 'out' ? ' withdrawal' : ' deposit'), sub: t.note || 'Investment', attr: 'data-venue="' + esc(t.venue) + '"', av: '\u2197', kind: 'inv' };
+    if (f.src === 'debt') return { d: f.d, ref: t, amt: f.amt, title: t.k === 'settle' ? 'Settled up with ' + t.person : t.amt > 0 ? (t.k === 'paid' ? 'Paid ' + t.person + ' back' : 'Lent to ' + t.person) : t.person + ' paid you', sub: t.note || 'People', attr: 'data-person="' + esc(t.person) + '"', av: '\u21c4', kind: 'xfer' };
+    return { d: f.d, ref: t, amt: f.amt, title: 'Paid ' + f.prov, sub: 'PayLater bill', attr: 'data-lump="' + esc(f.k) + '"', av: '\uD83D\uDCB3', kind: 'bill' };
   });
-  S.ledger.forEach(function (e) {
-    if (e.acct !== n || e.f === 'bal') return;
-    out.push({ d: e.d, ref: e, amt: e.f === 'out' ? e.amt : -e.amt, title: e.venue + (e.f === 'out' ? ' withdrawal' : ' deposit'), sub: e.note || 'Investment', attr: 'data-venue="' + esc(e.venue) + '"', av: '\u2197', kind: 'inv' });
-  });
-  S.debts.forEach(function (x) {
-    if (x.acct !== n || x.txId || x.ledgerId) return;
-    out.push({ d: x.d, ref: x, amt: -x.amt, title: x.k === 'settle' ? 'Settled up with ' + x.person : x.amt > 0 ? (x.k === 'paid' ? 'Paid ' + x.person + ' back' : 'Lent to ' + x.person) : x.person + ' paid you', sub: x.note || 'People', attr: 'data-person="' + esc(x.person) + '"', av: '\u21c4', kind: 'xfer' });
-  });
-  var lumps = bag();
-  S.bills.forEach(function (b) {
-    (b.payments || []).forEach(function (p) {
-      if (p.from !== n) return; var k = p.payId || p.id;
-      var L = lumps[k] = lumps[k] || { d: p.d, ref: p, amt: 0, prov: billProv(b), k: k }; L.amt = r2(L.amt + p.amt);
-    });
-  });
-  Object.keys(lumps).forEach(function (k) { var L = lumps[k]; out.push({ d: L.d, ref: L.ref, amt: -L.amt, title: 'Paid ' + L.prov, sub: 'PayLater bill', attr: 'data-lump="' + esc(k) + '"', av: '\uD83D\uDCB3', kind: 'bill' }); });
-  return out.sort(function (a, b) { return a.d < b.d ? 1 : a.d > b.d ? -1 : 0; });
 }
 // Balance on any day, anchored to your last count of this wallet. Without a count we can
-// only show how much it went up or down, so the numbers are relative.
-function walletModel(n) {
-  var flows = walletFlows(n), anchorC = null, anchorD = null, anchor = null;
-  checksSorted().reverse().some(function (c) { if (c.lines && c.lines[n] != null) { anchorC = c; anchorD = c.d; anchor = +c.lines[n]; return true; } return false; });
-  function amt(f) { return f.amt; }
-  function balOn(day) {
-    if (!anchorC) return r2(sum(flows.filter(function (f) { return f.d <= day; }), amt));
-    // the count is a moment: an entry on its day comes after it only if it was logged after it
-    if (day >= anchorD) return r2(anchor + sum(flows.filter(function (f) { return flowAfter(anchorC, f) && f.d <= day; }), amt));
-    return r2(anchor - sum(flows.filter(function (f) { return f.d > day && !flowAfter(anchorC, f); }), amt));
-  }
-  return { flows: flows, anchorC: anchorC, anchorD: anchorD, anchor: anchor, balOn: balOn, now: balOn(today()) };
-}
+// only show how much it went up or down, so the numbers are relative (money.js walletModel).
+function walletModel(n) { return Money.walletModel(walletFlows(n), checksSorted(), n, today()); }
 function walletPage(n, range) {
   range = range || UI.wrange || 90; UI.wrange = range;
   var M = walletModel(n), t0 = today();
@@ -4774,20 +4734,7 @@ function walletSub(n, b) {
 // Every entry that moves a wallet's money, after count a and up to count b (no b: up to now). On a
 // count's own day the time decides: an entry logged after the count was saved comes after it.
 // An entry that names no wallet, or one since removed, comes back with acct null.
-function walletMoves(a, b) {
-  var ok = {}, out = []; wallets().forEach(function (n) { ok[n] = 1; });
-  function add(o) { if (!flowAfter(a, o) || (b && flowAfter(b, o))) return; if (!ok[o.acct]) o.acct = null; out.push(o); }
-  allTx().forEach(function (t) {
-    // a transfer or bill payment with no wallet changes nothing you can count
-    if (t.t === 'xfer') { add({ kind: 'xfer', ref: t, d: t.d, amt: -t.amt, acct: t.from, skip: 1 }); add({ kind: 'xfer', ref: t, d: t.d, amt: t.amt, acct: t.to, skip: 1 }); return; }
-    if (t.pm === 'later' || t.propOf) return;
-    add({ kind: 'tx', ref: t, d: t.d, amt: t.t === 'exp' ? -t.amt : t.amt, acct: t.acct, skip: !!(t.feeOf || /Finance fees/.test(t.cat || '')) });
-  });
-  S.ledger.forEach(function (e) { if (e.f !== 'bal') add({ kind: 'inv', ref: e, d: e.d, amt: e.f === 'out' ? e.amt : -e.amt, acct: e.acct }); });
-  S.bills.forEach(function (bl) { (bl.payments || []).forEach(function (q) { add({ kind: 'bill', ref: q, d: q.d, amt: -q.amt, acct: q.from, skip: 1 }); }); });
-  S.debts.forEach(function (x) { if (!x.txId && !x.ledgerId) add({ kind: 'debt', ref: x, d: x.d, amt: -x.amt, acct: x.acct }); });
-  return out;
-}
+function walletMoves(a, b) { return Money.walletMoves(moneyData(), wallets(), a, b, today()); }
 function moveTitle(m) {
   var r = m.ref;
   if (m.kind === 'tx') return r.note || plain(r.cat);
@@ -5184,9 +5131,9 @@ function checkSheet() {
 // Grab bills a statement period of PayLater spending as one bill, payable in full the
 // next month or split over 4, 8 or 12 monthly payments (8 and 12 carry a processing fee).
 var PL_SPLITS = [1, 4, 8, 12];
-var GRAB = 'GrabPay Later';
-function provOf(t) { return t.plp || GRAB; }
-function billProv(b) { return b.prov || GRAB; }
+var GRAB = Money.GRAB;
+function provOf(t) { return Money.provOf(t); }
+function billProv(b) { return Money.billProv(b); }
 // Providers come from three places: ones you added, ones already used on a purchase or
 // bill, and any account in the balance check that is clearly a buy-now-pay-later line.
 function providers() {
@@ -5210,65 +5157,26 @@ function cycleDay(prov) {
   return Math.min(28, Math.max(1, c || 1));
 }
 function dayBefore(d) { var x = new Date(d + 'T00:00:00'); x.setDate(x.getDate() - 1); return x.getFullYear() + '-' + pad2(x.getMonth() + 1) + '-' + pad2(x.getDate()); }
-function periodStart(d, prov) { var m = monthOf(d), cs = cycleDay(prov); if (+d.slice(8, 10) < cs) m = addMonth(m, -1); return m + '-' + pad2(cs); }
-function periodEnd(from) { return dayBefore(addMonth(monthOf(from), 1) + '-' + from.slice(8, 10)); }
+function periodStart(d, prov) { return Money.periodStart(d, cycleDay(prov)); }
+function periodEnd(from) { return Money.periodEnd(from); }
 function periodLabel(from, prov) {
   var to = periodEnd(from);
   return +from.slice(8, 10) === 1 ? monthLabel(monthOf(from)) : dayLabel(from) + ' to ' + dayLabel(to);
 }
-// A purchase split into n instalments puts one share into each of n consecutive bills.
-// You still owe the full amount from day one; each bill only asks for its share.
-function instShares(t, prov) {
-  var n = t.inst && t.inst.n > 1 ? t.inst.n : 1, first = periodStart(t.d, prov), off = t.inst && t.inst.start ? 1 : 0;
-  var total = r2(t.amt + ((t.inst && t.inst.fee) || 0)), each = r2(total / n), out = [];
-  for (var k = 0; k < n; k++) {
-    out.push({ from: addMonth(monthOf(first), k + off) + first.slice(7), amt: k === n - 1 ? r2(total - each * (n - 1)) : each, k: k + 1, n: n });
-  }
-  return out;
-}
-function laterItems(from, prov) {
-  prov = prov || GRAB;
-  var to = periodEnd(from), out = [];
-  allTx().forEach(function (t) {
-    if (t.t !== 'exp' || t.pm !== 'later' || provOf(t) !== prov) return;
-    if (t.inst && t.inst.n > 1) {
-      instShares(t, prov).forEach(function (sh) {
-        if (sh.from === from) out.push(Object.assign({}, t, { amt: sh.amt, _inst: sh.k + ' of ' + sh.n, _full: t.amt, split: null }));
-      });
-    } else if (t.d >= from && t.d <= to) out.push(t);
-  });
-  return out.sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; });
-}
-function billFor(from, prov) { prov = prov || GRAB; return S.bills.filter(function (b) { return b.from === from && billProv(b) === prov; })[0] || null; }
-function billTotal(b) { return r2(sum(laterItems(b.from, billProv(b)), function (t) { return t.amt; })); }
-function billDue(b) { return r2(billTotal(b) + (b.fee || 0)); }
-function billPaid(b) { return r2(sum(b.payments || [], function (p) { return p.amt; })); }
-function billLeft(b) { return r2(billDue(b) - billPaid(b)); }
-function billSchedule(b) {
-  var n = b.n || 1, due = billDue(b), each = r2(due / n), out = [], paid = billPaid(b);
-  var first = b.first || (addMonth(monthOf(periodEnd(b.from)), 1) + '-' + pad2(Math.min(28, +periodEnd(b.from).slice(8, 10))));
-  for (var i = 0; i < n; i++) {
-    var amt = i === n - 1 ? r2(due - each * (n - 1)) : each;
-    var covered = Math.min(amt, Math.max(0, paid - each * i));
-    out.push({ i: i, d: instalmentDate(first, i), amt: amt, part: r2(covered), paid: covered >= amt - 0.01 });
-  }
-  return out;
-}
-function periods(prov) {
-  prov = prov || GRAB;
-  var ps = {};
-  allTx().forEach(function (t) {
-    if (t.t !== 'exp' || t.pm !== 'later' || provOf(t) !== prov) return;
-    if (t.inst && t.inst.n > 1) instShares(t, prov).forEach(function (sh) { ps[sh.from] = 1; });
-    else ps[periodStart(t.d, prov)] = 1;
-  });
-  S.bills.forEach(function (b) { if (billProv(b) === prov) ps[b.from] = 1; });
-  return Object.keys(ps).sort().reverse();
-}
+// The bill maths is in js/money.js; these pass it every transaction, the bills and the provider's cycle day.
+function instShares(t, prov) { return Money.instShares(t, cycleDay(prov)); }
+function laterItems(from, prov) { prov = prov || GRAB; return Money.laterItems(allTx(), from, prov, cycleDay(prov)); }
+function billFor(from, prov) { return Money.billFor(S.bills, from, prov); }
+function billTotal(b) { return Money.billTotal(allTx(), b, cycleDay(billProv(b))); }
+function billDue(b) { return Money.billDue(allTx(), b, cycleDay(billProv(b))); }
+function billPaid(b) { return Money.billPaid(b); }
+function billLeft(b) { return Money.billLeft(allTx(), b, cycleDay(billProv(b))); }
+function billSchedule(b) { return Money.billSchedule(allTx(), b, cycleDay(billProv(b))); }
+function periods(prov) { prov = prov || GRAB; return Money.laterPeriods(allTx(), S.bills, prov, cycleDay(prov)); }
 // With no provider named, these add up every provider.
 function laterOwed(prov) {
   if (!prov) return r2(sum(providers(), function (p) { return laterOwed(p.name); }));
-  return r2(sum(periods(prov), function (f) { var b = billFor(f, prov); return b ? billLeft(b) : r2(sum(laterItems(f, prov), function (t) { return t.amt; })); }));
+  return Money.laterOwed(allTx(), S.bills, prov, cycleDay(prov));
 }
 function nextPayment(prov) {
   var out = null;

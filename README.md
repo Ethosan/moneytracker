@@ -62,7 +62,7 @@ Phone / browser ── static files (Cloudflare Pages) ── service worker kee
 | `index.html`, `app.css` | Page shell and styles |
 | `js/app.js` | The app |
 | `js/dates.js` | Date helpers (month-end rules, statement date parsing) |
-| `js/money.js` | The money maths behind the screens: spent, paybacks, income, saved, investment results, people balances |
+| `js/money.js` | The money maths behind the screens: spent, paybacks, income, saved, investment results, people balances, PayLater bills, wallet balances |
 | `js/mm-import.js` | Money Manager import mapper |
 | `js/google-signin.js` | Google sign-in button |
 | `js/whatsnew.js` | The release log behind the small "What's new" link at the foot of Settings |
@@ -128,6 +128,8 @@ The money maths in `js/money.js` has its own tests (`tests/money.test.js`). Ask'
 
 `tests/money-extremes.test.mjs` names the extreme cases one by one: amounts saved as text, negative, infinite or beyond S$100 billion, split shares above the bill, categories and people called `constructor` or `__proto__`, old stored rows the app never re-saved, 120,000 transactions checked to the exact cent, the calculator's limits, and Apply refusing a bad proposed change. `tests/money-fuzz.test.mjs` throws 1,500 random messy ledgers at the app and at Ask's engine. They must agree on every total, keep their own arithmetic, never crash, and never touch JavaScript's built-in objects. It is seeded: `FUZZ_SEED=<n> FUZZ_RUNS=<n> node --test tests/money-fuzz.test.mjs` repeats a failure or searches further.
 
+`tests/money-wallets.test.mjs` covers PayLater and wallets: statement periods, instalment shares that add up to the cent with the fee, bill schedules and what you still owe, and each wallet's balance on any day around a balance count. Its random ledgers check that the wallet page and the balance check, which apply the same rules separately, always agree, and that an entry dated in the future hasn't moved a wallet yet. It takes the same `FUZZ_SEED` and `FUZZ_RUNS`.
+
 ## AI assistant (optional)
 
 Off until enabled in **Settings → AI assistant**. Once a week it sends entries added since its last review (date, type, amount, category and note), plus the type of each category and your usual patterns for those notes and categories, worked out from your older entries, and puts anything it flags in Suggestions for you to approve. Questions you ask in the **Ask** tab send your full history so the answer has context.
@@ -136,8 +138,10 @@ The API key never lives in this repository; it is stored as a Supabase secret:
 
 ```bash
 npx supabase login
-npx supabase functions deploy ledger-ai --project-ref <project-ref> --use-api
+npx supabase functions deploy ledger-ai --remote=<project-ref> --use-api
 ```
+
+From a script or an AI agent, add `--yes`: the CLI won't deploy to a hosted project without confirming, and can't ask there. (`--project-ref` still works in CLI 3 but goes in v4.)
 
 Then in **Supabase → Edge Functions → Secrets** add `LLM_API_KEY`, a DeepSeek API key: DeepSeek is then the default, with `deepseek-v4-pro` answering Ask and `deepseek-flash` doing the weekly review (thinking off for both). DeepSeek's servers are in China, and the assistant sends personal finance data (see `PRIVACY.md` for exactly what). Optional overrides: `LLM_MODEL_ASK`, `LLM_MODEL_REVIEW` (or `LLM_MODEL` for both; a Mistral or Claude name there is ignored), `LLM_BASE_URL` (default `https://api.deepseek.com`). To use Mistral or Claude instead, add `MISTRAL_API_KEY` or `ANTHROPIC_API_KEY` and set `AI_PROVIDER` to `mistral` or `anthropic`; with several keys set, a provider that fails hands the question to the next (DeepSeek, then Mistral). Optional model overrides for those: `MISTRAL_MODEL`, `ANTHROPIC_MODEL`. `OPEN_TO_ALL` at the top of the function is `true`, so every signed-in account can use the assistant, capped at 120 calls an hour each and 300 a day for all accounts together (change the daily number with the `AI_DAILY_LIMIT` secret). The caps are counted in the database by `ai_take_call()` (in `supabase/schema.sql`), so they hold across restarts. Set it to `false` to restrict the assistant to the accounts on the `AI_ALLOWED_IDS` allowlist: your user id from **Authentication → Users** (the UUID), comma-separated for a small team. Keep a spending cap at the AI provider as a safety net: DeepSeek is prepaid, so the balance you top up is the most it can spend (turn on its low-balance alert); for Mistral, **Admin → Administration → Workspaces →** your workspace **→ Settings → Monthly spending limit** (there is none by default).
 
