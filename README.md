@@ -62,6 +62,7 @@ Phone / browser ── static files (Cloudflare Pages) ── service worker kee
 | `index.html`, `app.css` | Page shell and styles |
 | `js/app.js` | The app |
 | `js/dates.js` | Date helpers (month-end rules, statement date parsing) |
+| `js/money.js` | The money maths behind the screens: spent, paybacks, income, saved, investment results, people balances |
 | `js/mm-import.js` | Money Manager import mapper |
 | `js/google-signin.js` | Google sign-in button |
 | `js/whatsnew.js` | The release log behind the small "What's new" link at the foot of Settings |
@@ -121,7 +122,9 @@ A public repository only exposes the code. Your data lives in Supabase behind ro
 npm test
 ```
 
-Needs Node 18 or newer and nothing else: no install step, no build. The tests cover the date rules that are easy to get wrong, like instalments and renewals on the 29th to 31st. They also check leap years. Impossible statement dates like 31 Feb never make it in.
+Needs Node 22 or newer (the Ask engine tests load TypeScript directly) and nothing else: no install step, no build. The tests cover the date rules that are easy to get wrong, like instalments and renewals on the 29th to 31st. They also check leap years. Impossible statement dates like 31 Feb never make it in.
+
+The money maths in `js/money.js` has its own tests (`tests/money.test.js`). Ask's engine (`supabase/functions/ledger-ai/engine.ts`) keeps a separate copy of the same rules, because the Edge Function can't load a browser script, so `tests/money-parity.test.mjs` runs one ledger through both and fails if any total differs. It also runs a Money Manager export through `js/mm-import.js` and checks the result the same way. Change a money rule in one place and the parity test tells you to change the other.
 
 ## AI assistant (optional)
 

@@ -1,6 +1,7 @@
 // The exact-numbers engine behind the Ask chat. The language model never adds anything up:
 // it calls these tools, and every total, filter and calculation is worked out here with the same
-// rules the app uses on its own screens (monthStats, ea, incKind), so the chat and the app agree.
+// rules the app uses on its own screens (js/money.js: monthStats, ea, catKind, venuePnl), so the chat
+// and the app agree. tests/money-parity.test.mjs checks that they do: change a rule here, change it there.
 //
 // Plain TypeScript with erasable types only: Deno runs it inside the Edge Function, and Node 22+
 // runs the same file in tests/ledger-ai-engine.test.mjs without a build step.

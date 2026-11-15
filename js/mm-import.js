@@ -79,8 +79,9 @@ var MM = (function () {
     }
     return L;
   }
-  // rows: array of arrays incl. header row
-  function map(rows, XLSX) {
+  // rows: array of arrays incl. header row. mpt: the app's person tag (or null), passed in because
+  // this file cannot see app.js's personTag(); calling it from here threw on every spending row.
+  function map(rows, XLSX, mpt) {
     var out = { tx: [], ledger: [], debts: [], venues: {}, cats: {}, skipped: 0, headers: [] };
     var n = 0;
     function id() { n++; return 'mm' + n; }
@@ -103,7 +104,7 @@ var MM = (function () {
         var c = CAT_MAP[cat] || cat;
         var t = type === 'Expense' ? 'exp' : 'inc';
         var tags = [];
-        var mpt = personTag(); if (mpt && (c === '💝 Dates' || String(note || '').toLowerCase().indexOf(mpt.toLowerCase()) > -1) && tags.indexOf(mpt) < 0) tags.push(mpt);
+        if (mpt && (c === '💝 Dates' || String(note || '').toLowerCase().indexOf(mpt.toLowerCase()) > -1) && tags.indexOf(mpt) < 0) tags.push(mpt);
         out.cats[c] = { name: c, type: t, kind: t === 'inc' ? (INC_KIND[c] || 'other') : undefined };
         out.tx.push({ id: id(), d: d, t: t, amt: amt, cat: c, sub: sub, note: note, tags: tags, src: 'mm' });
       } else if (type === 'Transfer-Out') {

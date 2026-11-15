@@ -4,7 +4,8 @@
 var $ = function (s, r) { return (r || document).querySelector(s); };
 function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
 function uid() { return 'a' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
-function r2(n) { return Math.round(n * 100) / 100; }
+// Money maths lives in js/money.js (tested on its own); these pass the app's state to it.
+function r2(n) { return Money.r2(n); }
 function money(n, dp) {
   if (n == null || isNaN(n)) return '–';
   var d = dp == null ? 2 : dp; // cents everywhere; summaries pass 0 for whole dollars
@@ -29,7 +30,7 @@ function stampBefore(t, c) { var at = besideCount(c, -1); if (at) t.at = at; ret
 function stampSide(t, side) { if (!side) return; var ck = checksSorted().filter(function (c) { return c.d === t.d; }).pop(); var at = ck && besideCount(ck, side === 'after' ? 1 : -1); if (at) t.at = at; }
 function localZone() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Singapore'; } catch (e) { return 'Asia/Singapore'; } }
 function plural(n, word) { return n + ' ' + word + (n === 1 ? '' : 's'); }
-function sum(a, f) { var s = 0; for (var i = 0; i < a.length; i++) s += f ? f(a[i]) : a[i]; return s; }
+function sum(a, f) { return Money.sum(a, f); }
 // Every change is recorded as one history entry holding the previous version of just the
 // parts that changed (a month of transactions, People, PayLater...). Undo steps back
 // through them in order; undoing is itself recorded, so it can be redone.
@@ -408,10 +409,10 @@ var store = { mode: 'boot', col: null, dirty: {}, timer: null, writing: false };
 
 // What the transaction actually cost you: if you paid for others, only your share
 // counts as spending. The rest is money owed to you, tracked under People.
-function ea(t) { return t.t === 'exp' && t.split && t.split.mine >= 0 ? t.split.mine : t.amt; }
+function ea(t) { return Money.ea(t); }
 function allTx() { var a = []; Object.keys(S.tx).forEach(function (k) { a = a.concat(S.tx[k]); }); return a; }
 function catObj(name) { for (var i = 0; i < S.meta.cats.length; i++) if (S.meta.cats[i].name === name) return S.meta.cats[i]; return null; }
-function incKind(name) { var c = catObj(name); return (c && c.kind) || 'other'; }
+function incKind(name) { return Money.catKind(S.meta.cats, name); }
 function cleanSub(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
 function rememberSub(cat, sub) {
   sub = cleanSub(sub); if (!cat || !sub) return;
@@ -425,9 +426,9 @@ function removeKnownSub(cat, sub) {
   S.meta.subcats[cat] = S.meta.subcats[cat].filter(function (x) { return x !== sub; });
   if (!S.meta.subcats[cat].length) delete S.meta.subcats[cat];
 }
-function cashBasis() { return (S.meta.basis || 'cash') === 'cash'; }
-function isClosed(v) { return !!(S.meta.venues[v] && S.meta.venues[v].closed); }
-function venueType(v) { return (S.meta.venues[v] && S.meta.venues[v].type) || 'broker'; }
+function cashBasis() { return Money.cashBasis(S.meta); }
+function isClosed(v) { return Money.isClosed(S.meta, v); }
+function venueType(v) { return Money.venueType(S.meta, v); }
 
 // ---------- persistence ----------
 function saveLocal() { try { localStorage.setItem(LS_KEY, JSON.stringify(S)); } catch (e) { } }
@@ -815,23 +816,8 @@ function wireLogin() {
 }
 
 // ---------- calculations ----------
-function monthStats(m) {
-  var tx = S.tx[m] || [];
-  var o = { spend: 0, earned: 0, other: 0, reimb: 0, person: 0, byCat: {}, byTag: {} }, PT = personTag();
-  tx.forEach(function (t) {
-    if (t.t === 'exp') {
-      var v = ea(t);
-      o.spend += v; o.byCat[t.cat] = (o.byCat[t.cat] || 0) + v;
-      if (PT && (t.tags || []).indexOf(PT) > -1) o.person += v;
-      (t.tags || []).forEach(function (g) { o.byTag[g] = (o.byTag[g] || 0) + v; });
-    } else if (t.t === 'inc') {
-      var k = incKind(t.cat); o[k === 'earned' ? 'earned' : k === 'reimb' ? 'reimb' : 'other'] += t.amt;
-    }
-  });
-  o.net = o.spend - o.reimb; o.saved = o.earned + o.other - o.net;
-  return o;
-}
-function tagSpend(m, tag) { return sum((S.tx[m] || []).filter(function (t) { return t.t === 'exp' && (t.tags || []).indexOf(tag) > -1; }), ea); }
+function monthStats(m) { return Money.monthStats(S.tx[m] || [], S.meta.cats, personTag()); }
+function tagSpend(m, tag) { return Money.tagSpend(S.tx[m] || [], tag); }
 function priorAvg(m) {
   var acc = {}, n = 0, net = 0;
   for (var k = 1; k <= 3; k++) {
@@ -843,52 +829,14 @@ function priorAvg(m) {
   // kept off the object's keys, so code that walks categories never sees it
   Object.defineProperty(acc, '__net', { value: net / n, enumerable: false }); return acc;
 }
-function venuePnl(v) {
-  var type = venueType(v);
-  var all = S.ledger.filter(function (e) { return e.venue === v; });
-  var partners = {};
-  all.forEach(function (e) { if (e.who && e.who !== 'me' && e.f !== 'bal') partners[e.who] = r2((partners[e.who] || 0) + (e.f === 'in' ? e.amt : -e.amt)); });
-  var es = all.filter(function (e) { return !e.who || e.who === 'me' || e.f === 'bal'; }).sort(function (a, b) {
-    return a.d < b.d ? -1 : a.d > b.d ? 1 : (a.f === 'bal') - (b.f === 'bal');
-  });
-  var o = { type: type, partners: partners, inn: 0, out: 0, n: all.length, bal: null, pnl: null, stale: false, last: es.length ? es[es.length - 1].d : null, opening: null };
-  if (type === 'prop' || type === 'poker' || cashBasis()) {
-    var lastBal = null;
-    // A balance logged before any deposit or withdrawal is capital carried in from before
-    // you started tracking, so on a cash basis it counts as money put in.
-    if (es.length && es[0].f === 'bal') { o.opening = es[0].amt; o.inn += es[0].amt; }
-    es.forEach(function (e, i) { if (e.f === 'in') o.inn += e.amt; else if (e.f === 'out') o.out += e.amt; else if (i > 0) lastBal = e.amt; });
-    o.pnl = r2(o.out - o.inn); o.paper = lastBal; o.cash = true;
-    // On a cash basis, money still with a broker is neither profit nor loss yet.
-    o.open = (type === 'broker' || type === 'crypto') && !isClosed(v) && o.inn - o.out > 0.01;
-    o.outThere = o.open ? r2(o.inn - o.out) : 0;
-    return o;
-  }
-  var startIdx = -1, start = 0;
-  if (es.length && es[0].f === 'bal') { startIdx = 0; start = es[0].amt; o.opening = start; }
-  var endIdx = -1;
-  for (var i = es.length - 1; i > startIdx; i--) if (es[i].f === 'bal') { endIdx = i; break; }
-  es.forEach(function (e, i) {
-    if (i <= startIdx || e.f === 'bal') return;
-    if (e.f === 'in') o.inn += e.amt; else o.out += e.amt;
-    if (endIdx > -1 && i > endIdx) o.stale = true;
-  });
-  if (endIdx < 0 && isClosed(v)) { o.bal = 0; o.pnl = o.out - o.inn - start; o.stale = false; return o; }
-  if (endIdx > -1) {
-    o.bal = es[endIdx].amt;
-    var fin = 0, fout = 0;
-    es.forEach(function (e, i) { if (i > startIdx && i < endIdx && e.f !== 'bal') { if (e.f === 'in') fin += e.amt; else fout += e.amt; } });
-    o.pnl = o.bal - start + fout - fin;
-  }
-  return o;
-}
+function venuePnl(v) { return Money.venuePnl(S.ledger, v, S.meta); }
 function venuesByType() {
   var names = {}; S.ledger.forEach(function (e) { names[e.venue] = 1; }); Object.keys(S.meta.venues).forEach(function (v) { names[v] = 1; });
   var g = { broker: [], crypto: [], prop: [], poker: [] };
   Object.keys(names).forEach(function (v) { var t = venueType(v); (g[t] || g.broker).push({ name: v, p: venuePnl(v) }); });
   return g;
 }
-function monthlyEquiv(s) { return s.amt / (s.cycle || 1); }
+function monthlyEquiv(s) { return Money.monthlyEquiv(s); }
 
 // A repayment should be recorded once: either as a payback on the income side, or
 // against the person's balance. Recording both inflates your money on paper.
@@ -2023,14 +1971,7 @@ function heroToggle() {
   return '<div class="hero-tog" role="tablist">' + [['spend', 'Spent'], ['earn', 'Earned']].map(function (x) {
     return '<button role="tab" data-hm="' + x[0] + '" aria-selected="' + (mode === x[0]) + '">' + x[1] + '</button>'; }).join('') + '</div>';
 }
-function incomeBy(m) {
-  var by = {}, work = 0, other = 0;
-  (S.tx[m] || []).forEach(function (t) {
-    if (t.t !== 'inc') return; var k = incKind(t.cat); if (k === 'reimb') return;
-    by[t.cat] = r2((by[t.cat] || 0) + t.amt); if (k === 'earned') work += t.amt; else other += t.amt;
-  });
-  return { by: by, work: r2(work), other: r2(other), total: r2(work + other) };
-}
+function incomeBy(m) { return Money.incomeBy(S.tx[m] || [], S.meta.cats); }
 function earnHero(m, quick) {
   var cur = incomeBy(m), prev = [1, 2, 3].map(function (k) { return incomeBy(addMonth(m, -k)); }).filter(function (x) { return x.total > 0; });
   // compare work income only: gifts and bonuses are one-offs and would distort "usual"
@@ -2539,7 +2480,7 @@ function pnlBody() {
 // people, subscriptions and the balance check all live on the Accounts tab.
 function peopleSection() {
   var h = '';
-  var ppl = {}; S.debts.forEach(function (d) { ppl[d.person] = (ppl[d.person] || 0) + d.amt; });
+  var ppl = Money.personBalances(S.debts);
   var names = Object.keys(ppl).sort(function (a, b) { return Math.abs(ppl[b]) - Math.abs(ppl[a]); });
   var open = names.filter(function (n) { return Math.abs(ppl[n]) > 0.005; });
   var owedToMe = sum(open.filter(function (n) { return ppl[n] > 0; }), function (n) { return ppl[n]; }), iOwe = -sum(open.filter(function (n) { return ppl[n] < 0; }), function (n) { return ppl[n]; });
@@ -3805,7 +3746,7 @@ function importSheet() {
           // try every sheet, keep whichever yields the most rows
           wb.SheetNames.forEach(function (nm) {
             var rows = XLSX.utils.sheet_to_json(wb.Sheets[nm], { header: 1, raw: true, defval: '' });
-            var r = MM.map(rows, XLSX);
+            var r = MM.map(rows, XLSX, personTag());
             if (!res || (r.tx.length + r.ledger.length) > (res.tx.length + res.ledger.length)) res = r;
           });
         } catch (err) { $('#imp', el).innerHTML = '<p class="neg">This file could not be read. Export again from Money Manager as .xlsx and retry.</p>'; return; }
