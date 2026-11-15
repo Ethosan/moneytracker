@@ -189,6 +189,38 @@ test('wallet names that are JavaScript built-ins are just names', () => {
   assert.equal(Object.prototype.amt, undefined);
 });
 
+test('cleaning stored bills, counts and instalment plans', () => {
+  const bills = M.cleanBills([
+    null, 'x', 7, { payments: [] }, // not bills: dropped (a null bill used to stop the app starting)
+    { from: 'soon' }, // no real period start
+    { month: '2026-09', payments: [{ amt: '12.345' }, null, { amt: 'abc' }] }, // old bills stored only the month
+    { from: '2026-10-01', fee: '2.5', n: '4', payments: 'junk' },
+    { from: '2026-11-01', fee: Infinity, n: 4.7 }
+  ]);
+  deq(bills, [
+    { month: '2026-09', payments: [{ amt: 12.35 }, { amt: 0 }], from: '2026-09-01' },
+    { from: '2026-10-01', fee: 2.5, n: 4, payments: [] },
+    { from: '2026-11-01', fee: 0, n: 4, payments: [] }
+  ]);
+  assert.deepEqual(J(M.cleanBills('nope')), []);
+
+  const checks = M.cleanChecks([
+    null, { lines: {} }, { d: 'today' }, // not counts
+    { d: '2026-11-01', lines: { DBS: '1000.505', Cash: 'lots', Wise: null, Big: 1e15, Neg: -3 }, total: '997.5' },
+    { d: '2026-11-02', lines: [1, 2] }
+  ]);
+  deq(checks, [
+    { d: '2026-11-01', lines: { DBS: 1000.51, Wise: null, Neg: -3 }, total: 997.5 },
+    { d: '2026-11-02', lines: {} }
+  ]);
+
+  const t1 = { inst: { n: '8', fee: '3.20' } }; M.cleanInst(t1); deq(t1, { inst: { n: 8, fee: 3.2 } });
+  const t2 = { inst: { n: 1e9, fee: 'x' } }; M.cleanInst(t2); deq(t2, { inst: { n: 60 } });
+  const t3 = { inst: 'four' }; M.cleanInst(t3); deq(t3, {});
+  const t4 = { inst: { n: 4, fee: -2 } }; M.cleanInst(t4); deq(t4, { inst: { n: 4 } });
+  const t5 = {}; M.cleanInst(t5); deq(t5, {});
+});
+
 // ---------- seeded random ledgers ----------
 function mulberry32(a) { return function () { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
 const SEED = +(process.env.FUZZ_SEED || 20261115), RUNS = +(process.env.FUZZ_RUNS || 400);
@@ -250,6 +282,15 @@ test(`random ledgers (seed ${SEED}, ${RUNS} runs): bills add up and wallets agre
     }
     assert.ok(mv.every((m) => m.acct === null || wallets.includes(m.acct)), why);
     assert.ok(Number.isFinite(M.flowsSince(count, L, TODAY)), why);
+
+    // junk as storage can hold it: once cleaned, every sum is a number and nothing throws
+    const junk = [null, 'x', { from: 'later' }, { month: '2026-10', fee: 'abc', n: 'many', payments: [null, { amt: 'NaN', from: 'DBS', d: '2026-11-03' }] }, { from: '2026-11-01', fee: '1e400', n: -2 }];
+    const bills = M.cleanBills(L.bills.concat(junk));
+    const checks = M.cleanChecks([count, null, { d: '2026-11-05', lines: { DBS: 'x', Cash: '7' } }]);
+    for (const t of L.tx) M.cleanInst(t);
+    for (const prov of ['GrabPay Later', 'Atome']) assert.ok(Number.isFinite(M.laterOwed(L.tx, bills, prov, cs)), why);
+    for (const b of bills) assert.ok(M.billSchedule(L.tx, b, cs).every((s) => Number.isFinite(s.amt) && Number.isFinite(s.part)), why);
+    for (const n of wallets) assert.ok(Number.isFinite(M.walletModel(M.walletFlows({ ...L, bills }, n), checks, n, TODAY).now), `${why} wallet ${n}`);
   }
   assert.equal(Object.prototype.amt, undefined);
   assert.equal(Object.prototype[1], undefined);

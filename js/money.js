@@ -179,6 +179,46 @@ var Money = (function () {
   // A count of instalments: a whole number from 1 to 60 (Grab offers up to 12; anything else is junk,
   // and a fraction or a huge number would split a bill into shares that don't add up, or never finish).
   function parts(n) { n = Math.floor(+n); return n > 1 ? Math.min(n, 60) : 1; }
+  // Cleaning stored PayLater data and balance counts, the way cleanTx cleans transactions (app.js
+  // normalize() runs these on load and after every sync), so every sum below reads numbers.
+  // An instalment plan: a whole count, and a fee in cents that is more than zero or not there at all.
+  function cleanInst(t) {
+    if (t.inst == null) return;
+    if (typeof t.inst !== 'object') { delete t.inst; return; }
+    t.inst.n = parts(t.inst.n);
+    if (t.inst.fee != null) { var f = num(t.inst.fee); if (f > 0) t.inst.fee = f; else delete t.inst.fee; }
+  }
+  // Bills: a real period start (old bills stored only the month), payments a list with amounts in
+  // cents, the fee a number and the count of payments a whole one. Anything else can't be a bill.
+  function cleanBills(list) {
+    return (Array.isArray(list) ? list : []).filter(function (b) {
+      if (!b || typeof b !== 'object') return false;
+      if (!b.from && typeof b.month === 'string') b.from = b.month + '-01';
+      if (typeof b.from !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(b.from)) return false;
+      b.payments = (Array.isArray(b.payments) ? b.payments : []).filter(function (p) { return p && typeof p === 'object'; });
+      b.payments.forEach(function (p) { p.amt = num(p.amt); });
+      if (b.fee != null) b.fee = num(b.fee);
+      if (b.n != null) b.n = parts(b.n);
+      return true;
+    });
+  }
+  // Balance counts: dated, each wallet's figure a number in cents. A figure that can't be read is
+  // dropped rather than read as 0, which would claim you counted an empty wallet.
+  function cleanChecks(list) {
+    return (Array.isArray(list) ? list : []).filter(function (c) {
+      return c && typeof c === 'object' && typeof c.d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(c.d);
+    }).map(function (c) {
+      var lines = c.lines && typeof c.lines === 'object' && !Array.isArray(c.lines) ? c.lines : {};
+      Object.keys(lines).forEach(function (k) {
+        var v = lines[k]; if (v == null) return;
+        var n = typeof v === 'number' ? v : parseFloat(v);
+        if (isFinite(n) && Math.abs(n) <= MAX_AMOUNT) lines[k] = r2(n); else delete lines[k];
+      });
+      c.lines = lines;
+      if (c.total != null) c.total = num(c.total);
+      return c;
+    });
+  }
   // The statement period day d falls in, and its last day.
   function periodStart(d, cs) { cs = cycle(cs); var m = monthOf(d); if (+d.slice(8, 10) < cs) m = addMonth(m, -1); return m + '-' + pad2(cs); }
   function periodEnd(from) { return addDays(addMonth(monthOf(from), 1) + '-' + from.slice(8, 10), -1); }
@@ -326,6 +366,7 @@ var Money = (function () {
     r2: r2, sum: sum, num: num, cleanTx: cleanTx, cleanDebts: cleanDebts, cleanLedger: cleanLedger, ea: ea, catKind: catKind, monthStats: monthStats, incomeBy: incomeBy, tagSpend: tagSpend,
     venueType: venueType, isClosed: isClosed, cashBasis: cashBasis, venuePnl: venuePnl,
     personBalances: personBalances, monthlyEquiv: monthlyEquiv, changeOk: changeOk,
+    cleanInst: cleanInst, cleanBills: cleanBills, cleanChecks: cleanChecks,
     GRAB: GRAB, provOf: provOf, billProv: billProv, periodStart: periodStart, periodEnd: periodEnd, instShares: instShares, laterItems: laterItems,
     billFor: billFor, billTotal: billTotal, billDue: billDue, billPaid: billPaid, billLeft: billLeft, billSchedule: billSchedule, laterPeriods: laterPeriods, laterOwed: laterOwed,
     flowAfter: flowAfter, flowsSince: flowsSince, walletMoves: walletMoves, walletFlows: walletFlows, walletModel: walletModel

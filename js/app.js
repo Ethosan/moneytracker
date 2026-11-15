@@ -350,7 +350,11 @@ function normalize() {
   // a budget without a key would crash the Month tab, so drop it
   m.budgets = m.budgets.filter(function (b) { return b && typeof b.key === 'string'; });
   m.budgets.forEach(function (b) { b.amt = num(b.amt); });
-  S.bills.forEach(function (b) { if (!b.from && b.month) b.from = b.month + '-01'; b.payments = Array.isArray(b.payments) ? b.payments : []; b.payments.forEach(function (p) { p.amt = num(p.amt); if (!p.id) p.id = uid(); }); });
+  // bills and balance counts: a bill or count that isn't one (null, no date) is dropped; fees, counts and
+  // each wallet's counted figure are numbers (money.js)
+  S.bills = Money.cleanBills(S.bills);
+  S.bills.forEach(function (b) { b.payments.forEach(function (p) { if (!p.id) p.id = uid(); }); });
+  S.checks = Money.cleanChecks(S.checks);
   // transactions: one bucket per month, ids unique, amounts numeric and positive
   var seen = {}, fixed = {}, moved = 0;
   Object.keys(S.tx).forEach(function (k) {
@@ -359,6 +363,7 @@ function normalize() {
       if (!t.id || seen[t.id]) t.id = uid();
       seen[t.id] = 1;
       if (!Money.cleanTx(t)) return; // amount in cents and positive, tags a list, split share within the bill
+      Money.cleanInst(t); // an instalment plan's count whole, its fee a number
       t.sub = cleanSub(t.sub);
       if (monthOf(t.d) !== k) moved++;
       (fixed[monthOf(t.d)] = fixed[monthOf(t.d)] || []).push(t);
