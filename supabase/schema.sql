@@ -31,9 +31,12 @@ create index if not exists ai_calls_user_at on public.ai_calls (user_id, at);
 alter table public.ai_calls enable row level security;
 revoke all on public.ai_calls from anon, authenticated;
 
--- Returns 'ok' (call recorded), 'user' (this account hit its hourly cap) or 'all' (every
--- account together hit the daily cap).
-create or replace function public.ai_take_call(per_user_hour int, all_users_day int)
+-- Returns 'ok' (call recorded), 'user' (this account hit its hourly cap), 'user_day' (this
+-- account hit its daily cap, which sits well below the global one) or 'all' (every account
+-- together hit the daily cap). The old two-argument version is dropped: it had no per-account
+-- daily cap, so one account could use up the whole day for everyone.
+drop function if exists public.ai_take_call(int, int);
+create or replace function public.ai_take_call(per_user_hour int, per_user_day int, all_users_day int)
 returns text
 language plpgsql
 security definer
@@ -46,10 +49,11 @@ begin
   perform pg_advisory_xact_lock(hashtext('ai_take_call'));
   delete from ai_calls where at < now() - interval '2 days';
   if (select count(*) from ai_calls where at > now() - interval '1 day') >= all_users_day then return 'all'; end if;
+  if (select count(*) from ai_calls where user_id = uid and at > now() - interval '1 day') >= per_user_day then return 'user_day'; end if;
   if (select count(*) from ai_calls where user_id = uid and at > now() - interval '1 hour') >= per_user_hour then return 'user'; end if;
   insert into ai_calls (user_id) values (uid);
   return 'ok';
 end;
 $$;
-revoke all on function public.ai_take_call(int, int) from public, anon;
-grant execute on function public.ai_take_call(int, int) to authenticated;
+revoke all on function public.ai_take_call(int, int, int) from public, anon;
+grant execute on function public.ai_take_call(int, int, int) to authenticated;

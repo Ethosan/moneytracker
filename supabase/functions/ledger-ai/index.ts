@@ -9,7 +9,7 @@
 // answer comes back with `steps`, the lookups made, which the app shows under the reply.
 //
 // The API key lives here as a Supabase secret, never in the app. OPEN_TO_ALL is true:
-// any signed-in account can use it (each capped at CALL_LIMIT calls an hour); set it to
+// any signed-in account can use it (each capped at CALL_LIMIT calls an hour and USER_DAILY_LIMIT a day); set it to
 // false to allow only the accounts on the AI_ALLOWED_IDS allowlist, since sign-in creates
 // an account for anyone and an open function lets a stranger spend the key.
 //
@@ -25,6 +25,7 @@
 //   ANTHROPIC_MODEL     optional, default claude-sonnet-5-5
 // Which provider and model each job gets, and the fallbacks, are in providers.ts.
 //   AI_DAILY_LIMIT      optional, AI calls per day for all accounts together (default 300)
+//   AI_USER_DAILY_LIMIT optional, AI calls per day for one account (default 30)
 //   AI_ALLOWED_IDS      comma-separated user ids allowed to call this function when
 //                       OPEN_TO_ALL is false (Supabase dashboard -> Authentication -> Users
 //                       -> copy the UUID); with it unset the function then answers nobody.
@@ -37,6 +38,7 @@ import { mistralAgent, deepseekAgent, claudeAgent } from "./agent.ts";
 import type { Turn, Run, Outcome } from "./agent.ts";
 import { firstThatAnswers, NAME_OF, KEY_OF, deepseekModel, deepseekBase, deepseekExtra, modelRefused, DEEPSEEK_FALLBACK, MISTRAL_FALLBACK, mistralModel, claudeModel } from "./providers.ts";
 import type { Provider } from "./providers.ts";
+import { CALL_LIMIT, USER_DAILY_LIMIT, DEFAULT_DAILY_LIMIT, checkBody, slotAnswer } from "./limits.ts";
 
 const CORS = {
   "Access-Control-Allow-Origin": "*",
@@ -256,14 +258,13 @@ function takeChanges(text: string, L: { ids: Set<string>; byId: Map<string, { t:
 
 // Usage caps: the AI spends the owner's API credits and the app is shared. Each call is recorded
 // by the ai_take_call() database function, so the caps hold across cold starts and copies of this
-// function: CALL_LIMIT per account per hour, and DAILY_LIMIT for all accounts together (the
-// AI_DAILY_LIMIT secret overrides it). The backstop is at the provider: DeepSeek is prepaid, so
-// the balance topped up there is the most it can spend (Mistral had a monthly spending limit).
-const CALL_LIMIT = 120;
-const DAILY_LIMIT = Number(Deno.env.get("AI_DAILY_LIMIT")) || 300;
-// Fallback cap kept in memory, used only if the database function can't be reached.
-const CALLS = new Map<string, { n: number; reset: number }>();
-const CALL_WINDOW_MS = 3600000;
+// function: CALL_LIMIT per account per hour, USER_DAILY_LIMIT per account per day, and DAILY_LIMIT
+// for all accounts together (the AI_DAILY_LIMIT secret overrides it). If the database can't be
+// reached the request is refused (503): there is no in-memory fallback, which was per copy and
+// reset on every cold start. The backstop is at the provider: DeepSeek is prepaid, so the balance
+// topped up there is the most it can spend (Mistral had a monthly spending limit).
+const DAILY_LIMIT = Number(Deno.env.get("AI_DAILY_LIMIT")) || DEFAULT_DAILY_LIMIT;
+const USER_DAILY = Number(Deno.env.get("AI_USER_DAILY_LIMIT")) || USER_DAILY_LIMIT;
 // Open to every signed-in account (2026-10-24): the app is a personal money tracker, so the
 // owner wants all accounts to work without an allowlist. Rate caps below still apply per account
 // and per day, and a monthly spending limit at the provider is the backstop.
@@ -287,22 +288,16 @@ Deno.serve(async (req) => {
     if (!allowed.includes(user.id)) return json({ error: "The AI assistant is not enabled for this account." }, 403);
   }
 
-  const { data: slot, error: slotErr } = await sb.rpc("ai_take_call", { per_user_hour: CALL_LIMIT, all_users_day: DAILY_LIMIT });
-  if (slotErr) {
-    console.error("ai_take_call failed, using the in-memory cap:", slotErr.message);
-    const now = Date.now();
-    const rec = CALLS.get(user.id);
-    if (rec && rec.reset > now) { if (rec.n >= CALL_LIMIT) return json({ error: "Too many AI requests. Try again in a little while." }, 429); rec.n++; }
-    else CALLS.set(user.id, { n: 1, reset: now + CALL_WINDOW_MS });
-    if (CALLS.size > 1000) { for (const [k, v] of CALLS) { if (v.reset <= now) CALLS.delete(k); } }
-  } else if (slot === "user") {
-    return json({ error: "Too many AI requests from this account. Try again in a little while." }, 429);
-  } else if (slot === "all") {
-    return json({ error: "The AI assistant has reached today's limit. Try again tomorrow." }, 429);
-  }
-
+  // the body is checked before a slot is taken, so a malformed or empty request costs no quota
   let body: Record<string, unknown>;
   try { body = await req.json(); } catch { return json({ error: "Bad request" }, 400); }
+  const early = checkBody(body);
+  if (early) return json(early.body, early.status);
+
+  const { data: slot, error: slotErr } = await sb.rpc("ai_take_call", { per_user_hour: CALL_LIMIT, per_user_day: USER_DAILY, all_users_day: DAILY_LIMIT });
+  if (slotErr) console.error("ai_take_call failed, refusing the request:", slotErr.message);
+  const denied = slotAnswer(slot, !!slotErr);
+  if (denied) return json(denied.body, denied.status);
 
   try {
     if (body.action === "review") {
