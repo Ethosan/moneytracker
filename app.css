@@ -2,7 +2,7 @@
 :root{
   --bg:#F2F4F8;--surface:#FFFFFF;--sunk:#EBEEF4;--ink:#0D1017;--muted:#5D6472;--line:#E3E7EE;
   --accent:#2A55F5;--accent-soft:#E6ECFF;--accent-ink:#FFFFFF;--raised:#FFFFFF;
-  --gain:#08784F;--gain-soft:#E1F6EE;--loss:#C42A37;--loss-soft:#FDE8EA;--warn:#C27C0E;--rose:#E3337A;--rose-soft:#FDE6EF;
+  --gain:#0B7C56;--gain-soft:#E1F6EE;--loss:#CD222F;--loss-soft:#FDE8EA;--warn:#C27C0E;--rose:#CA1C62;--rose-soft:#FDE6EF;
   --hero:#0D1017;--hero-ink:#FFFFFF;--hero-muted:#9AA3B5;
   --seg1:#2A55F5;--seg2:#6E8CFF;--seg3:#A9BBFF;--seg4:#CDD5E4;--seg5:#E1E6EF;
   --shadow:0 1px 2px rgba(22,34,70,.04);
@@ -565,10 +565,8 @@ nav.tabs button[aria-current="page"] .ms .pi-line{display:none}
 nav.tabs button[aria-current="page"] .ms .pi-line + .pi-fill{display:block}
 .icon .ico{display:none}
 
-/* WCAG AA: light-mode status colours darkened to reach 4.5:1 on white, on the page, and on their own tinted badges */
-:root{--loss:#CD222F;--gain:#0B7C56;--rose:#CA1C62}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--loss:#FF6B75;--gain:#34D399;--rose:#FF6FA8}}
-:root[data-theme="dark"]{--loss:#FF6B75;--gain:#34D399;--rose:#FF6FA8}
+/* The money colours (--loss, --gain, --rose) live once, in the token blocks at the top of this file.
+   The light values there are the WCAG AA ones: 4.5:1 on white, on the page and on their tinted badges. */
 
 /* ---------- Insights layout across screen sizes ----------
    Phone: one column. Tablet (768+): the view spans the page in two columns.
@@ -1136,4 +1134,29 @@ nav.tabs {
   #splash.splash-hide{animation:splashOut 200ms ease forwards}
   .splash-logo,.splash-text{animation:none}
   .splash-spin{animation:spin 1.4s linear infinite}
+}
+
+/* ---------- Audit fixes, 2026-11 ---------- */
+/* version stamp: drawn from data-app-version, in the muted ink (4.5:1), no opacity */
+.app-version{position:fixed;bottom:4px;right:8px;z-index:1;pointer-events:none;font:12px/1 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:var(--muted)}
+.app-version::before{content:"v" attr(data-app-version)}
+
+/* sign-in: one centred column at every width (it used to stretch into the 3-column page grid at 1024+) */
+main.login{display:block;max-width:420px;margin:0 auto;padding:max(10px,env(safe-area-inset-top,0px)) 16px 40px}
+@media (min-width:768px){main.login{padding-top:72px}}
+main.login .hero .big{font-size:40px}
+main.login .panel{padding:16px}
+main.login #lerr{font-size:13px;min-height:1em;margin:10px 2px 0}
+main.login .actions{margin-top:8px}
+main.login .legal{text-align:center;font-size:13px;margin:14px 0 0}
+main.login .legal a{display:inline-block;padding:14px 8px;color:var(--muted);text-decoration:underline;text-underline-offset:2px}
+
+/* the nav pill sits over scrolling text: a firmer fill so rows don't ghost through its labels */
+nav.tabs{background:color-mix(in srgb,var(--surface) 92%,transparent)}
+@media (prefers-reduced-transparency:reduce){nav.tabs{background:var(--surface);backdrop-filter:none;-webkit-backdrop-filter:none}}
+
+/* touch: the smaller controls still clear 44px (the Google button is drawn by Google at 40px) */
+@media (pointer:coarse){
+  .icon.sm{width:44px;height:44px}
+  .btn.sm,.chip.sm,.linkbtn,.chg-act .chip,.coins .t,.fromusd .t{min-height:44px}
 }
