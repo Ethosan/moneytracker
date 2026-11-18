@@ -1,10 +1,14 @@
-# Security headers (from netlify.toml)
+# Security headers (from netlify.toml). Content-Security-Policy-Report-Only is the same policy
+# without 'unsafe-inline' for styles: watch the browser console for violations (inline style
+# attributes in js/app.js) before tightening the enforced one.
 /*
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: no-referrer
-  Permissions-Policy: camera=(), microphone=(), geolocation=()
-  Content-Security-Policy: default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://accounts.google.com/gsi/ https://wqpjijgqjhzquncruvlc.supabase.co https://api.coingecko.com https://open.er-api.com; worker-src 'self' blob:; frame-src https://accounts.google.com/gsi/; manifest-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), interest-cohort=()
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' 'unsafe-inline' https://accounts.google.com/gsi/style; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://accounts.google.com/gsi/ https://wqpjijgqjhzquncruvlc.supabase.co https://api.coingecko.com https://open.er-api.com; worker-src 'self' blob:; frame-src https://accounts.google.com/gsi/; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' https://accounts.google.com/gsi/style; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https://accounts.google.com/gsi/ https://wqpjijgqjhzquncruvlc.supabase.co https://api.coingecko.com https://open.er-api.com; worker-src 'self' blob:; frame-src https://accounts.google.com/gsi/; manifest-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
 
 # Always check for a new service worker, page and styles
 /sw.js
