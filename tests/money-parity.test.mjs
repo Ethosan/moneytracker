@@ -470,3 +470,25 @@ test("on pace for: spent so far plus what earlier months spent after this day, n
   // with no earlier months, the straight line is all there is
   assert.equal(Money.monthPace({ "2026-10": tx["2026-10"] }, "2026-10", cats, "", 10, 31, 650).proj, 650 / 10 * 31);
 });
+
+test("Trends' on pace for a category: so far plus what earlier months added after this day", () => {
+  const cats = [{ name: "Rent", type: "exp" }, { name: "Food", type: "exp" }];
+  const row = (d, cat, amt, sub) => ({ id: d + cat + amt, d, t: "exp", amt, cat, sub, tags: [] });
+  const ms = ["2026-07", "2026-08", "2026-09", "2026-10"];
+  const rows = ms.slice(0, 3).flatMap((m) => [row(m + "-01", "Rent", 1200), row(m + "-08", "Food", 100, "Hawker"), row(m + "-28", "Food", 200, "Hawker")])
+    .concat([row("2026-10-01", "Rent", 1200), row("2026-10-08", "Food", 100, "Hawker")]);
+  const T = Money.trendData(rows, ms, "exp", cats, 25), rent = T.cats.find((c) => c.name === "Rent"), food = T.cats.find((c) => c.name === "Food");
+  assert.deepEqual(rent.e, [1200, 1200, 1200, 1200]); assert.deepEqual(food.e, [100, 100, 100, 100]); assert.deepEqual(food.m, [300, 300, 300, 100]);
+  assert.deepEqual(food.subs[0].e, food.e);
+  const prog = 25 / 31;
+  // rent went out on the 1st, so on the 25th October has had its one rent: not 1200 / prog = $1,488
+  assert.equal(Money.seriesPace(rent.m, rent.e, 3, 0, prog), 1200);
+  // food: $100 so far plus the $200 the earlier months spent after the 25th
+  assert.equal(Money.seriesPace(food.m, food.e, 3, 0, prog), 300);
+  // only the three months before count, and none before the series started
+  assert.equal(Money.seriesPace([900, 0, 300, 300, 100], [0, 0, 100, 100, 100], 4, 2, prog), 300);
+  // a series that starts this month has nothing to go on but the straight line
+  assert.equal(Money.seriesPace([0, 0, 0, 100], [0, 0, 0, 100], 3, 3, prog), 100 / prog);
+  // without uptoDay, trendData leaves e at zero and nothing else changes
+  assert.deepEqual(Money.trendData(rows, ms, "exp", cats).cats.find((c) => c.name === "Food").m, food.m);
+});

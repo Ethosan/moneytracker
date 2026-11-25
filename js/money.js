@@ -438,15 +438,17 @@ var Money = (function () {
   // with the notes that come up most. Categories and subcategories under 50 cents in all are dropped.
   function inTrend(t, kind, cats) { return kind === 'inc' ? t.t === 'inc' && catKind(cats, t.cat) !== 'reimb' : t.t === 'exp'; }
   function trendAmt(t) { return t.t === 'exp' ? ea(t) : t.amt; }
-  function trendData(rows, months, kind, cats) {
+  // With uptoDay, each category and subcategory also gets e: each month's amount up to that day of the month,
+  // which seriesPace needs.
+  function trendData(rows, months, kind, cats, uptoDay) {
     var ix = bag(); months.forEach(function (m, i) { ix[m] = i; });
-    var byCat = bag(), id = function (v) { return v; };
+    var byCat = bag(), id = function (v) { return v; }, zeros = function () { return months.map(function () { return 0; }); };
     (rows || []).forEach(function (t) {
       if (!inTrend(t, kind, cats) || ix[t.d.slice(0, 7)] == null) return;
-      var c = byCat[t.cat] = byCat[t.cat] || { name: t.cat, m: months.map(function () { return 0; }), subs: bag(), notes: bag() };
-      var v = trendAmt(t), i = ix[t.d.slice(0, 7)], sb = cleanSub(t.sub) || 'No subcategory';
-      c.m[i] += v;
-      var s = c.subs[sb] = c.subs[sb] || { name: sb, m: months.map(function () { return 0; }), notes: bag() }; s.m[i] += v;
+      var c = byCat[t.cat] = byCat[t.cat] || { name: t.cat, m: zeros(), e: zeros(), subs: bag(), notes: bag() };
+      var v = trendAmt(t), i = ix[t.d.slice(0, 7)], sb = cleanSub(t.sub) || 'No subcategory', early = uptoDay && +t.d.slice(8, 10) <= uptoDay;
+      c.m[i] += v; if (early) c.e[i] += v;
+      var s = c.subs[sb] = c.subs[sb] || { name: sb, m: zeros(), e: zeros(), notes: bag() }; s.m[i] += v; if (early) s.e[i] += v;
       var n = (t.note || '').trim().toLowerCase();
       if (n) [c.notes, s.notes].forEach(function (nb) { var o = nb[n] = nb[n] || { note: t.note.trim(), n: 0, amt: 0 }; o.n++; o.amt += v; });
     });
@@ -460,6 +462,17 @@ var Money = (function () {
       return c;
     }).filter(function (c) { return c.total > 0.5; }).sort(function (a, b) { return b.total - a.total; });
     return { months: months, cats: list };
+  }
+
+  // Where the unfinished last month (index P) of one Trends series is heading: what it has so far, plus what
+  // the up to three months before it added after this day (e: each month's amount up to this day, from
+  // trendData). Rent paid on the 1st is then "on pace" for one rent, not 1.2 rents on day 25. Months before
+  // start (the series' first month with money) don't count; with none, the straight line is all there is.
+  function seriesPace(m, e, P, start, prog) {
+    var from = Math.max(start, P - 3), n = P - from;
+    if (n <= 0 || !e) return m[P] / prog;
+    var later = 0; for (var i = from; i < P; i++) later += Math.max(0, m[i] - e[i]);
+    return m[P] + later / n;
   }
 
   // A tag's lens: spending with the tag (own share) per month, day, weekday and category; what others
@@ -535,7 +548,7 @@ var Money = (function () {
   }
 
   return {
-    addMonth: addMonth, cleanSub: cleanSub, priorAvg: priorAvg, monthPace: monthPace, periodStats: periodStats, weekdayAvg: weekdayAvg, inTrend: inTrend, trendAmt: trendAmt,
+    addMonth: addMonth, cleanSub: cleanSub, priorAvg: priorAvg, monthPace: monthPace, periodStats: periodStats, weekdayAvg: weekdayAvg, inTrend: inTrend, trendAmt: trendAmt, seriesPace: seriesPace,
     trendData: trendData, lensData: lensData, monthTrading: monthTrading, tradingRuns: tradingRuns,
     r2: r2, sum: sum, num: num, cleanTx: cleanTx, cleanDebts: cleanDebts, cleanLedger: cleanLedger, ea: ea, catKind: catKind, monthStats: monthStats, incomeBy: incomeBy, tagSpend: tagSpend,
     venueType: venueType, isClosed: isClosed, cashBasis: cashBasis, venuePnl: venuePnl,

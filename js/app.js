@@ -5942,10 +5942,10 @@ function monthProgress(m) {
 function trendKind() { return UI.trKind === 'inc' ? 'inc' : 'exp'; }
 function inTrend(t) { return Money.inTrend(t, trendKind(), S.meta.cats); }
 function trendAmt(t) { return Money.trendAmt(t); }
-function trendData() { return Money.trendData(allTx(), trendMonths(), trendKind(), S.meta.cats); }
+function trendData() { return Money.trendData(allTx(), trendMonths(), trendKind(), S.meta.cats, +today().slice(8, 10)); }
 function firstActive(m) { for (var i = 0; i < m.length; i++) if (m[i] > 0.5) return i; return 0; }
 // averages, the recent trend and the pace of the unfinished month, as numbers and as a sentence
-function describeSeries(ms, m) {
+function describeSeries(ms, m, e) {
   var P = ms.length - 1, prog = monthProgress(ms[P]), start = firstActive(m);
   var full = m.slice(start, prog < 1 ? P : P + 1), avg = full.length ? sum(full, function (v) { return v; }) / full.length : m[P] / prog;
   var end = prog < 1 ? P : P + 1;
@@ -5960,7 +5960,7 @@ function describeSeries(ms, m) {
     var mName = MONTHS_FULL[+ms[P].slice(5) - 1];
     // income arrives in lumps and the first week says little, so only project spending, and only after day 7
     if (trendKind() === 'inc' || prog < 0.23) txt += ' ' + mName + ' so far: <b>' + money(m[P], 0) + '</b>.';
-    else { var pace = m[P] / prog; txt += ' ' + mName + ' is on pace for <b>' + money(pace, 0) + '</b>' + (avg > 1 ? (pace > avg * 1.1 ? ', above your usual.' : pace < avg * 0.9 ? ', below your usual.' : ', close to your usual.') : '.'); }
+    else { var pace = Money.seriesPace(m, e, P, start, prog); txt += ' ' + mName + ' is on pace for <b>' + money(pace, 0) + '</b>' + (avg > 1 ? (pace > avg * 1.1 ? ', above your usual.' : pace < avg * 0.9 ? ', below your usual.' : ', close to your usual.') : '.'); }
   }
   if (full.length > 1) { var best = Math.max.apply(null, full), bi = start + full.indexOf(best); if (best > 1) txt += ' Biggest month: ' + MONTHS_FULL[+ms[bi].slice(5) - 1] + ' at ' + money(best, 0) + '.'; }
   return { avg: avg, text: txt, start: start, partial: prog < 1 ? P : -1 };
@@ -5979,8 +5979,8 @@ function renderTrends() {
   if (!T.cats.length) return sw + '<div class="empty">No ' + (K === 'inc' ? 'income' : 'spending') + ' logged yet.</div>';
   var ci = Math.min(UI.trCat || 0, T.cats.length - 1); UI.trCat = ci;
   var c = T.cats[ci], si = UI.trSub != null && c.subs[UI.trSub] ? UI.trSub : null;
-  var ser = si == null ? { name: plain(c.name), m: c.m } : { name: c.subs[si].name, m: c.subs[si].m };
-  var d = describeSeries(T.months, ser.m); UI.trDesc = d; UI.trSer = ser;
+  var ser = si == null ? { name: plain(c.name), m: c.m, e: c.e } : { name: c.subs[si].name, m: c.subs[si].m, e: c.subs[si].e };
+  var d = describeSeries(T.months, ser.m, ser.e); UI.trDesc = d; UI.trSer = ser;
   var h = sw + '<div class="tr-rail" role="group" aria-label="Categories">' + T.cats.map(function (x, i) {
     return '<button class="chip tr-chip" data-trcat="' + i + '" aria-pressed="' + (i === ci) + '"><span aria-hidden="true">' + esc(avatar(x.name)) + '</span>' + esc(plain(x.name)) + ' <small>' + money(x.total, 0) + '</small></button>';
   }).join('') + '</div>';

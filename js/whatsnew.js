@@ -3,7 +3,7 @@
 // release; fixes go in as one "Bug fixes and polish." line (what was fixed belongs in the commit log).
 // `v` is the version range the entry spans; releases before 1.3 had no version number, so it is empty.
 var WHATS_NEW = [
-  { d: '2026-11-25', v: '1.9.0 – 1.9.1', title: 'Try it without an account', items: [
+  { d: '2026-11-25', v: '1.9.0 – 1.9.2', title: 'Try it without an account', items: [
     'A demo on the sign-in page opens the app on six months of made-up money, so you can look around every screen before you sign up. What you change there stays in that browser tab and is gone when you close it.',
     'Bug fixes and polish.'
   ] },
