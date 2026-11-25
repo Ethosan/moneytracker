@@ -4,6 +4,8 @@
 
 A personal finance tracker that installs to your phone like a native app. Track everyday spending, split bills with friends, follow PayLater instalments, and see trading and poker P&L in one place. An optional AI assistant answers questions about your money and flags entries that look wrong. Data syncs to your own Supabase project and stays available offline.
 
+**[Try the demo](https://20bucks.ethantam.dev/?demo)**: six months of made-up money, no sign-in. It stays in that browser tab and is never sent anywhere.
+
 ![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?logo=javascript&logoColor=black)
 ![PWA](https://img.shields.io/badge/PWA-5A0FC8?logo=pwa&logoColor=white)
 ![Supabase](https://img.shields.io/badge/Supabase-3FCF8E?logo=supabase&logoColor=white)
