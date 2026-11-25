@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
-import { loadLedger, monthSummary, monthsWithEntries, venueSummary, accountSummary, plainCat, r2 } from "../supabase/functions/ledger-ai/engine.ts";
+import { loadLedger, monthSummary, monthsWithEntries, venueSummary, accountSummary, searchTransactions, overview, plainCat, r2 } from "../supabase/functions/ledger-ai/engine.ts";
 
 const read = (f) => fs.readFileSync(new URL("../js/" + f, import.meta.url), "utf8");
 const C = {};
@@ -234,4 +234,148 @@ test("an imported ledger gives the same figures in the app and in Ask", () => {
   assert.equal(jul.earned_from_work, 2500);
   assert.equal(jul.other_income, 88.88);
   assert.equal(monthSummary(L, "2026-08").other_income, 50); // money from family through the balancer is a bonus
+});
+
+// ---- Insights and Home (1.8.6): the figures on those screens, against what Ask works out ----
+const near = (a, b, tol = 0.011) => Math.abs(a - b) <= tol;
+// the app's categories folded the way Ask names them ("🍜 Food" is "Food")
+function plainTotals(byCat) {
+  const o = Object.create(null);
+  for (const [c, v] of Object.entries(byCat)) { const k = plainCat(c) || "(no category)"; o[k] = (o[k] || 0) + v; }
+  return o;
+}
+const groupTotals = (res) => Object.fromEntries((res.groups || []).map((g) => [g.key, g.total]));
+function sameTotals(app, eng, at) {
+  for (const k of new Set([...Object.keys(app), ...Object.keys(eng)])) assert.ok(near(r2(app[k] ?? 0), eng[k] ?? 0), `${at} "${k}": app ${r2(app[k] ?? 0)}, Ask ${eng[k] ?? 0}`);
+}
+function monthRange(a, b) { const out = []; for (let m = a; m <= b; m = Money.addMonth(m, 1)) out.push(m); return out; }
+const allRows = (S) => Object.values(S.tx).flat();
+
+function checkInsights(doc, today) {
+  const L = loadLedger(doc), S = appState(doc), tag = personTag(S);
+  const have = monthsWithEntries(L), ms = monthRange(have[0], today.slice(0, 7));
+  const done = have.filter((m) => m < today.slice(0, 7)).slice(-12);
+  assert.ok(done.length >= 2, "needs at least two finished months");
+
+  // Overview over the finished months: the totals line and the savings rate Ask is given
+  const P = Money.periodStats(S.tx, done, S.meta.cats, tag);
+  const ov = overview(L, today);
+  const tot = /Totals over [^:]*: income (-?\d+(?:\.\d+)?), net spent (-?\d+(?:\.\d+)?), saved (-?\d+(?:\.\d+)?)/.exec(ov);
+  assert.ok(tot, "overview has its totals line");
+  const tol = 0.006 * done.length; // Ask adds monthly figures already rounded to cents
+  assert.ok(near(P.income, +tot[1], tol), `income: app ${P.income}, Ask ${tot[1]}`);
+  assert.ok(near(P.net, +tot[2], tol), `net spent: app ${P.net}, Ask ${tot[2]}`);
+  assert.ok(near(P.kept, +tot[3], tol), `saved: app ${P.kept}, Ask ${tot[3]}`);
+  const pct = /\((-?\d+)% of income\)/.exec(ov);
+  if (pct) assert.equal(P.rate, +pct[1], "savings rate");
+  assert.ok(near(P.avgNet, P.net / done.length, 1e-9));
+
+  // the period's spending and money in by category, against search_transactions over the same dates
+  const from = done[0], to = done[done.length - 1];
+  sameTotals(plainTotals(P.byCat), groupTotals(searchTransactions(L, { from, to, type: "exp", group_by: "category", limit: 0 })), "period spending");
+  sameTotals(plainTotals(P.incomeByCat), groupTotals(searchTransactions(L, { from, to, type: "inc", group_by: "category", limit: 0 })), "period money in");
+
+  // "usual" spending: the average of the three months before, against Ask's month totals
+  for (const m of ms) {
+    const prev = [1, 2, 3].map((k) => Money.addMonth(m, -k)).filter((p) => have.includes(p));
+    const pa = Money.priorAvg(S.tx, m, S.meta.cats, tag);
+    if (!prev.length) { assert.equal(pa, null, `${m}: no months before`); continue; }
+    const ss = prev.map((p) => monthSummary(L, p));
+    assert.equal(pa.__n, prev.length);
+    assert.ok(near(pa.__net, ss.reduce((a, s) => a + s.net_spent, 0) / prev.length), `${m} usual net: app ${pa.__net}`);
+    assert.ok(!Object.keys(pa).includes("__net"), "__net stays off the category keys");
+    const avg = {}; for (const s of ss) for (const c of s.by_category) avg[c.category] = (avg[c.category] || 0) + c.total / prev.length;
+    const cats = { ...pa }; delete cats.__n;
+    sameTotals(plainTotals(cats), avg, `${m} usual by category`);
+  }
+
+  // Trends, month by month: spending per category, and income without paybacks
+  const td = Money.trendData(allRows(S), ms, "exp", S.meta.cats);
+  ms.forEach((m, i) => {
+    const app = {}; for (const c of td.cats) app[c.name] = c.m[i];
+    const eng = groupTotals(searchTransactions(L, { from: m, to: m, type: "exp", group_by: "category", limit: 0 }));
+    // Trends drops a category whose whole range is under 50 cents; Ask keeps it
+    const kept = new Set(td.cats.map((c) => plainCat(c.name) || "(no category)"));
+    for (const k of Object.keys(eng)) if (!kept.has(k)) delete eng[k];
+    sameTotals(plainTotals(app), eng, `${m} trend`);
+    for (const c of td.cats) assert.ok(near(c.subs.reduce((a, s) => a + s.m[i], 0), c.m[i], 0.5 + 1e-9), `${m} ${c.name}: subcategories add up`);
+  });
+  const ti = Money.trendData(allRows(S), ms, "inc", S.meta.cats);
+  const incApp = ms.map((_, i) => ti.cats.reduce((a, c) => a + c.m[i], 0));
+  ms.forEach((m, i) => assert.ok(near(incApp[i], monthSummary(L, m).income_total), `${m} trend income: app ${incApp[i]}, Ask ${monthSummary(L, m).income_total}`));
+
+  // a tag's lens: per month and in all, against search_transactions with the tag
+  if (tag) {
+    const lz = Money.lensData(allRows(S), ms, tag, S.meta.cats, S.ledger, S.debts);
+    const eng = groupTotals(searchTransactions(L, { tag, type: "exp", group_by: "month", limit: 0 }));
+    ms.forEach((m, i) => assert.ok(near(lz.m[i], eng[m] ?? 0), `${tag} ${m}: app ${lz.m[i]}, Ask ${eng[m] ?? 0}`));
+    assert.ok(near(lz.total, searchTransactions(L, { tag, type: "exp", limit: 0 }).spent), `${tag} total`);
+  }
+  // a person's lens: their People balance is the one Ask reports
+  for (const p of accountSummary(L, "people").people) {
+    if (p.person === "(no name)") continue;
+    assert.ok(near(Money.lensData(allRows(S), ms, p.person, S.meta.cats, S.ledger, S.debts).balance, p.balance), `${p.person} balance`);
+  }
+
+  // prop firm and poker lines end at the Accounts results Ask reports
+  const tr = Money.tradingRuns(S.ledger, S.meta), vs = venueSummary(L);
+  const net = (ty) => vs.filter((v) => v.type === ty).reduce((a, v) => a + (v.net ?? 0), 0);
+  assert.ok(near(tr.propNet, net("prop")), `prop: app ${tr.propNet}, Ask ${net("prop")}`);
+  assert.ok(near(tr.pokerNet, net("poker")), `poker: app ${tr.pokerNet}, Ask ${net("poker")}`);
+  if (tr.days.length) { assert.equal(tr.prop[tr.prop.length - 1], tr.propNet); assert.deepEqual([...tr.days], [...tr.days].sort()); assert.equal(new Set(tr.days).size, tr.days.length); }
+  return { P, td, tr };
+}
+
+test("Insights and Home figures agree with Ask on the sample ledger", () => {
+  for (const basis of ["cash", "balance"]) checkInsights(sampleDoc(basis), "2026-11-15");
+});
+
+test("Insights and Home figures agree with Ask on a Money Manager import", () => {
+  const { doc } = importedDoc();
+  const L = loadLedger(doc), last = monthsWithEntries(L).at(-1);
+  checkInsights(doc, Money.addMonth(last, 1) + "-15");
+});
+
+test("the prop firm result on Insights and Home leaves out a partner's stake, as Accounts does", () => {
+  const S = appState(sampleDoc("cash"));
+  // Apex: 167 of your own in, 167 of Jo's in, 1200.40 out. Your result is 1033.40, not 866.40.
+  const tr = Money.tradingRuns(S.ledger, S.meta);
+  assert.equal(tr.propNet, 1033.4);
+  assert.equal(tr.propNet, r2(Money.venuePnl(S.ledger, "Apex", S.meta).pnl));
+  assert.equal(tr.pokerNet, -64.5);
+  const jan = Money.monthTrading(S.ledger, S.meta, "2026-01");
+  assert.equal(jan.propFees, 167); // Jo's 167 the next day is theirs
+  assert.equal(jan.has, true);
+  assert.equal(Money.monthTrading(S.ledger, S.meta, "2026-02").net, 1200.4);
+  assert.equal(Money.monthTrading(S.ledger, S.meta, "2026-05").poker, -64.5);
+  const jun = Money.monthTrading(S.ledger, S.meta, "2026-06");
+  assert.ok(near(jun.brIn, 0.3) && near(jun.brOut, 0.3) && jun.net === 0);
+  assert.equal(Money.monthTrading(S.ledger, S.meta, "2026-08").has, false);
+});
+
+test("an opening balance on a prop account counts as paid in on its day, on Insights as on Accounts", () => {
+  const meta = { venues: { FTMO: { type: "prop" }, Table: { type: "poker" } } };
+  const ledger = [
+    { d: "2026-01-01", venue: "FTMO", f: "bal", amt: 300 }, // capital carried in
+    { d: "2026-01-05", venue: "FTMO", f: "out", amt: 50 },
+    { d: "2026-01-09", venue: "FTMO", f: "out", amt: 400 },
+    { d: "2026-01-09", venue: "Table", f: "in", amt: 20 },
+    { d: "2026-01-20", venue: "FTMO", f: "bal", amt: 9999 }, // a later balance is not money moved
+  ];
+  const tr = Money.tradingRuns(ledger, meta);
+  assert.equal(r2(Money.venuePnl(ledger, "FTMO", meta).pnl), 150);
+  assert.equal(tr.propNet, 150);
+  assert.deepEqual([...tr.days], ["2026-01-01", "2026-01-05", "2026-01-09"]);
+  assert.deepEqual([...tr.prop], [-300, -250, 150]);
+  assert.deepEqual([...tr.poker], [0, 0, -20]);
+});
+
+test("weekday averages count the days with nothing spent, and stop at today", () => {
+  // 2026-11-02 is a Monday
+  const exps = [{ d: "2026-11-02", t: "exp", amt: 70 }, { d: "2026-11-09", t: "exp", amt: 30, split: { mine: 10, person: "Sam" } }];
+  const w = Money.weekdayAvg(exps, ["2026-11"], "2026-11-10");
+  assert.equal(w.avg[0], 40); // two Mondays so far: (70 + 10) / 2
+  assert.equal(w.avg[6], 0);
+  assert.equal(w.byDay["2026-11-09"], 10);
+  assert.equal(Money.weekdayAvg(exps, ["2026-11"], "2026-12-31").avg[0], 80 / 5, "five Mondays in all of November");
 });

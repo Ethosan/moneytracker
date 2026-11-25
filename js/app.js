@@ -420,7 +420,7 @@ function ea(t) { return Money.ea(t); }
 function allTx() { var a = []; Object.keys(S.tx).forEach(function (k) { a = a.concat(S.tx[k]); }); return a; }
 function catObj(name) { for (var i = 0; i < S.meta.cats.length; i++) if (S.meta.cats[i].name === name) return S.meta.cats[i]; return null; }
 function incKind(name) { return Money.catKind(S.meta.cats, name); }
-function cleanSub(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+function cleanSub(s) { return Money.cleanSub(s); }
 // Subcategories per category name, stored as a plain object (it is saved as JSON). Read and write it by
 // own key only: a category called "constructor" or "__proto__" would otherwise get JavaScript's
 // built-ins back instead of a list, and the app failed to start.
@@ -839,17 +839,7 @@ function wireLogin() {
 // ---------- calculations ----------
 function monthStats(m) { return Money.monthStats(S.tx[m] || [], S.meta.cats, personTag()); }
 function tagSpend(m, tag) { return Money.tagSpend(S.tx[m] || [], tag); }
-function priorAvg(m) {
-  var acc = bag(), n = 0, net = 0;
-  for (var k = 1; k <= 3; k++) {
-    var pm = addMonth(m, -k); if (!S.tx[pm] || !S.tx[pm].length) continue; n++;
-    var st = monthStats(pm); Object.keys(st.byCat).forEach(function (c) { acc[c] = (acc[c] || 0) + st.byCat[c]; }); net += st.net;
-  }
-  if (!n) return null;
-  Object.keys(acc).forEach(function (c) { acc[c] /= n; }); acc.__n = n;
-  // kept off the object's keys, so code that walks categories never sees it
-  Object.defineProperty(acc, '__net', { value: net / n, enumerable: false }); return acc;
-}
+function priorAvg(m) { return Money.priorAvg(S.tx, m, S.meta.cats, personTag()); }
 function venuePnl(v) { return Money.venuePnl(S.ledger, v, S.meta); }
 function venuesByType() {
   var names = {}; S.ledger.forEach(function (e) { names[e.venue] = 1; }); Object.keys(S.meta.venues).forEach(function (v) { names[v] = 1; });
@@ -2115,13 +2105,8 @@ function renderHome() {
   }
 
   // trading this month + prop fees watch
-  var mEntries = S.ledger.filter(function (e) { return monthOf(e.d) === m; });
-  var propFees = sum(mEntries.filter(function (e) { return venueType(e.venue) === 'prop' && e.f === 'in'; }), function (e) { return e.amt; });
-  var propPay = sum(mEntries.filter(function (e) { return venueType(e.venue) === 'prop' && e.f === 'out'; }), function (e) { return e.amt; });
-  var poker = sum(mEntries.filter(function (e) { return venueType(e.venue) === 'poker'; }), function (e) { return e.f === 'out' ? e.amt : e.f === 'in' ? -e.amt : 0; });
-  var brIn = sum(mEntries.filter(function (e) { var t = venueType(e.venue); return (t === 'broker' || t === 'crypto') && e.f === 'in'; }), function (e) { return e.amt; });
-  var brOut = sum(mEntries.filter(function (e) { var t = venueType(e.venue); return (t === 'broker' || t === 'crypto') && e.f === 'out'; }), function (e) { return e.amt; });
-  var hasTrading = mEntries.some(function (e) { var ty = venueType(e.venue); return ty === 'prop' || ty === 'poker' || ty === 'broker' || ty === 'crypto'; });
+  var MT = Money.monthTrading(S.ledger, S.meta, m);
+  var propFees = MT.propFees, propPay = MT.propPay, poker = MT.poker, brIn = MT.brIn, brOut = MT.brOut, hasTrading = MT.has;
   var plTx = (S.tx[m] || []).filter(function (t) { return t.t === 'exp' && t.pm === 'later'; });
   var plOwed = laterOwed(), plNext = nextPayment(), plMonth = r2(sum(plTx, function (t) { return t.amt; }));
   var hasLater = plOwed > 0 || plMonth > 0;
@@ -2129,7 +2114,7 @@ function renderHome() {
     // one line each; the detail lives on Accounts
     h += '<section class="blk"><h2>' + (hasTrading && hasLater ? 'Trading and PayLater' : hasTrading ? 'Trading and poker' : 'PayLater') + '</h2><div class="panel">';
     if (hasTrading) {
-      var tradeNet = r2(propPay - propFees + poker), allOut = st.net + propFees + Math.max(0, -poker) + brIn - brOut;
+      var tradeNet = MT.net, allOut = st.net + propFees + Math.max(0, -poker) + brIn - brOut;
       var tbits = [];
       if (propFees || propPay) tbits.push('prop fees ' + money(propFees, 0) + ', payouts ' + money(propPay, 0));
       if (poker) tbits.push('poker ' + signed(poker, 0));
@@ -5913,31 +5898,9 @@ function monthProgress(m) {
   return Math.max(1, +today().slice(8, 10)) / dim;
 }
 function trendKind() { return UI.trKind === 'inc' ? 'inc' : 'exp'; }
-function inTrend(t) { return trendKind() === 'inc' ? t.t === 'inc' && incKind(t.cat) !== 'reimb' : t.t === 'exp'; }
-function trendAmt(t) { return t.t === 'exp' ? ea(t) : t.amt; }
-function trendData() {
-  var ms = trendMonths(), ix = {}; ms.forEach(function (m, i) { ix[m] = i; });
-  var cats = bag();
-  allTx().forEach(function (t) {
-    if (!inTrend(t) || ix[monthOf(t.d)] == null) return;
-    var c = cats[t.cat] = cats[t.cat] || { name: t.cat, m: ms.map(function () { return 0; }), subs: bag(), notes: bag() };
-    var v = trendAmt(t), i = ix[monthOf(t.d)], sb = cleanSub(t.sub) || 'No subcategory';
-    c.m[i] += v;
-    var s = c.subs[sb] = c.subs[sb] || { name: sb, m: ms.map(function () { return 0; }), notes: bag() }; s.m[i] += v;
-    var n = (t.note || '').trim().toLowerCase();
-    if (n) [c.notes, s.notes].forEach(function (bag) { var o = bag[n] = bag[n] || { note: t.note.trim(), n: 0, amt: 0 }; o.n++; o.amt += v; });
-  });
-  function tops(bag, k) { return Object.keys(bag).map(function (x) { return bag[x]; }).sort(function (a, b) { return b.n - a.n || b.amt - a.amt; }).slice(0, k); }
-  var list = Object.keys(cats).map(function (k) {
-    var c = cats[k];
-    c.subs = Object.keys(c.subs).map(function (x) { var s = c.subs[x]; s.top = tops(s.notes, 4); return s; })
-      .filter(function (s) { return sum(s.m, function (v) { return v; }) > 0.5; })
-      .sort(function (a, b) { return sum(b.m, function (v) { return v; }) - sum(a.m, function (v) { return v; }); });
-    c.top = tops(c.notes, 5); c.total = sum(c.m, function (v) { return v; });
-    return c;
-  }).filter(function (c) { return c.total > 0.5; }).sort(function (a, b) { return b.total - a.total; });
-  return { months: ms, cats: list };
-}
+function inTrend(t) { return Money.inTrend(t, trendKind(), S.meta.cats); }
+function trendAmt(t) { return Money.trendAmt(t); }
+function trendData() { return Money.trendData(allTx(), trendMonths(), trendKind(), S.meta.cats); }
 function firstActive(m) { for (var i = 0; i < m.length; i++) if (m[i] > 0.5) return i; return 0; }
 // averages, the recent trend and the pace of the unfinished month, as numbers and as a sentence
 function describeSeries(ms, m) {
@@ -6067,29 +6030,7 @@ function lensTag() {
   if (UI.lensTag && usable.indexOf(UI.lensTag) > -1) return UI.lensTag;
   var pt = personTag(); return (pt && usable.indexOf(pt) > -1) ? pt : usable[0] || null;
 }
-function lensData(tag) {
-  var ms = trendMonths(), ix = {}; ms.forEach(function (m, i) { ix[m] = i; });
-  var L = { tag: tag, months: ms, m: ms.map(function () { return 0; }), days: ms.map(function () { return {}; }), cats: bag(), wd: [0, 0, 0, 0, 0, 0, 0].map(function () { return { days: {}, amt: 0 }; }), items: [], covered: 0 };
-  var all = ms.map(function () { return 0; });
-  allTx().forEach(function (t) {
-    if (t.t !== 'exp' || ix[monthOf(t.d)] == null) return;
-    var i = ix[monthOf(t.d)], v = ea(t); all[i] += v;
-    if ((t.tags || []).indexOf(tag) < 0) return;
-    L.m[i] += v; L.days[i][t.d] = 1; L.cats[t.cat] = (L.cats[t.cat] || 0) + v;
-    var w = (new Date(t.d + 'T00:00:00').getDay() + 6) % 7; L.wd[w].amt += v; L.wd[w].days[t.d] = 1;
-    L.items.push(t); if (t.split) L.covered += t.amt - v;
-  });
-  L.all = all; L.total = sum(L.m, function (v) { return v; });
-  L.nDays = Object.keys(L.items.reduce(function (o, t) { o[t.d] = 1; return o; }, {})).length;
-  L.first = L.items.reduce(function (a, t) { return !a || t.d < a ? t.d : a; }, null);
-  L.catList = Object.keys(L.cats).map(function (k) { return { name: k, amt: L.cats[k] }; }).sort(function (a, b) { return b.amt - a.amt; });
-  L.top = L.items.slice().sort(function (a, b) { return ea(b) - ea(a); }).slice(0, 6);
-  var low = tag.toLowerCase();
-  L.paybacks = sum(allTx().filter(function (t) { return t.t === 'inc' && incKind(t.cat) === 'reimb' && (t.note || '').toLowerCase().indexOf(low) > -1; }), function (t) { return t.amt; });
-  L.invested = sum(S.ledger.filter(function (e) { return e.who === tag && e.f === 'in'; }), function (e) { return e.amt; });
-  var bal = 0; S.debts.forEach(function (x) { if (x.person === tag) bal += x.amt; }); L.balance = r2(bal);
-  return L;
-}
+function lensData(tag) { return Money.lensData(allTx(), trendMonths(), tag, S.meta.cats, S.ledger, S.debts); }
 function renderLens() {
   var tag = lensTag();
   if (!tag) return '<div class="empty">Tag entries (for example with the person you were with) and this view shows what you spend together, when and on what.</div>';
@@ -6163,18 +6104,17 @@ function renderOverview() {
   var ms = dataMonths();
   h += '<div class="seg" id="rng">' + [[3, '3 months'], [6, '6 months'], [12, '12 months'], [0, 'All']].map(function (r) { return '<button data-range="' + r[0] + '" aria-pressed="' + (UI.range === r[0]) + '">' + r[1] + '</button>'; }).join('') + '</div>';
   if (!ms.length) return h + '<div class="empty">Import or log some transactions to see insights.</div>';
-  var st = ms.map(monthStats), tx = allTx().filter(function (t) { return ms.indexOf(monthOf(t.d)) > -1; }), exps = tx.filter(function (t) { return t.t === 'exp'; });
-  var avgSpend = sum(st, function (x) { return x.net; }) / ms.length, inc = sum(st, function (x) { return x.earned + x.other; }), kept = sum(st, function (x) { return x.saved; });
-  var alTot = sum(st, function (x) { return x.person; }), spTot = sum(st, function (x) { return x.spend; });
-  var subsCat = sum(exps.filter(function (t) { return t.cat === '🗓 Subscriptions'; }), ea) / ms.length;
-  var peakI = st.reduce(function (b, x, i) { return x.net > st[b].net ? i : b; }, 0);
+  var P = Money.periodStats(S.tx, ms, S.meta.cats, personTag()), st = P.st, exps = P.exps;
+  var avgSpend = P.avgNet, inc = P.income, kept = P.kept, alTot = P.person, spTot = P.spend;
+  var subsCat = (P.byCat['🗓 Subscriptions'] || 0) / ms.length;
+  var peakI = P.peak;
   h += '<div class="kpis"><div><span>Average month</span><b>' + money(avgSpend, 0) + '</b><i>spent after paybacks</i></div>' +
-    '<div><span>Savings rate</span><b class="' + tone(kept) + '">' + (inc ? Math.round(kept / inc * 100) : 0) + '%</b><i>' + signed(kept, 0) + ' kept</i></div>' +
+    '<div><span>Savings rate</span><b class="' + tone(kept) + '">' + P.rate + '%</b><i>' + signed(kept, 0) + ' kept</i></div>' +
     (personTag() ? '<div><span>With ' + esc(personTag()) + '</span><b style="color:var(--rose)">' + (spTot ? Math.round(alTot / spTot * 100) : 0) + '%</b><i>' + money(alTot, 0) + ' of spending over ' + (ms.length === 1 ? '1 month' : ms.length + ' months') + '</i></div>' : '') +
     '<div><span>Subscriptions</span><b>' + money(subsCat, 0) + '</b><i>a month, everything logged under Subscriptions</i></div></div>';
 
   h += chartBlock('c1', 'Spending peaked in ' + monthLabel(ms[peakI]) + ' at ' + money(st[peakI].net, 0), 'By category, before paybacks', 240, '<div class="lg" id="c1l"></div>');
-  h += chartBlock('c2', inc >= sum(st, function (x) { return x.net; }) ? 'You earned more than you spent over this period' : 'You spent more than you brought in over this period', 'Money in versus spending after paybacks', 200, '<div class="lg"><span><i style="background:var(--gain)"></i>Money in</span><span><i style="background:var(--ink)"></i>Spent</span></div>');
+  h += chartBlock('c2', inc >= P.net ? 'You earned more than you spent over this period' : 'You spent more than you brought in over this period', 'Money in versus spending after paybacks', 200, '<div class="lg"><span><i style="background:var(--gain)"></i>Money in</span><span><i style="background:var(--ink)"></i>Spent</span></div>');
 
   // time with the person tag
   var pTag = personTag();
@@ -6195,20 +6135,13 @@ function renderOverview() {
     '<div class="lg"><span><i style="background:' + (isDark() ? COVE_D[1] : COVE_L[1]) + '"></i>Grab</span><span><i style="background:' + (isDark() ? COVE_D[0] : COVE_L[0]) + '"></i>Public transport and other</span></div>');
 
   // weekday + heatmap
-  var wd = [0, 0, 0, 0, 0, 0, 0], wdN = [0, 0, 0, 0, 0, 0, 0], byDay = {};
-  exps.forEach(function (t) { byDay[t.d] = (byDay[t.d] || 0) + ea(t); });
-  var first = ms[0] + '-01', last = addMonth(ms[ms.length - 1], 1) + '-01';
-  for (var dt = new Date(first + 'T00:00:00'); ; dt.setDate(dt.getDate() + 1)) {
-    var k = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
-    if (k >= last || k > today()) break; var w = (dt.getDay() + 6) % 7; wd[w] += byDay[k] || 0; wdN[w]++;
-  }
-  var wdAvg = wd.map(function (v, i) { return wdN[i] ? v / wdN[i] : 0; }), topW = wdAvg.indexOf(Math.max.apply(null, wdAvg));
+  var WK = Money.weekdayAvg(exps, ms, today()), byDay = WK.byDay, wdAvg = WK.avg, topW = wdAvg.indexOf(Math.max.apply(null, wdAvg));
   var WD = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   more += chartBlock('c5', WD[topW] + ' is your most expensive day', 'Average spent per day of the week', 160, '');
   more += '<section class="blk"><h2>Every day, last 20 weeks</h2>' + heatmap(byDay) + '<p class="note">Darker means more spent. Empty squares are days with nothing logged; if you know you spent, that is where a gap hides.</p></section>';
 
   // category table
-  var cc = catColorMap(), catT = bag(); exps.forEach(function (t) { catT[t.cat] = (catT[t.cat] || 0) + ea(t); });
+  var cc = catColorMap(), catT = P.byCat;
   var lastM = ms[ms.length - 1], prevAvg = priorAvg(lastM) || {}, lastSt = monthStats(lastM);
   // a month in progress compares with what you usually spend by today, like Month does
   var ovDay = +today().slice(8, 10), ovNow = lastM === monthOf(today()) ? Math.min(1, ovDay / new Date(+lastM.slice(0, 4), +lastM.slice(5, 7), 0).getDate()) : 1;
@@ -6229,14 +6162,14 @@ function renderOverview() {
   more += '<section class="blk"><h2>Largest purchases</h2><div class="panel">' + bigs.map(txRow).join('') + '</div></section>';
 
   // income sources
-  var incs = bag(); tx.filter(function (t) { return t.t === 'inc'; }).forEach(function (t) { incs[t.cat] = (incs[t.cat] || 0) + t.amt; });
+  var incs = P.incomeByCat;
   var incK = Object.keys(incs).sort(function (a, b) { return incs[b] - incs[a]; });
   if (incK.length) more += chartBlock('c6', incK[0] + ' is your biggest source of money in', 'Total over this period. Paybacks included', incK.length * 34 + 30, '');
 
   // trading
-  var le = S.ledger.filter(function (e) { var t = venueType(e.venue); return (t === 'prop' || t === 'poker') && e.f !== 'bal'; });
-  if (le.length) {
-    var pf = sum(le.filter(function (e) { return venueType(e.venue) === 'prop'; }), function (e) { return e.f === 'out' ? e.amt : -e.amt; });
+  var TR = Money.tradingRuns(S.ledger, S.meta);
+  if (TR.days.length) {
+    var pf = TR.propNet;
     h += chartBlock('c7', (pf >= 0 ? 'Prop firms have made you ' + money(pf, 0) : 'Prop firms have cost you ' + money(-pf, 0)) + ' net so far', 'Running total of prop firm and poker results, all time', 200,
       '<div class="lg"><span><i style="background:' + (isDark() ? COVE_D[6] : COVE_L[6]) + '"></i>Prop firms</span><span><i style="background:' + cssv('--muted') + '"></i>Poker, dashed</span></div>');
   }
@@ -6300,28 +6233,19 @@ function drawOverview() {
   });
   mk('c4', { type: 'bar', data: { labels: labels, datasets: [Object.assign({ label: 'Grab', data: tr.map(function (x) { return x[0]; }), backgroundColor: pal[1] }, bar, { borderRadius: 0 }), Object.assign({ label: 'Public transport and other', data: tr.map(function (x) { return x[1]; }), backgroundColor: pal[0] }, bar)] }, options: base(true) });
   // c5 weekday
-  var exps = allTx().filter(function (t) { return t.t === 'exp' && ms.indexOf(monthOf(t.d)) > -1; }), byDay = {};
-  exps.forEach(function (t) { byDay[t.d] = (byDay[t.d] || 0) + ea(t); });
-  var wd = [0, 0, 0, 0, 0, 0, 0], wn = [0, 0, 0, 0, 0, 0, 0], last = addMonth(ms[ms.length - 1], 1) + '-01';
-  for (var dt = new Date(ms[0] + '-01T00:00:00'); ; dt.setDate(dt.getDate() + 1)) {
-    var k = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
-    if (k >= last || k > today()) break; var w = (dt.getDay() + 6) % 7; wd[w] += byDay[k] || 0; wn[w]++;
-  }
-  var wa = wd.map(function (v, i) { return wn[i] ? r2(v / wn[i]) : 0; }), mx = Math.max.apply(null, wa);
+  var P = Money.periodStats(S.tx, ms, S.meta.cats, personTag());
+  var wa = Money.weekdayAvg(P.exps, ms, today()).avg.map(r2), mx = Math.max.apply(null, wa);
   mk('c5', { type: 'bar', data: { labels: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'], datasets: [Object.assign({ label: 'Average', data: wa, backgroundColor: wa.map(function (v) { return v === mx ? pal[0] : (isDark() ? '#2B3346' : '#CDD5E4'); }) }, bar)] }, options: base(false) });
   // c6 income sources
-  var incs = bag(); allTx().filter(function (t) { return t.t === 'inc' && ms.indexOf(monthOf(t.d)) > -1; }).forEach(function (t) { incs[t.cat] = (incs[t.cat] || 0) + t.amt; });
+  var incs = P.incomeByCat;
   var ik = Object.keys(incs).sort(function (a, b) { return incs[b] - incs[a]; });
   mk('c6', { type: 'bar', data: { labels: ik, datasets: [Object.assign({ label: 'Total', data: ik.map(function (k) { return r2(incs[k]); }), backgroundColor: ik.map(function (k) { return incKind(k) === 'earned' ? cssv('--gain') : incKind(k) === 'reimb' ? (isDark() ? '#3A4D94' : '#A9BBFF') : pal[3]; }) }, bar)] }, options: base(false, true) });
   // c7 cumulative trading
-  var le = S.ledger.filter(function (e) { var t = venueType(e.venue); return (t === 'prop' || t === 'poker') && e.f !== 'bal'; }).sort(function (a, b) { return a.d < b.d ? -1 : 1; });
-  if (le.length) {
-    var days = [], seen = {}; le.forEach(function (e) { if (!seen[e.d]) { seen[e.d] = 1; days.push(e.d); } });
-    var cp = 0, ck = 0, P = [], K = [];
-    days.forEach(function (d) { le.filter(function (e) { return e.d === d; }).forEach(function (e) { var v = e.f === 'out' ? e.amt : -e.amt; if (venueType(e.venue) === 'prop') cp += v; else ck += v; }); P.push(r2(cp)); K.push(r2(ck)); });
-    mk('c7', { type: 'line', data: { labels: days.map(function (d) { return dayLabel(d); }), datasets: [
-      { label: 'Prop firms', data: P, borderColor: pal[6], backgroundColor: pal[6], borderWidth: 2, pointRadius: 0, stepped: true, fill: { target: 'origin', above: 'transparent', below: pal[6] + '1a' } },
-      { label: 'Poker', data: K, borderColor: mut, backgroundColor: mut, borderWidth: 2, pointRadius: 0, stepped: true, borderDash: [5, 4] }] },
+  var TR = Money.tradingRuns(S.ledger, S.meta);
+  if (TR.days.length) {
+    mk('c7', { type: 'line', data: { labels: TR.days.map(function (d) { return dayLabel(d); }), datasets: [
+      { label: 'Prop firms', data: TR.prop, borderColor: pal[6], backgroundColor: pal[6], borderWidth: 2, pointRadius: 0, stepped: true, fill: { target: 'origin', above: 'transparent', below: pal[6] + '1a' } },
+      { label: 'Poker', data: TR.poker, borderColor: mut, backgroundColor: mut, borderWidth: 2, pointRadius: 0, stepped: true, borderDash: [5, 4] }] },
       options: Object.assign(base(false), { interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 5, maxRotation: 0 } }, y: { grid: { color: grid }, border: { display: false }, ticks: { callback: fmt, maxTicksLimit: 5 } } } }) });
   }
 }

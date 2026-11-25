@@ -141,6 +141,25 @@ function check(seed) {
     const eo = Object.fromEntries(e.map((x) => [x.person === "(no name)" ? "" : x.person, x.balance]));
     for (const k of new Set([...Object.keys(a), ...Object.keys(eo)])) if (!near(eo[k] ?? 0, r2(a[k] ?? 0))) bad("people balances differ", `"${k}": engine ${eo[k]}, app ${a[k]}`);
   } catch (err) { bad("people crashed", err.message); }
+  // Insights and Home: no crash, every figure a number, and the prop and poker lines end at Ask's Accounts results
+  try {
+    const ms = [...months].sort(), rows = Object.values(S.tx).flat();
+    if (ms.length) {
+      const P = Money.periodStats(S.tx, ms, S.meta.cats, "Dates");
+      for (const k of ["net", "income", "kept", "person", "spend", "avgNet", "rate"]) if (!isNum(P[k])) bad("period figure not a number", `${k}=${P[k]}`);
+      if (!near(Object.values(P.byCat).reduce((a, b) => a + b, 0), P.spend)) bad("period categories don't add up to spent", `${P.spend}`);
+      const pa = Money.priorAvg(S.tx, Money.addMonth(ms[ms.length - 1], 1), S.meta.cats, "Dates");
+      if (pa && !isNum(pa.__net)) bad("usual spending not a number", String(pa.__net));
+      for (const kind of ["exp", "inc"]) for (const c of Money.trendData(rows, ms, kind, S.meta.cats).cats) if (!c.m.every(isNum)) bad("trend not a number", c.name);
+      const lz = Money.lensData(rows, ms, "Dates", S.meta.cats, S.ledger, S.debts);
+      if (![lz.total, lz.covered, lz.paybacks, lz.invested, lz.balance].every(isNum)) bad("lens figure not a number", JSON.stringify(plainObj({ t: lz.total, c: lz.covered, p: lz.paybacks, i: lz.invested, b: lz.balance })));
+      Money.weekdayAvg(P.exps, ms, "2026-03-15");
+    }
+    const tr = Money.tradingRuns(S.ledger, S.meta);
+    const askNet = (ty) => vs.filter((v) => v.type === ty).reduce((a, v) => a + (v.net ?? 0), 0);
+    if (!near(tr.propNet, r2(askNet("prop"))) || !near(tr.pokerNet, r2(askNet("poker")))) bad("trading line differs from Accounts", `prop ${tr.propNet} vs ${r2(askNet("prop"))}, poker ${tr.pokerNet} vs ${r2(askNet("poker"))}`);
+    for (const m of ["2026-01", "2026-02", "2026-03"]) if (!isNum(Money.monthTrading(S.ledger, S.meta, m).net)) bad("month trading not a number", m);
+  } catch (err) { bad("insights crashed", err.message); }
   // the other things Ask runs on the same ledger must not crash or touch built-ins either
   try {
     overview(L, "2026-03-15");

@@ -362,7 +362,168 @@ var Money = (function () {
     return { flows: flows, anchorC: anchorC, anchorD: anchorC ? anchorC.d : null, anchor: anchor, balOn: balOn, now: balOn(day) };
   }
 
+  // ---- Insights and the Home screen's comparisons ----
+  // 'YYYY-MM' plus k months (dates.js has the app's copy; this file loads on its own in tests).
+  function addMonth(m, k) { var y = +m.slice(0, 4), mo = +m.slice(5, 7) - 1 + k; y += Math.floor(mo / 12); mo = ((mo % 12) + 12) % 12; return y + '-' + String(mo + 1).padStart(2, '0'); }
+  function cleanSub(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); }
+  // Every row of the app's rows-by-month object.
+  function allRows(txByMonth) { var a = []; Object.keys(txByMonth || {}).forEach(function (m) { var r = txByMonth[m]; if (Array.isArray(r)) a = a.concat(r); }); return a; }
+
+  // What you usually spend: the average of the up to three months before m that have entries,
+  // by category, with __n (how many months) and __net (spent after paybacks, kept off the keys).
+  // Null when none of those months has entries.
+  function priorAvg(txByMonth, m, cats, personTag) {
+    var acc = bag(), n = 0, net = 0;
+    for (var k = 1; k <= 3; k++) {
+      var rows = own(txByMonth, addMonth(m, -k)); if (!rows || !rows.length) continue; n++;
+      var st = monthStats(rows, cats, personTag); Object.keys(st.byCat).forEach(function (c) { acc[c] = (acc[c] || 0) + st.byCat[c]; }); net += st.net;
+    }
+    if (!n) return null;
+    Object.keys(acc).forEach(function (c) { acc[c] /= n; }); acc.__n = n;
+    Object.defineProperty(acc, '__net', { value: net / n, enumerable: false }); return acc;
+  }
+
+  // A run of months, as Insights' Overview shows it: each month's monthStats, the totals across them
+  // (net = spent after paybacks, income = work + other, kept = saved), spending by category (own share)
+  // and money in by category (paybacks included, as its chart says). Not rounded.
+  function periodStats(txByMonth, months, cats, personTag) {
+    var st = months.map(function (m) { return monthStats(own(txByMonth, m) || [], cats, personTag); });
+    var inRange = bag(); months.forEach(function (m) { inRange[m] = 1; });
+    var rows = allRows(txByMonth).filter(function (t) { return inRange[t.d.slice(0, 7)]; });
+    var exps = rows.filter(function (t) { return t.t === 'exp'; });
+    var byCat = bag(), incomeByCat = bag();
+    exps.forEach(function (t) { byCat[t.cat] = (byCat[t.cat] || 0) + ea(t); });
+    rows.forEach(function (t) { if (t.t === 'inc') incomeByCat[t.cat] = (incomeByCat[t.cat] || 0) + t.amt; });
+    var o = {
+      st: st, rows: rows, exps: exps, byCat: byCat, incomeByCat: incomeByCat,
+      net: sum(st, function (x) { return x.net; }), income: sum(st, function (x) { return x.earned + x.other; }),
+      kept: sum(st, function (x) { return x.saved; }), person: sum(st, function (x) { return x.person; }), spend: sum(st, function (x) { return x.spend; }),
+      peak: st.reduce(function (b, x, i) { return x.net > st[b].net ? i : b; }, 0)
+    };
+    o.avgNet = months.length ? o.net / months.length : 0;
+    o.rate = o.income ? Math.round(o.kept / o.income * 100) : 0;
+    return o;
+  }
+
+  // Spending per calendar day, and the average per weekday (Monday first) over every day from the
+  // first month's 1st to the end of the last month or today, whichever is earlier. Days with nothing
+  // logged count as zero.
+  function weekdayAvg(exps, months, today) {
+    var byDay = {}, wd = [0, 0, 0, 0, 0, 0, 0], wn = [0, 0, 0, 0, 0, 0, 0];
+    (exps || []).forEach(function (t) { byDay[t.d] = (byDay[t.d] || 0) + ea(t); });
+    if (months.length) {
+      var last = addMonth(months[months.length - 1], 1) + '-01';
+      for (var dt = new Date(months[0] + '-01T00:00:00'); ; dt.setDate(dt.getDate() + 1)) {
+        var k = dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+        if (k >= last || k > today) break; var w = (dt.getDay() + 6) % 7; wd[w] += byDay[k] || 0; wn[w]++;
+      }
+    }
+    return { byDay: byDay, avg: wd.map(function (v, i) { return wn[i] ? v / wn[i] : 0; }) };
+  }
+
+  // Trends: spending (own share) or income (paybacks left out) per category and subcategory per month,
+  // with the notes that come up most. Categories and subcategories under 50 cents in all are dropped.
+  function inTrend(t, kind, cats) { return kind === 'inc' ? t.t === 'inc' && catKind(cats, t.cat) !== 'reimb' : t.t === 'exp'; }
+  function trendAmt(t) { return t.t === 'exp' ? ea(t) : t.amt; }
+  function trendData(rows, months, kind, cats) {
+    var ix = bag(); months.forEach(function (m, i) { ix[m] = i; });
+    var byCat = bag(), id = function (v) { return v; };
+    (rows || []).forEach(function (t) {
+      if (!inTrend(t, kind, cats) || ix[t.d.slice(0, 7)] == null) return;
+      var c = byCat[t.cat] = byCat[t.cat] || { name: t.cat, m: months.map(function () { return 0; }), subs: bag(), notes: bag() };
+      var v = trendAmt(t), i = ix[t.d.slice(0, 7)], sb = cleanSub(t.sub) || 'No subcategory';
+      c.m[i] += v;
+      var s = c.subs[sb] = c.subs[sb] || { name: sb, m: months.map(function () { return 0; }), notes: bag() }; s.m[i] += v;
+      var n = (t.note || '').trim().toLowerCase();
+      if (n) [c.notes, s.notes].forEach(function (nb) { var o = nb[n] = nb[n] || { note: t.note.trim(), n: 0, amt: 0 }; o.n++; o.amt += v; });
+    });
+    function tops(nb, k) { return Object.keys(nb).map(function (x) { return nb[x]; }).sort(function (a, b) { return b.n - a.n || b.amt - a.amt; }).slice(0, k); }
+    var list = Object.keys(byCat).map(function (k) {
+      var c = byCat[k];
+      c.subs = Object.keys(c.subs).map(function (x) { var s = c.subs[x]; s.top = tops(s.notes, 4); return s; })
+        .filter(function (s) { return sum(s.m, id) > 0.5; })
+        .sort(function (a, b) { return sum(b.m, id) - sum(a.m, id); });
+      c.top = tops(c.notes, 5); c.total = sum(c.m, id);
+      return c;
+    }).filter(function (c) { return c.total > 0.5; }).sort(function (a, b) { return b.total - a.total; });
+    return { months: months, cats: list };
+  }
+
+  // A tag's lens: spending with the tag (own share) per month, day, weekday and category; what others
+  // covered on its split bills; paybacks whose note names it; and, when the tag is a person, their
+  // stake in your investments and their People balance.
+  function lensData(rows, months, tag, cats, ledger, debts) {
+    var ix = bag(); months.forEach(function (m, i) { ix[m] = i; });
+    var L = { tag: tag, months: months, m: months.map(function () { return 0; }), days: months.map(function () { return {}; }), cats: bag(), wd: [0, 0, 0, 0, 0, 0, 0].map(function () { return { days: {}, amt: 0 }; }), items: [], covered: 0 };
+    var all = months.map(function () { return 0; });
+    (rows || []).forEach(function (t) {
+      if (t.t !== 'exp' || ix[t.d.slice(0, 7)] == null) return;
+      var i = ix[t.d.slice(0, 7)], v = ea(t); all[i] += v;
+      if ((t.tags || []).indexOf(tag) < 0) return;
+      L.m[i] += v; L.days[i][t.d] = 1; L.cats[t.cat] = (L.cats[t.cat] || 0) + v;
+      var w = (new Date(t.d + 'T00:00:00').getDay() + 6) % 7; L.wd[w].amt += v; L.wd[w].days[t.d] = 1;
+      L.items.push(t); if (t.split) L.covered += t.amt - v;
+    });
+    L.all = all; L.total = sum(L.m);
+    L.nDays = Object.keys(L.items.reduce(function (o, t) { o[t.d] = 1; return o; }, {})).length;
+    L.first = L.items.reduce(function (a, t) { return !a || t.d < a ? t.d : a; }, null);
+    L.catList = Object.keys(L.cats).map(function (k) { return { name: k, amt: L.cats[k] }; }).sort(function (a, b) { return b.amt - a.amt; });
+    L.top = L.items.slice().sort(function (a, b) { return ea(b) - ea(a); }).slice(0, 6);
+    var low = tag.toLowerCase();
+    L.paybacks = sum((rows || []).filter(function (t) { return t.t === 'inc' && catKind(cats, t.cat) === 'reimb' && (t.note || '').toLowerCase().indexOf(low) > -1; }), function (t) { return t.amt; });
+    L.invested = sum((ledger || []).filter(function (e) { return e.who === tag && e.f === 'in'; }), function (e) { return e.amt; });
+    var bal = 0; (debts || []).forEach(function (x) { if (x.person === tag) bal += x.amt; }); L.balance = r2(bal);
+    return L;
+  }
+
+  // Your own money in and out of a venue: someone else's stake (who set, not 'me') is theirs, as on
+  // the Accounts screen (venuePnl keeps it apart under partners). Only in and out move money; a
+  // balance is a reading, and a flow of any other kind is ignored, as venuePnl ignores it.
+  function ownFlow(e) { return (e.f === 'in' || e.f === 'out') && (!e.who || e.who === 'me'); }
+  // One month's trading for the Home screen: prop fees and payouts, poker won or lost, and money moved
+  // to or from brokers and crypto. Your own flows only.
+  function monthTrading(ledger, meta, m) {
+    var o = { propFees: 0, propPay: 0, poker: 0, brIn: 0, brOut: 0, has: false };
+    (ledger || []).forEach(function (e) {
+      if (e.d.slice(0, 7) !== m) return;
+      var ty = venueType(meta, e.venue);
+      if (ty === 'prop' || ty === 'poker' || ty === 'broker' || ty === 'crypto') o.has = true;
+      if (!ownFlow(e)) return;
+      if (ty === 'prop') { if (e.f === 'in') o.propFees += e.amt; else if (e.f === 'out') o.propPay += e.amt; }
+      else if (ty === 'poker') o.poker += e.f === 'out' ? e.amt : -e.amt;
+      else if (ty === 'broker' || ty === 'crypto') { if (e.f === 'in') o.brIn += e.amt; else if (e.f === 'out') o.brOut += e.amt; }
+    });
+    o.net = r2(o.propPay - o.propFees + o.poker);
+    return o;
+  }
+  // Prop firm and poker results over time, for Insights: running totals per day of your own money
+  // out minus in, with an opening balance counted as paid in on its day, the way venuePnl counts them.
+  // So each line ends at the sum of the Accounts screen's results for that kind.
+  function tradingRuns(ledger, meta) {
+    var ev = [], names = bag();
+    (ledger || []).forEach(function (e) { names[e.venue] = 1; });
+    Object.keys(names).forEach(function (v) {
+      var ty = venueType(meta, v); if (ty !== 'prop' && ty !== 'poker') return;
+      // the same entries in the same order as venuePnl, so the same balance is the opening one
+      var es = (ledger || []).filter(function (e) { return e.venue === v && (!e.who || e.who === 'me' || e.f === 'bal'); })
+        .sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : (a.f === 'bal') - (b.f === 'bal'); });
+      es.forEach(function (e, i) {
+        if (e.f === 'bal') { if (i === 0) ev.push({ d: e.d, ty: ty, v: -e.amt }); return; }
+        if (ownFlow(e)) ev.push({ d: e.d, ty: ty, v: e.f === 'out' ? e.amt : -e.amt });
+      });
+    });
+    ev.sort(function (a, b) { return a.d < b.d ? -1 : a.d > b.d ? 1 : 0; });
+    var days = [], prop = [], poker = [], cp = 0, ck = 0;
+    ev.forEach(function (e, i) {
+      if (e.ty === 'prop') cp += e.v; else ck += e.v;
+      if (i === ev.length - 1 || ev[i + 1].d !== e.d) { days.push(e.d); prop.push(r2(cp)); poker.push(r2(ck)); }
+    });
+    return { days: days, prop: prop, poker: poker, propNet: r2(cp), pokerNet: r2(ck) };
+  }
+
   return {
+    addMonth: addMonth, cleanSub: cleanSub, priorAvg: priorAvg, periodStats: periodStats, weekdayAvg: weekdayAvg, inTrend: inTrend, trendAmt: trendAmt,
+    trendData: trendData, lensData: lensData, monthTrading: monthTrading, tradingRuns: tradingRuns,
     r2: r2, sum: sum, num: num, cleanTx: cleanTx, cleanDebts: cleanDebts, cleanLedger: cleanLedger, ea: ea, catKind: catKind, monthStats: monthStats, incomeBy: incomeBy, tagSpend: tagSpend,
     venueType: venueType, isClosed: isClosed, cashBasis: cashBasis, venuePnl: venuePnl,
     personBalances: personBalances, monthlyEquiv: monthlyEquiv, changeOk: changeOk,
