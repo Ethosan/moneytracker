@@ -25,6 +25,7 @@
   ];
   var FOOD = [['Hawker', 'Chicken rice', 4.5, 7], ['Hawker', 'Laksa', 5, 7.5], ['Hawker', 'Mixed rice', 4.8, 7], ['Cafe', 'Kopi and kaya toast', 3.6, 5.8],
     ['Cafe', 'Flat white', 5.5, 7.5], ['Groceries', 'FairPrice', 18, 64], ['Delivery', 'GrabFood', 14, 29], ['Hawker', 'Mee pok', 4, 6]];
+  var HAWKER = FOOD.filter(function (f) { return f[0] === 'Hawker'; });
   var RIDES = [['MRT', 'Bus and MRT', 1.2, 2.6], ['MRT', 'Bus and MRT', 1.4, 2.4], ['MRT', 'Bus and MRT', 1.1, 2.2], ['Grab', 'Grab home', 11, 24]];
   var SHOP = [['Clothes', 'Uniqlo', 29.9, 69.9], ['Home', 'Shopee', 8.9, 42], ['Tech', 'USB-C cable', 12.9, 25.9], ['Books', 'Kinokuniya', 18, 36]];
 
@@ -58,12 +59,18 @@
       add(ymd(y, m, 9), 'exp', 3.98, '🗓 Subscriptions', 'iCloud', 'iCloud 200 GB', { acct: 'DBS' });
       add(ymd(y, m, 18), 'exp', 28.13, '🗓 Subscriptions', 'Claude', 'Claude Pro', { acct: 'DBS' });
       add(ymd(y, m, 12), 'exp', 30, '🗓 Subscriptions', 'Phone', 'GOMO mobile plan', { acct: 'DBS' });
-      // every day: food, and getting around on weekdays
+      // every day: food, and getting around on weekdays. Whoever this is keeps to their food budget: on a day
+      // they are ahead of it for the month so far, it's one meal at a hawker centre
+      // and this month they're saving harder: a tighter food pace, the MRT home, no drinks out
+      var food = 0, careful = i === 5, pace = careful ? 420 : 540;
       for (var d = 1; d <= last; d++) {
-        var day = ymd(y, m, d), dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
-        var meals = R() < 0.35 ? 2 : 1;
-        for (var j = 0; j < meals; j++) { var f = pick(FOOD); add(day, 'exp', between(f[2], f[3]), '🍜 Food', f[0], f[1], { acct: R() < 0.4 ? 'Cash' : 'DBS' }); }
-        if (dow > 0 && dow < 6) { var r = R() < 0.12 ? RIDES[3] : pick(RIDES.slice(0, 3)); add(day, 'exp', between(r[2], r[3]), '🚖 Transport', r[0], r[1], { acct: 'DBS' }); }
+        var day = ymd(y, m, d), dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(), ahead = food > pace * d / last;
+        var meals = R() < 0.35 && !ahead ? 2 : 1;
+        for (var j = 0; j < meals; j++) {
+          var f = ahead ? HAWKER[Math.floor(R() * HAWKER.length)] : pick(FOOD), amt = r2(between(f[2], f[3])); food += amt;
+          add(day, 'exp', amt, '🍜 Food', f[0], f[1], { acct: R() < 0.4 ? 'Cash' : 'DBS' });
+        }
+        if (dow > 0 && dow < 6) { var r = R() < 0.05 && !careful ? RIDES[3] : pick(RIDES.slice(0, 3)); add(day, 'exp', between(r[2], r[3]), '🚖 Transport', r[0], r[1], { acct: 'DBS' }); }
       }
       // dates with Mei, tagged so the Mei lens has something in it
       [8, 22].forEach(function (d) {
@@ -72,7 +79,7 @@
       });
       // now and then
       if (R() < 0.8) { var s = pick(SHOP); add(ymd(y, m, 4 + Math.floor(R() * 20)), 'exp', between(s[2], s[3]), '🧥 Shopping', s[0], s[1], { acct: 'DBS' }); }
-      if (R() < 0.6) add(ymd(y, m, 10 + Math.floor(R() * 15)), 'exp', between(25, 60), '👬 Social life', 'Drinks', 'Drinks with the team', { acct: 'DBS' });
+      if (R() < 0.6 && !careful) add(ymd(y, m, 10 + Math.floor(R() * 15)), 'exp', between(25, 60), '👬 Social life', 'Drinks', 'Drinks with the team', { acct: 'DBS' });
       if (i === 1) add(ymd(y, m, 19), 'exp', 128, '🎟 Experiences', 'Concert', 'Concert tickets', { acct: 'DBS' });
       if (i === 3) add(ymd(y, m, 14), 'exp', 69.9, '🎮 Games', '', 'New Switch game', { acct: 'DBS' });
       if (i === 4) add(ymd(y, m, 2), 'exp', 50, '🙏 Giving', '', 'Food bank donation', { acct: 'DBS' });
@@ -91,21 +98,37 @@
     });
 
     // investments and the rest, dated from the first month
-    var f0 = months[0], f1 = months[1], f3 = months[3], f4 = months[4];
+    var f0 = months[0], f1 = months[1], f3 = months[3], f4 = months[4], f5 = months[5];
+    function led(e) { if (e.d <= today) ledger.push(e); }
+    var py = f0[0], pm = f0[1] - 1; if (pm < 1) { pm = 12; py--; }
     ledger.push({ id: id('l'), d: ymd(f0[0], f0[1], 1), venue: 'Moomoo', f: 'bal', amt: 5200, note: 'Starting balance' });
     ledger.push({ id: id('l'), d: ymd(f4[0], f4[1], 28), venue: 'Moomoo', f: 'bal', amt: 7140.55, note: 'From the app' });
-    ledger.push({ id: id('l'), d: ymd(f1[0], f1[1], 5), venue: 'Apex', f: 'in', amt: 167, note: 'Evaluation, 50K', acct: 'DBS' });
-    ledger.push({ id: id('l'), d: ymd(f3[0], f3[1], 11), venue: 'Apex', f: 'out', amt: 612.4, note: 'First payout', acct: 'DBS' });
+    // one prop firm evaluation, passed the month before the six, then a payout every other month
+    ledger.push({ id: id('l'), d: ymd(py, pm, 12), venue: 'Apex', f: 'in', amt: 167, note: 'Evaluation, 50K', acct: 'DBS' });
+    led({ id: id('l'), d: ymd(f1[0], f1[1], 18), venue: 'Apex', f: 'out', amt: 612.4, note: 'First payout', acct: 'DBS' });
+    led({ id: id('l'), d: ymd(f3[0], f3[1], 14), venue: 'Apex', f: 'out', amt: 845, note: 'Payout', acct: 'DBS' });
+    led({ id: id('l'), d: ymd(f5[0], f5[1], 9), venue: 'Apex', f: 'out', amt: 1020, note: 'Payout', acct: 'DBS' });
     ledger.push({ id: id('l'), d: ymd(f0[0], f0[1], 3), venue: 'Coinbase', f: 'bal', amt: 950, note: 'Starting balance' });
     ledger.push({ id: id('l'), d: ymd(f3[0], f3[1], 20), venue: 'Coinbase', f: 'bal', amt: 1088.2, note: 'Checked' });
     // money lent: Jo borrowed 150 and has paid 50 back
     debts.push({ id: id('d'), d: ymd(f3[0], f3[1], 7), person: 'Jo', amt: 150, note: 'Lent for rent', k: 'lend', acct: 'DBS', src: 'app' });
     debts.push({ id: id('d'), d: ymd(f4[0], f4[1], 7), person: 'Jo', amt: -50, note: 'Part payment', k: 'part', paid: 50, acct: 'DBS', src: 'app' });
 
-    // one count of the wallets the night before the first month, so balances have a starting point
-    var py = f0[0], pm = f0[1] - 1; if (pm < 1) { pm = 12; py--; }
+    // a count of the wallets the night before the first month, so balances have a starting point, then one
+    // every Sunday night before today, the app's default plan. Each count is what the entries say the wallet
+    // holds (money.js does the sums, as the app does), so every count matches and no gap is left to find.
     var c0 = ymd(py, pm, daysIn(py, pm));
     var checks = [{ id: 'demo-c1', d: c0, at: new Date(py, pm - 1, daysIn(py, pm), 21).toISOString(), total: 4380, lines: { DBS: 4200, Cash: 180 }, native: {}, exp: {} }];
+    var D = { tx: [].concat.apply([], Object.keys(tx).map(function (k) { return tx[k]; })), ledger: ledger, debts: debts, bills: [] };
+    for (var sun = new Date(Date.UTC(f0[0], f0[1] - 1, 1)); ; sun.setUTCDate(sun.getUTCDate() + 1)) {
+      var sd2 = sun.toISOString().slice(0, 10); if (sd2 >= today) break;
+      if (sun.getUTCDay() !== 0) continue;
+      var prev = checks[checks.length - 1], lines = { DBS: prev.lines.DBS, Cash: prev.lines.Cash };
+      root.Money.walletMoves(D, ['DBS', 'Cash'], prev, { d: sd2, at: new Date(+sd2.slice(0, 4), +sd2.slice(5, 7) - 1, +sd2.slice(8, 10), 21).toISOString() }, today)
+        .forEach(function (mv) { if (mv.acct) lines[mv.acct] = r2(lines[mv.acct] + mv.amt); });
+      checks.push({ id: 'demo-c' + (checks.length + 1), d: sd2, at: new Date(+sd2.slice(0, 4), +sd2.slice(5, 7) - 1, +sd2.slice(8, 10), 21).toISOString(),
+        total: r2(lines.DBS + lines.Cash), lines: lines, native: {}, exp: {} });
+    }
 
     var cats = CATS.map(function (c) { return { name: c[0], type: c[1], kind: c[2] }; });
     var nextOn = function (day) { var y = ty, m = tm; if (td >= day) { m++; if (m > 12) { m = 1; y++; } } return ymd(y, m, Math.min(day, daysIn(y, m))); };

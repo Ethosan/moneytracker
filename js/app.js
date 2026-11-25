@@ -479,6 +479,7 @@ function removeKnownSub(cat, sub) {
 function cashBasis() { return Money.cashBasis(S.meta); }
 function isClosed(v) { return Money.isClosed(S.meta, v); }
 function venueType(v) { return Money.venueType(S.meta, v); }
+function hasPoker() { return Object.keys(S.meta.venues || {}).some(function (v) { return venueType(v) === 'poker'; }) || (S.ledger || []).some(function (e) { return venueType(e.venue) === 'poker'; }); }
 
 // ---------- persistence ----------
 function saveLocal() { try { LS.setItem(LS_KEY, JSON.stringify(S)); } catch (e) { } }
@@ -1996,7 +1997,7 @@ function paceLine(m, st, avg) {
   if (m !== monthOf(today())) return '';
   var day = +today().slice(8, 10), dim = new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate();
   if (day < 5 || day >= dim) return '';
-  var proj = st.net / day * dim, usual = avg ? avg.__net : 0; // after paybacks, like proj
+  var mp = Money.monthPace(S.tx, m, S.meta.cats, personTag(), day, dim, st.net), proj = mp.proj, usual = mp.usual; // after paybacks
   var pct = Math.min(100, day / dim * 100);
   return '<div class="pace"><div class="pbar"><i style="width:' + pct + '%"></i></div><span>Day ' + day + ' of ' + dim + '. On pace for <b>' + money(proj, 0) + '</b>' +
     (usual > 0 ? ', against your usual ' + money(usual, 0) : '') + '</span></div>';
@@ -2105,8 +2106,10 @@ function renderHome() {
       h += '<li class="tagrow" data-lensgo="' + esc(g) + '" role="button" tabindex="0"><span class="sw" style="background:var(--accent-soft);--c:var(--accent)"><span style="font-size:19px;color:var(--accent);display:inline-flex">' + TAG_ICON + '</span></span><span>' + esc(g) + ' <span class="note" style="display:inline;margin:0">all categories</span></span><span></span><span class="amt">' + money(v, 0) + '</span></li>';
     });
     var dayNow = +today().slice(8, 10), byNow = m === monthOf(today()) ? Math.min(1, dayNow / new Date(+m.slice(0, 4), +m.slice(5, 7), 0).getDate()) : 1;
+    // mid-month, compare with what the earlier months had spent by this same day, not a share of their whole month
+    var avgNow = avg && byNow < 1 ? Money.priorAvg(S.tx, m, S.meta.cats, personTag(), dayNow) : avg;
     cats.slice(0, 7).forEach(function (c, k) {
-      var d = avg ? st.byCat[c] - (avg[c] || 0) * byNow : null, cls = d == null ? 'flat' : d > 5 ? 'up' : d < -5 ? 'down' : 'flat';
+      var d = avgNow ? st.byCat[c] - (avgNow[c] || 0) : null, cls = d == null ? 'flat' : d > 5 ? 'up' : d < -5 ? 'down' : 'flat';
       var dl = d == null || cls === 'flat' ? 'About usual' : money(Math.abs(Math.round(d)), 0) + (d > 0 ? ' more' : ' less') + ' than usual' + (byNow < 1 ? ' by now' : '');
       h += '<li class="catrow" data-catgo="' + esc(c) + '" role="button" tabindex="0"><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')) + '</span><span class="delta ' + cls + '">' +
         (d == null ? '' : '<span aria-hidden="true">' + (Math.round(d) === 0 ? '' : d > 0 ? '+' : '−') + '$' + Math.abs(Math.round(d)) + '</span><span class="sr">' + dl + '</span>') + '</span><span class="amt">' + money(st.byCat[c], 0) + '</span></li>';
@@ -2146,7 +2149,9 @@ function renderHome() {
   var hasLater = plOwed > 0 || plMonth > 0;
   if (hasTrading || hasLater) {
     // one line each; the detail lives on Accounts
-    h += '<section class="blk"><h2>' + (hasTrading && hasLater ? 'Trading and PayLater' : hasTrading ? 'Trading and poker' : 'PayLater') + '</h2><div class="panel">';
+    // "poker" only for someone who keeps a poker venue
+    var tName = hasPoker() ? 'Trading and poker' : 'Trading';
+    h += '<section class="blk"><h2>' + (hasTrading && hasLater ? 'Trading and PayLater' : hasTrading ? tName : 'PayLater') + '</h2><div class="panel">';
     if (hasTrading) {
       var tradeNet = MT.net, allOut = st.net + propFees + Math.max(0, -poker) + brIn - brOut;
       var tbits = [];
@@ -2154,7 +2159,7 @@ function renderHome() {
       if (poker) tbits.push('poker ' + signed(poker, 0));
       if (brIn || brOut) tbits.push(money(brIn, 0) + ' moved to investments');
       tbits.push('all money out ' + money(allOut, 0));
-      h += '<button class="row" data-tab="pnl" data-acct="inv"><div class="l"><b>Trading and poker in ' + monthLabel(m, true) + '</b><span>' + tbits.join(', ') + '</span></div><div class="r ' + tone(tradeNet) + '">' + signed(tradeNet) + '</div></button>';
+      h += '<button class="row" data-tab="pnl" data-acct="inv"><div class="l"><b>' + tName + ' in ' + monthLabel(m, true) + '</b><span>' + tbits.join(', ') + '</span></div><div class="r ' + tone(tradeNet) + '">' + signed(tradeNet) + '</div></button>';
     }
     if (hasLater) {
       var lbits = [];
@@ -6182,9 +6187,11 @@ function renderOverview() {
   var lastM = ms[ms.length - 1], prevAvg = priorAvg(lastM) || {}, lastSt = monthStats(lastM);
   // a month in progress compares with what you usually spend by today, like Month does
   var ovDay = +today().slice(8, 10), ovNow = lastM === monthOf(today()) ? Math.min(1, ovDay / new Date(+lastM.slice(0, 4), +lastM.slice(5, 7), 0).getDate()) : 1;
+  // what the earlier months had spent by this day, not a share of their whole month (Money.priorAvg)
+  var ovAvg = ovNow < 1 ? Money.priorAvg(S.tx, lastM, S.meta.cats, personTag(), ovDay) || {} : prevAvg;
   h += '<section class="blk"><h2>Categories</h2><div class="panel tbl"><div class="th"><span>Category</span><span>Per month</span><span>Share</span><span>' + monthLabel(lastM, true) + (ovNow < 1 ? ' vs usual by day ' + ovDay : ' vs avg') + '</span></div>' +
     Object.keys(catT).sort(function (a, b) { return catT[b] - catT[a]; }).map(function (c) {
-      var d = (lastSt.byCat[c] || 0) - (prevAvg[c] || 0) * ovNow;
+      var d = (lastSt.byCat[c] || 0) - (ovAvg[c] || 0);
       return '<div class="tr"><span><i style="background:' + (cc.map[c] || '#999') + '"></i>' + esc(c) + '</span><span>' + money(catT[c] / ms.length, 0) + '</span><span>' + Math.round(catT[c] / spTot * 100) + '%</span><span class="' + (d > 5 ? 'up' : d < -5 ? 'down' : 'flat') + '">' + (Math.abs(d) < 1 ? '–' : (d > 0 ? '+' : '−') + '$' + Math.abs(Math.round(d))) + '</span></div>';
     }).join('') + '</div></section>';
 
@@ -6207,8 +6214,8 @@ function renderOverview() {
   var TR = Money.tradingRuns(S.ledger, S.meta);
   if (TR.days.length) {
     var pf = TR.propNet;
-    h += chartBlock('c7', (pf >= 0 ? 'Prop firms have made you ' + money(pf, 0) : 'Prop firms have cost you ' + money(-pf, 0)) + ' net so far', 'Running total of prop firm and poker results, all time', 200,
-      '<div class="lg"><span><i style="background:' + (isDark() ? COVE_D[6] : COVE_L[6]) + '"></i>Prop firms</span><span><i style="background:' + cssv('--muted') + '"></i>Poker, dashed</span></div>');
+    h += chartBlock('c7', (pf >= 0 ? 'Prop firms have made you ' + money(pf, 0) : 'Prop firms have cost you ' + money(-pf, 0)) + ' net so far', 'Running total of prop firm' + (hasPoker() ? ' and poker' : '') + ' results, all time', 200,
+      '<div class="lg"><span><i style="background:' + (isDark() ? COVE_D[6] : COVE_L[6]) + '"></i>Prop firms</span>' + (hasPoker() ? '<span><i style="background:' + cssv('--muted') + '"></i>Poker, dashed</span>' : '') + '</div>');
   }
   if (more) h += '<details class="fold morepat" data-fold="morepat"' + (UI.folds.morepat ? ' open' : '') + '><summary>More patterns<span>' + (pTag ? 'Time with ' + esc(pTag) + ', ' : '') + 'transport, weekdays, every day, repeats, largest purchases, income</span></summary><div class="morepat-in">' + more + '</div></details>';
   return h;
@@ -6282,7 +6289,7 @@ function drawOverview() {
   if (TR.days.length) {
     mk('c7', { type: 'line', data: { labels: TR.days.map(function (d) { return dayLabel(d); }), datasets: [
       { label: 'Prop firms', data: TR.prop, borderColor: pal[6], backgroundColor: pal[6], borderWidth: 2, pointRadius: 0, stepped: true, fill: { target: 'origin', above: 'transparent', below: pal[6] + '1a' } },
-      { label: 'Poker', data: TR.poker, borderColor: mut, backgroundColor: mut, borderWidth: 2, pointRadius: 0, stepped: true, borderDash: [5, 4] }] },
+      { label: 'Poker', data: TR.poker, borderColor: mut, backgroundColor: mut, borderWidth: 2, pointRadius: 0, stepped: true, borderDash: [5, 4] }].slice(0, hasPoker() ? 2 : 1) },
       options: Object.assign(base(false), { interaction: { mode: 'index', intersect: false }, scales: { x: { grid: { display: false }, border: { display: false }, ticks: { maxTicksLimit: 5, maxRotation: 0 } }, y: { grid: { color: grid }, border: { display: false }, ticks: { callback: fmt, maxTicksLimit: 5 } } } }) });
   }
 }

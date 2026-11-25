@@ -371,16 +371,29 @@ var Money = (function () {
 
   // What you usually spend: the average of the up to three months before m that have entries,
   // by category, with __n (how many months) and __net (spent after paybacks, kept off the keys).
-  // Null when none of those months has entries.
-  function priorAvg(txByMonth, m, cats, personTag) {
+  // Null when none of those months has entries. With uptoDay, each of those months counts only its
+  // entries up to that day of the month: what you usually spend by day 25, so money that goes out on
+  // the 1st (rent, money to family) isn't "more than usual" for most of the month.
+  function priorAvg(txByMonth, m, cats, personTag, uptoDay) {
     var acc = bag(), n = 0, net = 0;
     for (var k = 1; k <= 3; k++) {
       var rows = own(txByMonth, addMonth(m, -k)); if (!rows || !rows.length) continue; n++;
+      if (uptoDay) rows = rows.filter(function (t) { return +String(t.d).slice(8, 10) <= uptoDay; });
       var st = monthStats(rows, cats, personTag); Object.keys(st.byCat).forEach(function (c) { acc[c] = (acc[c] || 0) + st.byCat[c]; }); net += st.net;
     }
     if (!n) return null;
     Object.keys(acc).forEach(function (c) { acc[c] /= n; }); acc.__n = n;
     Object.defineProperty(acc, '__net', { value: net / n, enumerable: false }); return acc;
+  }
+
+  // Where month m is heading on day `day` (of dim days), after paybacks: what you've spent so far plus what
+  // the earlier months spent after this day. Spending isn't spread evenly, and rent or money to family on
+  // the 1st made a straight-line guess look like a blown month for the first fortnight. With no earlier
+  // months there is nothing to go on but the straight line.
+  function monthPace(txByMonth, m, cats, personTag, day, dim, spentNet) {
+    var all = priorAvg(txByMonth, m, cats, personTag), byNow = all && priorAvg(txByMonth, m, cats, personTag, day);
+    if (!all) return { proj: spentNet / day * dim, usual: 0 };
+    return { proj: spentNet + Math.max(0, all.__net - byNow.__net), usual: all.__net };
   }
 
   // A run of months, as Insights' Overview shows it: each month's monthStats, the totals across them
@@ -522,7 +535,7 @@ var Money = (function () {
   }
 
   return {
-    addMonth: addMonth, cleanSub: cleanSub, priorAvg: priorAvg, periodStats: periodStats, weekdayAvg: weekdayAvg, inTrend: inTrend, trendAmt: trendAmt,
+    addMonth: addMonth, cleanSub: cleanSub, priorAvg: priorAvg, monthPace: monthPace, periodStats: periodStats, weekdayAvg: weekdayAvg, inTrend: inTrend, trendAmt: trendAmt,
     trendData: trendData, lensData: lensData, monthTrading: monthTrading, tradingRuns: tradingRuns,
     r2: r2, sum: sum, num: num, cleanTx: cleanTx, cleanDebts: cleanDebts, cleanLedger: cleanLedger, ea: ea, catKind: catKind, monthStats: monthStats, incomeBy: incomeBy, tagSpend: tagSpend,
     venueType: venueType, isClosed: isClosed, cashBasis: cashBasis, venuePnl: venuePnl,

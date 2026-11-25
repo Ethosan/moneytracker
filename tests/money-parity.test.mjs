@@ -11,7 +11,8 @@ import { loadLedger, monthSummary, monthsWithEntries, venueSummary, accountSumma
 
 const read = (f) => fs.readFileSync(new URL("../js/" + f, import.meta.url), "utf8");
 const C = {};
-vm.runInNewContext(read("money.js") + "\n" + read("mm-import.js") + "\n" + read("demo.js"), C);
+// dates.js first, as in index.html: money.js's wallet sums use its afterCount, and the demo builds its counts with them
+vm.runInNewContext(read("dates.js") + "\n" + read("money.js") + "\n" + read("mm-import.js") + "\n" + read("demo.js"), C);
 const { Money, MM, Demo } = C;
 
 // ---- a ledger built to hit the awkward cases ----
@@ -421,5 +422,51 @@ test("the demo's money moves through a wallet, so Accounts shows no unlinked ent
   const { S } = demoDoc("2026-11-25");
   for (const t of Object.values(S.tx).flat()) assert.ok(S.meta.accounts.some((a) => a.name === t.acct), `${t.note}: wallet ${t.acct}`);
   for (const e of S.ledger) if (e.f !== "bal") assert.ok(e.acct, `${e.venue} ${e.f}: has a wallet`);
-  assert.equal(Money.tradingRuns(S.ledger, S.meta).propNet, 445.4); // 612.40 payout - 167 fee
+  assert.equal(Money.tradingRuns(S.ledger, S.meta).propNet, 2310.4); // 612.40 + 845 + 1020 payouts - 167 fee
+});
+
+test("the demo looks like someone careful with money: counts match, budgets kept, no losing trading month", () => {
+  for (const today of ["2026-11-25", "2027-01-03", "2028-02-29", "2026-07-31"]) {
+    const { S } = demoDoc(today);
+    const D = { tx: Object.values(S.tx).flat(), ledger: S.ledger, debts: S.debts, bills: [] };
+    // a count every Sunday night before today, so Home never says a balance check is overdue
+    const last = S.checks[S.checks.length - 1].d, gapDays = (Date.parse(today) - Date.parse(last)) / 864e5;
+    assert.ok(gapDays >= 1 && gapDays <= 7, `${today}: last count ${last}`);
+    // each count is exactly what the entries since the one before say, so no count shows a gap
+    for (let i = 1; i < S.checks.length; i++) {
+      const p = S.checks[i - 1], c = S.checks[i], mv = Money.walletMoves(D, ["DBS", "Cash"], p, c, today);
+      for (const w of ["DBS", "Cash"]) { const gap = c.lines[w] - p.lines[w] - mv.filter((m) => m.acct === w).reduce((a, m) => a + m.amt, 0); assert.ok(Math.abs(gap) < 0.005, `${c.d} ${w}: gap ${gap}`); }
+    }
+    for (const m of Object.keys(S.tx)) {
+      assert.ok(Money.monthTrading(S.ledger, S.meta, m).net >= 0, `${today}: trading lost money in ${m}`);
+      for (const b of S.meta.budgets) {
+        const cat = b.key.slice(4), spent = S.tx[m].filter((t) => t.t === "exp" && t.cat === cat).reduce((a, t) => a + (t.split ? t.split.mine : t.amt), 0);
+        assert.ok(spent <= b.amt, `${today}: ${cat} ${r2(spent)} over its ${b.amt} budget in ${m}`);
+      }
+    }
+    assert.ok(!Object.values(S.meta.venues).some((v) => v.type === "poker"), "no poker");
+  }
+});
+
+test("what you usually spend by a day of the month counts only the earlier months' entries up to that day", () => {
+  const cats = [{ name: "Family", type: "exp" }, { name: "Food", type: "exp" }];
+  const row = (d, cat, amt) => ({ id: d + cat, d, t: "exp", amt, cat, tags: [] });
+  const tx = { "2026-08": [row("2026-08-01", "Family", 500), row("2026-08-20", "Food", 90)], "2026-09": [row("2026-09-01", "Family", 500), row("2026-09-05", "Food", 30)] };
+  const whole = Money.priorAvg(tx, "2026-10", cats, ""), by10 = Money.priorAvg(tx, "2026-10", cats, "", 10);
+  assert.equal(whole.Family, 500); assert.equal(whole.Food, 60);
+  // by the 10th, money to family has always gone out, so October's $500 on the 1st is the usual amount
+  assert.equal(by10.Family, 500); assert.equal(by10.Food, 15); assert.equal(by10.__n, 2);
+});
+
+test("on pace for: spent so far plus what earlier months spent after this day, not a straight line", () => {
+  const cats = [{ name: "Family", type: "exp" }, { name: "Food", type: "exp" }];
+  const row = (d, cat, amt) => ({ id: d + cat, d, t: "exp", amt, cat, tags: [] });
+  const month = (m) => [row(m + "-01", "Family", 500), row(m + "-10", "Food", 150), row(m + "-25", "Food", 150)];
+  const tx = { "2026-08": month("2026-08"), "2026-09": month("2026-09"), "2026-10": [row("2026-10-01", "Family", 500), row("2026-10-10", "Food", 150)] };
+  // on 12 October, $650 spent with $150 of food still to come in a usual month: heading for $800, the usual
+  const p = Money.monthPace(tx, "2026-10", cats, "", 12, 31, 650);
+  assert.equal(p.proj, 800); assert.equal(p.usual, 800);
+  // a straight line would have said 650 / 12 * 31 = $1,679, more than twice the usual
+  // with no earlier months, the straight line is all there is
+  assert.equal(Money.monthPace({ "2026-10": tx["2026-10"] }, "2026-10", cats, "", 10, 31, 650).proj, 650 / 10 * 31);
 });

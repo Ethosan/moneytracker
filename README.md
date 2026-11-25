@@ -2,7 +2,7 @@
 
 # 20bucks
 
-A personal finance tracker that installs to your phone like a native app. Track everyday spending, split bills with friends, follow PayLater instalments, and see trading and poker P&L in one place. An optional AI assistant answers questions about your money and flags entries that look wrong. Data syncs to your own Supabase project and stays available offline.
+A personal finance tracker that installs to your phone like a native app. Track everyday spending, split bills with friends, follow PayLater instalments, and see your investments and trading P&L in one place. An optional AI assistant answers questions about your money and flags entries that look wrong. Data syncs to your own Supabase project and stays available offline.
 
 **[Try the demo](https://20bucks.ethantam.dev/?demo)**: six months of made-up money, no sign-in. It stays in that browser tab and is never sent anywhere.
 
@@ -40,7 +40,7 @@ Settings (names only; the values live in `config.js` and Supabase secrets):
 - **Spending and budgets.** Categorised transactions, and a monthly view that compares each category with what you usually spend by this day. Drill down by category for the detail.
 - **People and splits.** Tag who an expense was for and keep running "who owes me" balances.
 - **PayLater and subscriptions.** Instalment schedules that handle month-end dates correctly.
-- **Trading and poker P&L.** Prop firm and broker results, plus poker, alongside regular spending.
+- **Investments and trading P&L.** Broker, crypto and prop firm results alongside regular spending, with poker if you play.
 - **Multi-currency wallets.** US dollar and crypto wallets valued live, plus a converter.
 - **Imports.** Grab, bank statement CSVs and Money Manager `.xlsx` exports, with date validation and duplicate-safe re-imports.
 - **Balance checks.** Count a wallet and see exactly what is missing since the last count. A gap stays open after later counts until something you log explains it, and an entry dated on the wrong side of a count is spotted from the opposite gaps it leaves either side.
