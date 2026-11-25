@@ -25,7 +25,8 @@
 //   ANTHROPIC_MODEL     optional, default claude-sonnet-5-5
 // Which provider and model each job gets, and the fallbacks, are in providers.ts.
 //   AI_DAILY_LIMIT      optional, AI calls per day for all accounts together (default 300)
-//   AI_USER_DAILY_LIMIT optional, AI calls per day for one account (default 30)
+//   AI_USER_DAILY_LIMIT optional, AI calls per day for one account (default 30; ai_take_call in
+//                       schema.sql holds it to at most 30, so raising it means raising that too)
 //   AI_ALLOWED_IDS      comma-separated user ids allowed to call this function when
 //                       OPEN_TO_ALL is false (Supabase dashboard -> Authentication -> Users
 //                       -> copy the UUID); with it unset the function then answers nobody.

@@ -35,6 +35,11 @@ revoke all on public.ai_calls from anon, authenticated;
 -- account hit its daily cap, which sits well below the global one) or 'all' (every account
 -- together hit the daily cap). The old two-argument version is dropped: it had no per-account
 -- daily cap, so one account could use up the whole day for everyone.
+-- Any signed-in account can call this directly (POST /rest/v1/rpc/ai_take_call) with caps of its
+-- own choosing, and every 'ok' row counts towards the cap for all accounts. So the per-account caps
+-- passed in are held to at most 120 an hour and 30 a day (CALL_LIMIT and USER_DAILY_LIMIT in
+-- functions/ledger-ai/limits.ts): without that, one account could fill the day for everyone with
+-- per_user_day = 1000000. Raising either cap means raising it here too.
 drop function if exists public.ai_take_call(int, int);
 create or replace function public.ai_take_call(per_user_hour int, per_user_day int, all_users_day int)
 returns text
@@ -46,6 +51,8 @@ declare
   uid uuid := auth.uid();
 begin
   if uid is null then return 'user'; end if;
+  per_user_hour := least(coalesce(per_user_hour, 0), 120);
+  per_user_day := least(coalesce(per_user_day, 0), 30);
   perform pg_advisory_xact_lock(hashtext('ai_take_call'));
   delete from ai_calls where at < now() - interval '2 days';
   if (select count(*) from ai_calls where at > now() - interval '1 day') >= all_users_day then return 'all'; end if;

@@ -48,3 +48,17 @@ test("index.ts takes the slot after the body check and has no in-memory fallback
   assert.ok(!/CALLS\.(get|set)/.test(src), "the per-copy in-memory cap fails open");
   assert.match(src, /per_user_day/);
 });
+
+test("ai_take_call holds the per-account caps a caller passes to the ones ledger-ai uses", () => {
+  // any signed-in account can call the function itself with caps of its choosing, and each 'ok' row
+  // counts towards the cap for all accounts, so the SQL must not take a bigger per-account cap on trust
+  const sql = readFileSync(new URL("../supabase/schema.sql", import.meta.url), "utf8");
+  const fn = sql.slice(sql.indexOf("create or replace function public.ai_take_call"));
+  const body = fn.slice(fn.indexOf("begin"), fn.indexOf("insert into ai_calls"));
+  const cap = (arg) => { const at = body.indexOf(`${arg} := least(coalesce(${arg}, 0), `); return at < 0 ? NaN : parseInt(body.slice(at).split(", 0), ")[1], 10); };
+  assert.equal(cap("per_user_hour"), CALL_LIMIT);
+  assert.equal(cap("per_user_day"), USER_DAILY_LIMIT);
+  // the caps are held before any count is compared with them
+  assert.ok(body.indexOf("per_user_day := least") < body.indexOf(">= per_user_day"));
+  assert.ok(body.indexOf("per_user_hour := least") < body.indexOf(">= per_user_hour"));
+});

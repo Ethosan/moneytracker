@@ -5,3 +5,5 @@
 *.xlsx
 *.csv
 supabase/.temp/
+# Never commit secrets
+.env*
