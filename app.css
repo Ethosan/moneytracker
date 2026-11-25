@@ -1148,6 +1148,10 @@ main.login .hero .big{font-size:40px}
 main.login .panel{padding:16px}
 main.login #lerr{font-size:13px;min-height:1em;margin:10px 2px 0}
 main.login .actions{margin-top:8px}
+main.login .demo-cta{display:flex;flex-direction:column;align-items:center;gap:6px;margin:16px 0 0}
+main.login .demo-cta .btn{flex:0 0 auto;padding:12px 24px;min-height:44px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+main.login .demo-cta span{font-size:13px;color:var(--muted)}
+.banner.demo b::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:8px;vertical-align:1px}
 main.login .legal{text-align:center;font-size:13px;margin:14px 0 0}
 main.login .legal a{display:inline-block;padding:14px 8px;color:var(--muted);text-decoration:underline;text-underline-offset:2px}
 

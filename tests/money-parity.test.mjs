@@ -11,8 +11,8 @@ import { loadLedger, monthSummary, monthsWithEntries, venueSummary, accountSumma
 
 const read = (f) => fs.readFileSync(new URL("../js/" + f, import.meta.url), "utf8");
 const C = {};
-vm.runInNewContext(read("money.js") + "\n" + read("mm-import.js"), C);
-const { Money, MM } = C;
+vm.runInNewContext(read("money.js") + "\n" + read("mm-import.js") + "\n" + read("demo.js"), C);
+const { Money, MM, Demo } = C;
 
 // ---- a ledger built to hit the awkward cases ----
 const CATS = [
@@ -378,4 +378,48 @@ test("weekday averages count the days with nothing spent, and stop at today", ()
   assert.equal(w.avg[6], 0);
   assert.equal(w.byDay["2026-11-09"], 10);
   assert.equal(Money.weekdayAvg(exps, ["2026-11"], "2026-12-31").avg[0], 80 / 5, "five Mondays in all of November");
+});
+
+// ---- the demo (index.html?demo): its made-up ledger is shown as real figures, so it must add up too ----
+function demoDoc(today) {
+  const S = JSON.parse(JSON.stringify(Demo.build(today))); // out of the vm, so plain objects and arrays
+  const doc = { meta: S.meta, ledger: { entries: S.ledger }, debts: { entries: S.debts }, bills: { entries: S.bills }, checks: { entries: S.checks } };
+  for (const [m, items] of Object.entries(S.tx)) doc["tx-" + m] = { items };
+  return { S, doc };
+}
+
+test("the demo ledger gives the same figures in the app and in Ask", () => {
+  for (const today of ["2026-11-25", "2027-01-03", "2028-02-29", "2026-07-31"]) {
+    const { doc } = demoDoc(today);
+    checkMonths(doc); checkVenues(doc); checkPeople(doc);
+    checkInsights(doc, today);
+  }
+});
+
+test("the demo covers six months up to today and nothing after, the same on every device", () => {
+  for (const today of ["2026-11-25", "2027-01-03", "2028-02-29"]) {
+    const { S } = demoDoc(today);
+    const rows = Object.values(S.tx).flat(), dated = [...rows, ...S.ledger, ...S.debts];
+    assert.equal(Object.keys(S.tx).length, 6, `${today}: six months`);
+    assert.ok(S.tx[today.slice(0, 7)], `${today}: this month has entries`);
+    for (const e of dated) assert.ok(e.d <= today, `${today}: ${e.d} is after today`);
+    for (const [m, items] of Object.entries(S.tx)) for (const t of items) assert.equal(t.d.slice(0, 7), m, "filed under its month");
+    const ids = [...rows, ...S.ledger, ...S.debts].map((x) => x.id);
+    assert.equal(new Set(ids).size, ids.length, "ids are unique");
+    assert.equal(S.meta.demo, true, "marked as the demo");
+    assert.deepEqual(demoDoc(today).S, S, "built the same way twice");
+    // every split dinner Sam owes for is paid back and tied to its income, so nothing looks counted twice
+    const paybacks = S.debts.filter((d) => d.amt < 0 && d.person === "Sam");
+    for (const d of paybacks) assert.ok(rows.some((t) => t.id === d.txId && t.cat === "↩️ Paybacks"), "payback linked to its income");
+    // a payback recorded before today must leave Sam owing nothing for that month
+    const sam = S.debts.filter((d) => d.person === "Sam").reduce((a, d) => a + d.amt, 0);
+    assert.ok(sam >= -0.005 && sam < 70, `Sam's balance ${sam}`);
+  }
+});
+
+test("the demo's money moves through a wallet, so Accounts shows no unlinked entries", () => {
+  const { S } = demoDoc("2026-11-25");
+  for (const t of Object.values(S.tx).flat()) assert.ok(S.meta.accounts.some((a) => a.name === t.acct), `${t.note}: wallet ${t.acct}`);
+  for (const e of S.ledger) if (e.f !== "bal") assert.ok(e.acct, `${e.venue} ${e.f}: has a wallet`);
+  assert.equal(Money.tradingRuns(S.ledger, S.meta).propNet, 445.4); // 612.40 payout - 167 fee
 });
