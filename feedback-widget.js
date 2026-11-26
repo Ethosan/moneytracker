@@ -11,6 +11,8 @@
  *     data-bottom="calc(88px + env(safe-area-inset-bottom, 0px))"></script>
  *
  * data-bottom (optional, default 20px) lifts the button above a site's bottom tab bar.
+ * The form follows html.dark (or the OS when the site hasn't set html.light). It holds a hidden
+ * honeypot field named "website"; if it's filled the widget pretends success and sends nothing.
  * The button is a small muted icon that takes the accent on hover; data-button-label is
  * its tooltip and accessible name.
  *
@@ -40,6 +42,11 @@
   }
 
   /* ---- injected styles ---- */
+  // Dark rules apply when the site sets html.dark, or when the OS is dark and the site hasn't set
+  // html.light. :where() keeps the specificity of the light rule, so :hover still wins over them.
+  function dark(rule) {
+    return ":where(html.dark) " + rule + "\n@media (prefers-color-scheme:dark){:where(html:not(.light)) " + rule + "}";
+  }
   var css = [
     ":root{--fbw-accent:" + cfg.accent + "}",
     ".fbw-reset{all:initial;box-sizing:border-box;font-family:inherit}",
@@ -53,39 +60,47 @@
     ".fbw-btn:focus-visible{outline:2px solid var(--fbw-accent);outline-offset:2px}",
     ".fbw-btn:active{transform:scale(.94)}",
     ".fbw-btn svg{width:16px;height:16px;flex:none}",
-    "@media (prefers-color-scheme:dark){.fbw-btn{background:rgba(44,44,46,.82);border-color:rgba(255,255,255,.1);color:#a1a1a6}}",
+    dark(".fbw-btn{background:rgba(44,44,46,.82);border-color:rgba(255,255,255,.1);color:#a1a1a6}"),
     ".fbw-backdrop{position:fixed;inset:0;z-index:2147483646;background:rgba(0,0,0,.4);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);opacity:0;pointer-events:none;transition:opacity .2s ease-out}",
     ".fbw-backdrop.fbw-open{opacity:1;pointer-events:auto}",
     ".fbw-modal{position:fixed;z-index:2147483647;top:50%;left:50%;width:calc(100% - 32px);max-width:440px;max-height:calc(100% - 48px);overflow-y:auto;background:#fff;color:#1a1a1a;border-radius:16px;box-shadow:0 24px 64px rgba(0,0,0,.3),0 4px 16px rgba(0,0,0,.15);transform:translate(-50%,-50%) scale(.92);opacity:0;pointer-events:none;transition:transform .22s cubic-bezier(.16,1,.3,1),opacity .18s ease-out}",
     ".fbw-modal.fbw-open{transform:translate(-50%,-50%) scale(1);opacity:1;pointer-events:auto}",
     ".fbw-modal:focus{outline:none}",
-    "@media (prefers-color-scheme:dark){.fbw-modal{background:#1c1c1e;color:#f0f0f0}}",
+    dark(".fbw-modal{background:#1c1c1e;color:#f0f0f0}"),
     ".fbw-head{display:flex;align-items:center;justify-content:space-between;padding:18px 20px 0}",
     ".fbw-title{font-size:17px;font-weight:700;letter-spacing:-.01em}",
     ".fbw-close{display:flex;align-items:center;justify-content:center;width:44px;height:44px;flex:none;border:none;border-radius:22px;background:transparent;color:#6b6b6b;cursor:pointer;transition:background .12s ease-out,color .12s ease-out;-webkit-tap-highlight-color:transparent}",
-    ".fbw-close:hover{background:rgba(0,0,0,.06);color:#333}",
-    "@media (prefers-color-scheme:dark){.fbw-close{color:#888}.fbw-close:hover{background:rgba(255,255,255,.08);color:#ddd}}",
+    "@media (hover:hover){.fbw-close:hover{background:rgba(0,0,0,.06);color:#333}}",
+    dark(".fbw-close{color:#888}"),
+    "@media (hover:hover){" + dark(".fbw-close:hover{background:rgba(255,255,255,.08);color:#ddd}") + "}",
     ".fbw-close:active{transform:scale(.92)}",
     ".fbw-close svg{width:18px;height:18px}",
     ".fbw-body{padding:14px 20px 20px}",
     ".fbw-label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:#555}",
-    "@media (prefers-color-scheme:dark){.fbw-label{color:#aaa}}",
+    dark(".fbw-label{color:#aaa}"),
     ".fbw-label .fbw-opt{font-weight:400;color:#6b6b6b}",
-    "@media (prefers-color-scheme:dark){.fbw-label .fbw-opt{color:#a1a1a6}}",
+    dark(".fbw-label .fbw-opt{color:#a1a1a6}"),
     ".fbw-textarea{width:100%;min-height:110px;resize:vertical;padding:10px 12px;border:1px solid #ddd;border-radius:10px;font-size:14px;font-family:inherit;line-height:1.5;color:inherit;background:#fafafa;transition:border-color .12s ease-out,box-shadow .12s ease-out;-webkit-appearance:none;appearance:none}",
     ".fbw-textarea:focus{outline:none;border-color:var(--fbw-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--fbw-accent) 18%,transparent);background:#fff}",
-    "@media (prefers-color-scheme:dark){.fbw-textarea{background:#2a2a2c;border-color:#3a3a3c}.fbw-textarea:focus{background:#2a2a2c}}",
+    dark(".fbw-textarea{background:#2a2a2c;border-color:#3a3a3c}"),
+    dark(".fbw-textarea:focus{background:#2a2a2c}"),
     ".fbw-input{width:100%;padding:10px 12px;border:1px solid #ddd;border-radius:10px;font-size:14px;font-family:inherit;color:inherit;background:#fafafa;transition:border-color .12s ease-out,box-shadow .12s ease-out;-webkit-appearance:none;appearance:none}",
     ".fbw-input:focus{outline:none;border-color:var(--fbw-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--fbw-accent) 18%,transparent);background:#fff}",
-    "@media (prefers-color-scheme:dark){.fbw-input{background:#2a2a2c;border-color:#3a3a3c}.fbw-input:focus{background:#2a2a2c}}",
+    dark(".fbw-input{background:#2a2a2c;border-color:#3a3a3c}"),
+    dark(".fbw-input:focus{background:#2a2a2c}"),
+    // 16px on a touch screen, so iOS doesn't zoom the page when a field gets focus
+    "@media (pointer:coarse){.fbw-textarea,.fbw-input{font-size:16px}}",
+    // the honeypot: out of sight and out of the layout for people and screen readers
+    ".fbw-hp{position:absolute!important;left:-10000px!important;top:auto!important;width:1px!important;height:1px!important;overflow:hidden!important;opacity:0!important;pointer-events:none!important}",
     ".fbw-field{margin-bottom:14px}",
     ".fbw-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:4px}",
     ".fbw-cancel{min-height:44px;padding:9px 16px;border:1px solid #ddd;border-radius:10px;background:transparent;color:#666;font-size:14px;font-weight:500;cursor:pointer;transition:background .12s ease-out;-webkit-tap-highlight-color:transparent}",
-    ".fbw-cancel:hover{background:rgba(0,0,0,.04)}",
-    "@media (prefers-color-scheme:dark){.fbw-cancel{border-color:#3a3a3c;color:#aaa}.fbw-cancel:hover{background:rgba(255,255,255,.06)}}",
+    "@media (hover:hover){.fbw-cancel:hover{background:rgba(0,0,0,.04)}}",
+    dark(".fbw-cancel{border-color:#3a3a3c;color:#aaa}"),
+    "@media (hover:hover){" + dark(".fbw-cancel:hover{background:rgba(255,255,255,.06)}") + "}",
     ".fbw-cancel:active{transform:scale(.97)}",
     ".fbw-submit{min-height:44px;padding:9px 20px;border:none;border-radius:10px;background:var(--fbw-accent);color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:opacity .12s ease-out,transform .12s ease-out;-webkit-tap-highlight-color:transparent}",
-    ".fbw-submit:hover{opacity:.9}",
+    "@media (hover:hover){.fbw-submit:hover{opacity:.9}}",
     ".fbw-submit:active{transform:scale(.97)}",
     ".fbw-submit:disabled{opacity:.55;cursor:default;transform:none}",
     ".fbw-status{font-size:13px;margin-top:10px;min-height:18px;text-align:right}",
@@ -153,6 +168,7 @@
     '<textarea class="fbw-textarea" id="fbw-message" maxlength="4000" placeholder="A bug, an idea, anything"></textarea></div>' +
     '<div class="fbw-field"><label class="fbw-label" for="fbw-email">Email <span class="fbw-opt">(optional, if you want a reply)</span></label>' +
     '<input class="fbw-input" id="fbw-email" type="email" autocomplete="email" maxlength="254" placeholder="you@example.com"></div>' +
+    '<div class="fbw-hp" aria-hidden="true"><label>Leave this empty<input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>' +
     '<div class="fbw-actions"><button class="fbw-cancel" type="button">Cancel</button><button class="fbw-submit" type="submit">Send</button></div>' +
     '<p class="fbw-status" role="status" aria-live="polite"></p>';
 
@@ -165,6 +181,7 @@
 
   var textarea = form.querySelector("#fbw-message");
   var emailInput = form.querySelector("#fbw-email");
+  var honeypot = form.querySelector('input[name="website"]');
   var cancelBtn = form.querySelector(".fbw-cancel");
   var submitBtn = form.querySelector(".fbw-submit");
   var statusEl = form.querySelector(".fbw-status");
@@ -204,7 +221,7 @@
   function focusables() {
     return Array.prototype.filter.call(
       modal.querySelectorAll("button, textarea, input"),
-      function (el) { return !el.disabled; }
+      function (el) { return !el.disabled && el !== honeypot; }
     );
   }
 
@@ -246,6 +263,18 @@
     if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setStatus("That email doesn’t look right.", "err");
       emailInput.focus();
+      return;
+    }
+
+    // A bot fills every field, including the hidden one: say thanks and send nothing.
+    if (honeypot.value) {
+      textarea.value = "";
+      emailInput.value = "";
+      setStatus("Thanks, it’s sent.", "ok");
+      closeTimer = setTimeout(function () {
+        close();
+        setStatus("");
+      }, 1600);
       return;
     }
 
