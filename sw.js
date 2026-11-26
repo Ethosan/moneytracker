@@ -1,6 +1,6 @@
 // Keeps the app opening offline. Pages and scripts: try the network, fall back to the cached copy.
 // The import and maths libraries in vendor/ are large and rarely used, so they are cached on first use instead.
-const CACHE = 'ledger-1.10.0'; // rewritten by scripts/bump-version.mjs on every release
+const CACHE = 'ledger-1.10.1'; // rewritten by scripts/bump-version.mjs on every release
 const SHELL = ['./', './index.html', './app.css', './js/mm-import.js', './js/dates.js', './js/money.js', './js/google-signin.js', './js/whatsnew.js', './js/demo.js', './js/app.js', './config.js', './vendor/supabase-js.min.js', './vendor/591.supabase.js', './vendor/chart.umd.min.js', './manifest.webmanifest', './icons/icon-192.png', './icons/icon-512.png',
   './icons/icon-512-maskable.png', './icons/apple-touch-icon.png',
   './fonts/Geist-Regular.woff2', './fonts/Geist-Medium.woff2', './fonts/Geist-SemiBold.woff2', './fonts/Geist-Bold.woff2'];
@@ -22,6 +22,7 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.hostname.endsWith('supabase.co')) return; // never cache your data API
+  if (u.hostname === 'challenges.cloudflare.com') return; // the bot check talks to Cloudflare directly
   if (u.hostname === 'accounts.google.com') return; // Google sign-in loads and talks to Google directly
   const net = fetch(e.request).then(r => {
     if (r.ok || r.type === 'opaque') { const c = r.clone(); caches.open(CACHE).then(ca => ca.put(e.request, c)).catch(() => {}); }

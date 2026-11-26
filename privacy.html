@@ -16,9 +16,10 @@
   p, li { color: #5D6472 }
   @media (prefers-color-scheme: dark) { p, li { color: #98A1B3 } }
   a { color: #2A55F5 }
+  p:last-child a { display: inline-block; padding: 12px 4px }
   @media (prefers-color-scheme: dark) { a { color: #6C8CFF } }
 </style>
-  <meta name="app-version" content="1.10.0">
+  <meta name="app-version" content="1.10.1">
 </head>
 <body>
 <main>
@@ -53,7 +54,7 @@
   </ul>
 
   <h2>Keeping and deleting</h2>
-  <p>Data is kept while your account exists. You can delete items in the app any time. To remove everything, delete your data in the app and then delete your account from Supabase, or email us and we'll do it.</p>
+  <p>Data is kept while your account exists. You can delete items in the app any time. To remove everything, open Settings, tap <b>Delete my account</b> and type DELETE. That removes your sign-in and all of your data in the database straight away, and clears the copy kept on that device. Feedback you chose to send isn't tied to your account; email us if you want it removed.</p>
 
   <h2>We don't</h2>
   <p>We don't sell your data, share it with advertisers, or track you across other sites.</p>

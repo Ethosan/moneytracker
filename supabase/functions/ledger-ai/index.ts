@@ -452,6 +452,8 @@ Deno.serve(async (req) => {
     }
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
-    return json({ error: e instanceof Error ? e.message : String(e) }, 502);
+    // keep the real reason in the function logs; the app only gets a plain line (provider and library errors can quote keys or URLs)
+    console.error("ledger-ai failed:", e instanceof Error ? e.message : String(e));
+    return json({ error: "The assistant hit a problem. Try again in a moment." }, 502);
   }
 });
