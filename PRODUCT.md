@@ -8,13 +8,13 @@ web
 
 ## Users
 
-Ethan, the owner, tracking his own money in Singapore dollars. For now (and maybe always) he is the only person who logs in and edits. Other people do see it, though: friends or Alaina glance at it on his phone or laptop, so a screen should make sense to someone looking over his shoulder. Others may someday use their own copy, but nothing is built for that yet.
+Anyone who wants to track their own money, mostly people in Singapore, in Singapore dollars. Sign-up is open (email code or Google) and every account sees only its own data. Ethan, who built it, is the first and heaviest user. Friends or Alaina may glance at a phone or laptop, so a screen should make sense to someone looking over a shoulder.
 
 Alaina appears in the data as a tag for spending done together, not as a user.
 
 ## Product Purpose
 
-One place for all of Ethan's money, so nothing lives in a separate spreadsheet or app:
+One place for all of your money, so nothing lives in a separate spreadsheet or app:
 
 - know where money goes each month: by category, place and person;
 - notice overspending early and stay on budget;
@@ -25,14 +25,14 @@ Success is trusting the numbers without double-checking elsewhere, and logging f
 
 ## Positioning
 
-A tracker shaped around one person's real money life in Singapore, not a generic budgeting app: Grab and Grab PayLater (with instalments and bill cycles), Money Manager history, prop-firm fees counted as spending, poker and broker P&L, money shared with or owed by friends, and periodic balance counts that reconcile against actual wallets. Data stays in the owner's own Supabase project.
+A tracker shaped around one person's real money life in Singapore, not a generic budgeting app: Grab and Grab PayLater (with instalments and bill cycles), Money Manager history, prop-firm fees counted as spending, poker and broker P&L, money shared with or owed by friends, and periodic balance counts that reconcile against actual wallets. Each account's data is saved to its own row in the app's Supabase project, behind row level security.
 
 ## Operating Context
 
 - Used about equally on phone (installed to the home screen as an app) and on laptop in a browser. Phone: logging right after paying, quick checks of the month. Laptop: statement imports, cleanup, deeper review.
-- Hosted on Netlify from this repo; data in the owner's Supabase (`ledger_docs` table, row level security). Works offline and syncs later; edits from phone and laptop merge.
+- Hosted on Cloudflare Pages (20bucks.ethantam.dev) from this repo; data in Supabase (`ledger_docs` table, row level security). Works offline and syncs later; edits from phone and laptop merge.
 - Inputs: manual entries (with an amount calculator), Grab and bank statements (Excel, CSV, PDF or pasted text, including OCBC/DBS layouts), Money Manager exports, CSV round trips through a spreadsheet, JSON backups.
-- Optional AI assistant through the owner's `ledger-ai` Supabase function (DeepSeek since 14 Nov 2026, servers in China; Mistral or Claude as alternatives): a weekly review of new entries and questions about spending.
+- Optional AI assistant through the `ledger-ai` Supabase function (DeepSeek since 14 Nov 2026, servers in China; Mistral or Claude as alternatives): a weekly review of new entries and questions about spending.
 
 ## Capabilities and Constraints
 
@@ -45,8 +45,8 @@ A tracker shaped around one person's real money life in Singapore, not a generic
 
 ## Brand Commitments
 
-- Name: "Ethan's Ledger"; short name "Ledger" on the home screen.
-- Existing copy is plain, direct and calm, written in full sentences to the owner ("Nothing changes until you approve"). Recorded from the current app, not separately confirmed as a rule.
+- Name: "20bucks"; short name "20bucks" on the home screen.
+- Existing copy is plain, direct and calm, written in full sentences to the person using it ("Nothing changes until you approve"). Recorded from the current app, not separately confirmed as a rule.
 
 ## Evidence on Hand
 
@@ -59,4 +59,4 @@ A tracker shaped around one person's real money life in Singapore, not a generic
 2. **Logging must be fast.** If adding an entry is slow on a phone right after paying, entries stop getting logged and every other feature fails.
 3. **All of it in one place.** Spending, owed money, PayLater and trading results live together so the full picture is never split across tools.
 4. **Readable over a shoulder.** Others see the screen; it should be clear at a glance and not embarrass the owner with clutter or jargon.
-5. **Private by default.** The data belongs to the owner and stays in his own database; anything sent elsewhere (like the AI) is opt-in and minimal.
+5. **Private by default.** The data belongs to the owner and is saved to their own account; anything sent elsewhere (like the AI) is opt-in and minimal.

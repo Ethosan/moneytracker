@@ -1,6 +1,6 @@
 # 20bucks: Privacy
 
-20bucks is a personal finance tracker, a personal project by Ethan Tam. It tracks spending, splits bills, follows instalments, and shows trading and poker P&L. Data syncs to your own Supabase project. This page says what we collect, why, and who else touches it.
+20bucks is a personal finance tracker, a personal project by Ethan Tam. It tracks spending, splits bills, follows instalments, and shows trading and poker P&L. Data syncs to your account, kept in a Supabase database that only your sign-in can read. This page says what we collect, why, and who else touches it.
 
 ## What we collect
 
@@ -23,7 +23,7 @@ Answers and suggested changes are AI-generated and can be wrong. Nothing in your
 
 ## Who else processes your data
 
-- **Supabase:** database, sign-in, and receipt photo storage. Data lives in your own Supabase project.
+- **Supabase:** database, sign-in, and receipt photo storage. Each account only sees its own rows.
 - **Cloudflare:** hosting.
 - **DeepSeek** (servers in China): only if you turn on the AI assistant. **Mistral AI** or **Anthropic** only as a fallback or if the owner switches provider.
 - **Google:** only if you sign in with Google.
@@ -31,7 +31,7 @@ Answers and suggested changes are AI-generated and can be wrong. Nothing in your
 
 ## Keeping and deleting
 
-We keep your data while your account exists. You can delete your account any time under **Settings → Delete my account**. That removes your sign-in and your data straight away. Receipts are removed from storage within 30 days. Data cached in your browser for offline use is removed when you clear your browser data.
+We keep your data while your account exists. You can delete your account any time under **Settings → Delete my account**: type DELETE to confirm. That removes your sign-in and all of your data in the database (entries, budgets, chats, settings and AI usage counts) straight away, and clears the copy on that device. Feedback you chose to send isn't tied to your account; email us if you want it removed. Receipts are removed from storage within 30 days. Data cached in your browser for offline use is removed when you clear your browser data.
 
 ## Your rights
 
