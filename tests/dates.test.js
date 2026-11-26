@@ -130,3 +130,14 @@ test('a date without a year is never in the future', () => {
     assert.ok(d <= D.today(), s + ' gave ' + d);
   }
 });
+
+test('ymdOf gives the local day, also in the small hours in Singapore', () => {
+  assert.equal(D.ymdOf(new Date(2026, 0, 5, 2, 0)), '2026-01-05');
+  assert.equal(D.ymdOf(new Date(2026, 11, 31, 23, 59).getTime()), '2026-12-31');
+  // 02:00 SGT on 5 Jan is 18:00 UTC on 4 Jan: toISOString() would have said the 4th
+  const code = "const vm=require('vm'),fs=require('fs');const D={};vm.runInNewContext(fs.readFileSync(process.argv[1],'utf8'),D);" +
+    "const t=Date.UTC(2026,0,4,18,0);console.log(D.ymdOf(t)+' '+new Date(t).toISOString().slice(0,10));";
+  const out = require('node:child_process').execFileSync(process.execPath, ['-e', code, path.join(__dirname, '..', 'js', 'dates.js')],
+    { env: Object.assign({}, process.env, { TZ: 'Asia/Singapore' }) }).toString().trim();
+  assert.equal(out, '2026-01-05 2026-01-04');
+});

@@ -5,9 +5,14 @@
 // your real copy: everything it stores goes to this tab's sessionStorage under names of its own,
 // so it is gone when the tab closes, and the demo never talks to Supabase.
 var DEMO = /(^|&)demo(=|&|$)/.test(location.search.slice(1));
-var LS = DEMO ? demoStorage() : window.localStorage;
-function demoStorage() {
-  var P = 'demo:', ss = null; try { ss = window.sessionStorage; } catch (e) { }
+// Safari with "Block All Cookies" (and Firefox with cookies off) throw on the first touch of localStorage.
+// That used to kill the whole script and leave a blank page: fall back to memory and say so once.
+var LS_BLOCKED = false;
+var LS = DEMO ? demoStorage() : (function () {
+  try { var s = window.localStorage; s.getItem('ledger-probe'); return s; } catch (e) { LS_BLOCKED = true; return demoStorage(true); }
+})();
+function demoStorage(memOnly) {
+  var P = 'demo:', ss = null; if (!memOnly) { try { ss = window.sessionStorage; } catch (e) { } }
   var mem = {};
   return {
     getItem: function (k) {
@@ -170,7 +175,7 @@ function redoLast() { var u = histRedoable(); if (!u) { toast('Nothing to redo')
 function snapshot() { /* kept for older call sites: history records every change automatically */ }
 function agoLabel(t) {
   var s = Math.round((Date.now() - t) / 1000);
-  return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : dayLabel(new Date(t).toISOString().slice(0, 10));
+  return s < 60 ? 'just now' : s < 3600 ? Math.round(s / 60) + ' min ago' : s < 86400 ? Math.round(s / 3600) + ' h ago' : dayLabel(ymdOf(t));
 }
 function historySheet() {
   var list = HIST.list, last = histLast(), redo = histRedoable();
@@ -209,7 +214,7 @@ function toastUndo(msg, ms) { HIST.label = msg; HIST.labelT = Date.now();
   $('#undo').onclick = function () { t.classList.remove('on', 'act'); undoLast(); };
   clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on', 'act'); }, ms || 5000);
 }
-function toast(msg) { if (msg && !/^Undid|^Redone|^Nothing to/.test(msg)) { HIST.label = msg; HIST.labelT = Date.now(); } $('#toast').classList.remove('act'); var t = $('#toast'); t.innerHTML = '<span class="msg">' + esc(msg) + '</span>'; raiseToast(t); t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on'); }, 1800); }
+function toast(msg) { if (msg && !/^Undid|^Redone|^Nothing to/.test(msg)) { HIST.label = msg; HIST.labelT = Date.now(); } $('#toast').classList.remove('act'); var t = $('#toast'); t.innerHTML = '<span class="msg">' + esc(msg) + '</span>'; raiseToast(t); t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(function () { t.classList.remove('on'); }, Math.max(1800, String(msg || '').length * 60)); }
 
 // ---------- state ----------
 var DEFAULT_CATS = [
@@ -482,7 +487,13 @@ function venueType(v) { return Money.venueType(S.meta, v); }
 function hasPoker() { return Object.keys(S.meta.venues || {}).some(function (v) { return venueType(v) === 'poker'; }) || (S.ledger || []).some(function (e) { return venueType(e.venue) === 'poker'; }); }
 
 // ---------- persistence ----------
-function saveLocal() { try { LS.setItem(LS_KEY, JSON.stringify(S)); } catch (e) { } }
+function saveLocal() {
+  try { LS.setItem(LS_KEY, JSON.stringify(S)); saveLocal.warned = false; }
+  catch (e) {
+    // the offline copy sits in one key with a ~5 MB cap: say so once instead of going stale in silence
+    if (!saveLocal.warned) { saveLocal.warned = true; toast('The offline copy is full on this device. Changes still sync while you are online.'); }
+  }
+}
 function loadLocal() {
   try { var raw = LS.getItem(LS_KEY); if (raw) { var o = JSON.parse(raw); if (o && o.meta) S = o; } } catch (e) { }
   normalize();
@@ -619,20 +630,28 @@ function flush() {
     });
   })();
 }
+// A connection that hangs would leave "Saving…" on screen until the browser gave up. Data calls get 20 s,
+// the AI function 120 s; a caller that brings its own signal (Ask's Stop) keeps it.
+function timedFetch(input, init) {
+  init = init || {};
+  if (init.signal || typeof input !== 'string' || !window.AbortSignal || !AbortSignal.timeout) return fetch(input, init);
+  return fetch(input, Object.assign({}, init, { signal: AbortSignal.timeout(input.indexOf('/functions/v1/') > -1 ? 120000 : 20000) }));
+}
 function errText(e) {
   if (!e) return 'Unknown error';
   return e.message || e.error_description || e.details || e.hint || (typeof e === 'string' ? e : JSON.stringify(e));
 }
 function isNetworkErr(e) {
   var t = errText(e);
-  return navigator.onLine === false || /failed to fetch|networkerror|load failed|network request failed|timeout/i.test(t);
+  return navigator.onLine === false || /failed to fetch|networkerror|load failed|network request failed|timeout|timed out|aborted/i.test(t);
 }
+function syncMain() { return 'Couldn\u2019t save to the cloud. Your data is safe on this device. Try again, or send feedback.'; }
 function syncHint(t) {
-  if (/does not exist|relation .*ledger_docs|schema cache/i.test(t)) return 'The ledger_docs table is missing. Run supabase/schema.sql in your Supabase SQL editor.';
+  if (/does not exist|relation .*ledger_docs|schema cache/i.test(t)) return 'The ledger_docs table is missing. Run supabase/schema.sql in the Supabase SQL editor.';
   if (/permission denied|row-level security|violates row-level/i.test(t)) return 'Supabase is refusing the write. The row level security policies from schema.sql are missing or incomplete.';
   if (/jwt|token|session|401|invalid api key|apikey/i.test(t)) return 'Your sign-in has expired or the keys in config.js are wrong. Sign out and back in.';
-  if (/quota|payload|too large|413/i.test(t)) return 'The data is too large for one write. Export a backup and tell Claude.';
-  return 'Open the Supabase dashboard and check the project is running.';
+  if (/quota|payload|too large|413/i.test(t)) return 'The data is too large for one write. Download a backup and send feedback.';
+  return 'Check the Supabase project is running.';
 }
 // The state, not just the words: on a phone the dot is all you see.
 function syncState(t) {
@@ -673,7 +692,7 @@ function connect() {
     if (!window.supabase) { store.mode = 'auth'; store.err = 'A library failed to load, so sign-in is unavailable. Close and reopen the app to retry.'; render(); store.connectBusy = false; return; }
     store.mode = 'local'; setSync('On this device'); render(); ratesMaybe(); store.connectBusy = false; return;
   }
-  store.sb = store.sb || window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+  store.sb = store.sb || window.supabase.createClient(cfg.supabaseUrl, cfg.supabaseAnonKey, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }, global: { fetch: timedFetch } });
   if (!store.authSub) store.authSub = store.sb.auth.onAuthStateChange(function (ev) {
     // an email link landing on this page completes sign-in through the URL; pick it up here
     if (ev === 'SIGNED_IN' && store.mode !== 'cloud' && store.mode !== 'cloud-offline') connect();
@@ -787,15 +806,21 @@ function renderConnecting() {
   return '<div class="splash-static"><div class="splash-inner">' +
     '<div class="splash-logo">20bucks</div>' +
     '<div class="splash-spin"></div>' +
-    '<div class="splash-text">Loading your ledger…</div>' +
+    '<div class="splash-text">Loading your money…</div>' +
     '</div></div>';
 }
 
+function loadTurnstile(done) {
+  if (window.turnstile) { done(); return; }
+  var s = document.createElement('script');
+  s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'; s.async = true; s.onload = done;
+  document.head.appendChild(s);
+}
 function renderLogin() {
   return '<main class=\"login\"><div class=\"hero\"><div class=\"lbl\">20bucks</div><h1 class=\"big\">Sign in</h1><div class=\"sub\">Your data syncs to your own private account. No password needed.</div></div>' +
     '<div class=\"panel\">' + ((window.LEDGER_CONFIG || {}).googleClientId ? '<div id=\"gbtn\" class=\"gbtn\"></div><div class=\"or\"><span>or use email</span></div>' : '') + '<label class=\"f\" for=\"em\">Email</label><input class=\"t\" id=\"em\" type=\"email\" autocomplete=\"email\" placeholder=\"you@example.com\">' +
     '<div id=\"codebox\" hidden><label class=\"f\" for=\"code\">Code from the email</label><input class=\"t\" id=\"code\" inputmode=\"numeric\" autocomplete=\"one-time-code\" maxlength=\"8\" placeholder=\"123456\"></div>' +
-    '<p class=\"neg\" id=\"lerr\"></p>' +
+    '<p class=\"neg\" id=\"lerr\" role=\"alert\"></p>' + ((window.LEDGER_CONFIG || {}).turnstileSiteKey ? '<div id=\"cfts\" class=\"cfts\"></div>' : '') +
     '<div class=\"actions\"><button class=\"btn ghost\" id=\"resend\" hidden>Resend code</button><button class=\"btn\" id=\"si\">Email me a code</button></div></div>' +
     '<div class=\"demo-cta\"><a class=\"btn ghost\" href=\"?demo\">Try the demo first</a><span>Made-up money, no account needed</span></div>' +
     '<p class=\"legal\"><a href=\"/privacy.html\">Privacy</a> · <a href=\"/terms.html\">Terms</a></p></main>';
@@ -805,27 +830,39 @@ function wireLogin() {
   var sentTo = '', sentAt = 0; var home = location.origin + location.pathname.replace(/[^/]*$/, '');
   function say(t) { err.textContent = t; }
   if (store.err) say(store.err);
+  // Bot check (Cloudflare Turnstile) on the code email, so a script can't bomb inboxes or mass-create accounts.
+  // Off until config.js has turnstileSiteKey AND Supabase Auth has CAPTCHA switched on with the matching secret.
+  var tsKey = (window.LEDGER_CONFIG || {}).turnstileSiteKey || '', tsTok = '', tsWid = null;
+  function otpOpts() { var o = { shouldCreateUser: true, emailRedirectTo: home }; if (tsKey && tsTok) o.captchaToken = tsTok; return o; }
+  // a token works once: ask for a fresh one after every send
+  function tsUsed() { tsTok = ''; try { if (window.turnstile && tsWid != null) window.turnstile.reset(tsWid); } catch (e) { } }
+  if (tsKey && $('#cfts')) loadTurnstile(function () {
+    var box = $('#cfts'); if (!box || !window.turnstile) return;
+    tsWid = window.turnstile.render(box, { sitekey: tsKey, callback: function (t) { tsTok = t; }, 'expired-callback': function () { tsTok = ''; }, 'error-callback': function () { tsTok = ''; say('The quick check could not load. Check your connection and reopen the app.'); } });
+  });
   function reset() { sentTo = ''; codebox.hidden = true; resend.hidden = true; si.textContent = 'Email me a code'; code.value = ''; }
-  function otpErr(e) { var st = e && e.status; if (st === 502 || st === 503 || st === 504) return 'The sign-in service is unreachable. If the app was idle for a week or more, the project may be paused — restore it in the Supabase dashboard, then try again.'; return (e && e.message) || 'Could not reach the sign-in service. Check your connection and try again.'; }
+  function otpErr(e) { var st = e && e.status; if (st === 502 || st === 503 || st === 504) return 'The sign-in service is unreachable right now. Try again in a few minutes. If it keeps happening, send feedback from Settings.'; return (e && e.message) || 'Could not reach the sign-in service. Check your connection and try again.'; }
   si.addEventListener('click', function () {
     if (!store.sb) { say('Sign-in is unavailable right now — check your connection, then reopen the app and try again.'); return; }
     if (!sentTo) {
       var addr = em.value.trim();
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) { say('Enter your email address.'); return; }
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(addr)) { say(addr ? 'That email doesn’t look right. Check for a typo.' : 'Enter your email address.'); return; }
+      if (tsKey && !tsTok) { say('Hang on while the quick check finishes, then try again.'); return; }
       say(''); si.disabled = true; si.textContent = 'Sending…';
-      store.sb.auth.signInWithOtp({ email: addr, options: { shouldCreateUser: true, emailRedirectTo: home } }).then(function (r) {
-        si.disabled = false; si.textContent = 'Verify code';
+      store.sb.auth.signInWithOtp({ email: addr, options: otpOpts() }).then(function (r) {
+        tsUsed();
+        si.disabled = false; si.textContent = r.error ? 'Email me a code' : 'Verify code';
         if (r.error) { say(otpErr(r.error)); return; }
         sentTo = addr; sentAt = Date.now();
         codebox.hidden = false; resend.hidden = false; code.focus();
         toast('A code was sent to ' + addr + '. Only the newest code works.');
-      }).catch(function () { si.disabled = false; si.textContent = 'Email me a code'; say('Could not send the code. Check your connection and try again.'); });
+      }).catch(function () { tsUsed(); si.disabled = false; si.textContent = 'Email me a code'; say('Could not send the code. Check your connection and try again.'); });
       return;
     }
     var tok = code.value.trim().replace(/[\s-]/g, '');
     if (!/^\d{6,8}$/.test(tok)) { say('Enter the code from the email.'); return; }
     say(''); si.disabled = true; si.textContent = 'Checking…';
-    store.sb.auth.verifyOtp({ email: sentTo, token: tok, type: 'email' }).then(function (r) {
+    store.sb.auth.verifyOtp(tsTok ? { email: sentTo, token: tok, type: 'email', options: { captchaToken: tsTok } } : { email: sentTo, token: tok, type: 'email' }).then(function (r) {
       if (r.error) { si.disabled = false; si.textContent = 'Verify code'; say(/expired|invalid/i.test(r.error.message) ? 'That code is wrong or expired. Request a new code and use the newest email — each new code replaces the previous one.' : otpErr(r.error)); return; }
       // a successful verify consumes the code: hold the button so a second press cannot reuse it
       store.mode = 'connecting'; render();
@@ -839,11 +876,13 @@ function wireLogin() {
     if (!store.sb) { say('Sign-in is unavailable right now — check your connection, then reopen the app and try again.'); return; }
     if (!sentTo) return;
     if (Date.now() - sentAt < 60000) { say('Wait a minute before requesting another code.'); return; }
+    if (tsKey && !tsTok) { say('Hang on while the quick check finishes, then try again.'); return; }
     sentAt = Date.now(); say('');
-    store.sb.auth.signInWithOtp({ email: sentTo, options: { shouldCreateUser: true, emailRedirectTo: home } }).then(function (r) {
+    store.sb.auth.signInWithOtp({ email: sentTo, options: otpOpts() }).then(function (r) {
+      tsUsed();
       if (r.error) { say(otpErr(r.error)); return; }
       toast('New code sent — only the newest code works.');
-    }).catch(function () { say('Could not resend the code. Check your connection and try again.'); });
+    }).catch(function () { tsUsed(); say('Could not resend the code. Check your connection and try again.'); });
   });
   // Sign in with Google: one tap, no code to type. The email code stays as the fallback.
   var gbtn = $('#gbtn'), gid = (window.LEDGER_CONFIG || {}).googleClientId;
@@ -859,7 +898,7 @@ function wireLogin() {
       say(''); si.disabled = true;
       store.sb.auth.signInWithIdToken({ provider: 'google', token: idToken, nonce: nonce }).then(function (r) {
         if (r.error) { hideSplash(); si.disabled = false; say(/provider is not enabled|unsupported provider/i.test(r.error.message) ? 'Google sign-in isn\'t switched on yet. Use the email code for now.' : otpErr(r.error)); return; }
-        setSplashText('Loading your ledger…');
+        setSplashText('Loading your money…');
         store.mode = 'connecting'; render();
         connect();
       }).catch(function () { hideSplash(); si.disabled = false; store.mode = 'auth'; render(); say('Could not finish Google sign-in. Check your connection and try again.'); });
@@ -1436,17 +1475,45 @@ function askSideSet(on) { try { LS.setItem('ledger-ask-side', on ? '1' : '0'); }
 function askDrawer(open) {
   if (!!UI.askDrawer === open) return;
   UI.askDrawer = open;
-  if (open) { try { history.pushState({ askDrawer: 1 }, ''); } catch (e) { } }
+  if (open) { try { history.pushState({ askDrawer: 1, tab: UI.tab }, ''); } catch (e) { } }
   else if (history.state && history.state.askDrawer) { try { history.back(); } catch (e) { } }
   render();
 }
-window.addEventListener('popstate', function () { if (UI.askDrawer) { UI.askDrawer = false; render(); } });
+// Back (Android, or the browser's) works in layers: an open sheet closes first, then the chat drawer,
+// then each tab you came from. Every sheet and every tab change is a history entry of its own.
+function tabUrl(tab) {
+  var p = new URLSearchParams(location.search);
+  if (tab && tab !== 'home') p.set('tab', tab); else p.delete('tab');
+  p.delete('add');
+  var q = p.toString();
+  return location.pathname + (q ? '?' + q : '');
+}
+function goTab(tab) {
+  var st = history.state || {};
+  UI.askDrawer = false; UI.tab = tab;
+  try {
+    // a sheet or drawer entry that is being left becomes the tab's entry, so Back never lands on a stale one
+    if (st.sheet || st.askDrawer) history.replaceState({ tab: tab }, '', tabUrl(tab));
+    else if (st.tab !== tab) history.pushState({ tab: tab }, '', tabUrl(tab));
+  } catch (e) { }
+}
+window.addEventListener('popstate', function (e) {
+  var st = e.state || {}, again = false;
+  if (dlg && dlg.open) {
+    if (dlg.dataset.dirty && !confirm('Discard this entry?')) { try { history.pushState({ sheet: 1, tab: UI.tab }, ''); } catch (x) { } return; }
+    closeSheet();
+  }
+  if (UI.askDrawer && !st.askDrawer) { UI.askDrawer = false; again = true; }
+  var tab = st.tab || (e.state ? UI.tab : 'home');
+  if (tab !== UI.tab) { UI.tab = tab; again = true; }
+  if (again) { render(); window.scrollTo(0, 0); }
+});
 function renderAsk() {
   var h = '<header class="top"><h1>Ask</h1>' + hdRight() + '</header>';
   if (!aiOn() || store.mode !== 'cloud') {
     return h + '<section class="blk ask-off"><div class="panel"><div class="ask-mark" aria-hidden="true">' + ICON.ask + '</div>' +
       '<b>Ask anything about your money</b><p>Questions like "why was last month expensive?" are answered from your full history. It can log or fix entries for you too, and nothing changes until you tap Apply.</p>' +
-      (store.mode === 'demo' ? '<p class="note">Ask isn’t part of the demo: it reads your own ledger on the server, so it needs an account.</p><button class="btn ghost" data-act="demo-exit">Sign in to try Ask</button>' : store.mode !== 'cloud' ? '<p class="neg">This needs sync: sign in with your Supabase account first.</p>' : '<button class="btn" data-act="ai">Turn on the AI assistant</button>') +
+      (store.mode === 'demo' ? '<p class="note">Ask isn’t part of the demo: it reads your own ledger on the server, so it needs an account.</p><button class="btn ghost" data-act="demo-exit">Sign in to try Ask</button>' : store.mode === 'cloud-offline' ? '<p class="neg">You\u2019re offline. Ask works again when you\u2019re back online.</p>' : store.mode === 'error' ? '<p class="neg">Ask is paused while saving has a problem. Check Sync status in Settings.</p>' : store.mode !== 'cloud' ? '<p class="neg">This needs sync: sign in to your account first.</p>' : '<button class="btn" data-act="ai">Turn on the AI assistant</button>') +
       '</div></section>';
   }
   var chats = chatList(), cur = UI.chatId ? chatById(UI.chatId) : null;
@@ -1926,7 +1993,7 @@ function aiSheet() {
   var who = ai.model ? esc(ai.model) : 'the AI';
   var body = '<p style="margin-top:0">Once a week, new entries are sent to ' + who + ' to spot likely mistakes; anything it finds waits in Suggestions for you to approve. You can also ask it about your spending in the Ask tab, or ask it to log or fix entries; it shows each change and only makes it when you tap Apply.</p>' +
     '<p>What it sees: the weekly review sends the new entries’ dates, amounts, categories and notes, with your usual amount and category for notes you’ve used before. A question in Ask sends a summary of every month and the entries it looks up to answer, and it can look up any of your history: every transaction with its notes, wallets and tags, who you split bills with, people balances, investment and poker entries, PayLater bills and balance counts. Your email isn’t sent. It goes to ' + aiVendor(ai.model) + ' through a Supabase function that holds the API key.</p>' +
-    (store.mode === 'demo' ? '<p class="note">The AI assistant isn’t part of the demo: it needs an account.</p>' : !cloud ? '<p class="neg">This needs sync: sign in with your Supabase account first.</p>' : '') +
+    (store.mode === 'demo' ? '<p class="note">The AI assistant isn’t part of the demo: it needs an account.</p>' : !cloud ? (store.mode === 'cloud-offline' ? '<p class="neg">You\u2019re offline. Ask works again when you\u2019re back online.</p>' : '<p class="neg">This needs sync: sign in to your account first.</p>') : '') +
     '<div class="seg" id="aion"><button data-on="1" aria-pressed="' + on + '">On</button><button data-on="0" aria-pressed="' + !on + '">Off</button></div>' +
     (on ? '<div class="kv" style="margin-top:12px"><span>Last review</span><span>' + (ai.lastRun ? dayYear(ai.lastRun) : 'Not yet') + '</span>' +
       (ai.err ? '<span>Problem</span><span class="neg" style="white-space:normal">' + esc(ai.err) + '</span>' : '') + '</div>' +
@@ -1941,7 +2008,7 @@ function aiSheet() {
       run.disabled = true; run.textContent = 'Reviewing\u2026';
       aiReview().then(function (n) { aiSheet(); toast(n ? n + ' new suggestion' + (n > 1 ? 's' : '') + ', see Suggestions' : 'Nothing new looks wrong'); }, function (e) { aiSheet(); toast(String(e.message || e)); });
     });
-    var op = $('#aiopen', el); if (op) op.addEventListener('click', function () { closeSheet(); UI.tab = 'ask'; render(); window.scrollTo(0, 0); });
+    var op = $('#aiopen', el); if (op) op.addEventListener('click', function () { closeSheet(); goTab('ask'); render(); window.scrollTo(0, 0); });
   });
 }
 // ---------- rendering ----------
@@ -2058,7 +2125,7 @@ function haveCard() {
   var owed = r2(sum(A.liabs, function (l) { return l.now; }));
   var sub = 'Across ' + A.accs.length + ' wallet' + (A.accs.length === 1 ? '' : 's') +
     (owed > 0.005 ? ', minus ' + money(owed) + ' owed on PayLater' : '');
-  if (hasForeign() && RATES.at) sub += ' · US$ & crypto at live rates (' + agoLabel(Date.parse(RATES.at)) + ')';
+  if (hasForeign() && RATES.at) sub += ' · US$ & crypto at live rates (' + agoLabel(Math.min(Date.parse(RATES.usdAt || RATES.at), Date.parse(RATES.coinsAt || RATES.at))) + ')';
   return '<section class="blk"><div class="panel"><button class="row" data-tab="pnl" data-acct="bal">' +
     '<div class="l"><b>You have now</b><span>' + esc(sub) + '</span></div>' +
     '<div class="r have-r">' + money(A.expected, 0) + '</div>' +
@@ -2074,10 +2141,10 @@ function renderHome() {
   var cats = Object.keys(st.byCat).sort(function (a, b) { return st.byCat[b] - st.byCat[a]; });
   var h = '<header class="top">' + monthSwitch() + '' + hdRight() + '</header>' + '<h1 class="sr">Month</h1>';
   if (!allTx().length && !S.ledger.length) {
-    return h + '<div class="empty"><p>Nothing logged yet. Bring in your Money Manager history, or add your first transaction.</p>' +
-      '<button class="btn sm" data-act="import">Import from Money Manager</button></div>';
+    return h + '<div class="empty"><p>Nothing logged yet. Add your first spend, or bring in what you already have.</p>' +
+      '<div class="actions wrap-btns"><button class="btn sm" data-act="add-tx">Add your first spend</button><button class="btn sm ghost" data-act="stmt">Import a bank or Grab statement</button><button class="btn sm ghost" data-act="import">Import from Money Manager</button></div></div>';
   }
-  if (store.mode === 'demo') h += '<button class="banner demo" data-act="demo-exit"><b>This is the demo, with made-up money</b><span>Change anything you like; it stays in this tab and is gone when you close it. Tap to sign in and start your own.</span></button>';
+  if (store.mode === 'demo') h += '<div class="banner demo"><b>This is the demo, with made-up money</b><span>Change anything you like; it stays in this tab and is gone when you close it.</span><button class="chip sm" data-act="demo-exit">Sign in to start your own</button></div>';
   var dup = doubleCounts();
   if (dup.length) h += '<button class="banner" data-act="dupes"><b>' + dup.length + ' repayment' + (dup.length > 1 ? 's look' : ' looks') + ' recorded twice</b><span>Once as income and once against a balance. Tap to keep one.</span></button>';
   if (store.mode === 'error') h += '<button class="banner err" data-act="sync"><b>Your changes aren\u2019t syncing</b><span>They\u2019re safe on this device. Tap to see what\u2019s wrong and fix it.</span></button>';
@@ -2513,7 +2580,7 @@ function pnlBody() {
     return s + '</div></section>';
   }
   var body = group(cashBasis() ? 'Brokers, cash basis' : 'Brokers', g.broker, 'broker') + group('Prop firms', g.prop, 'prop') + group('Poker', g.poker, 'poker') + group('Crypto', g.crypto, 'broker');
-  if (!body) body = '<div class="empty">No accounts yet. Log a deposit, prop firm fee or poker session to start.</div>';
+  if (!body) body = '<div class="empty"><p>No accounts yet. Log a deposit, prop firm fee or poker session to start.</p><div class="actions wrap-btns"><button class="btn sm" data-act="add-ledger">Log an entry</button></div></div>';
   return h + '<div style="display:flex;gap:8px;margin-bottom:16px"><button class="btn sm" data-act="add-ledger">Log an entry</button></div>' + body +
     '<p class="note">Tap an account to change its group or mark it closed. Closed accounts stay in their group and in the totals, greyed out at the bottom.</p>' +
     (cashBasis()
@@ -2662,15 +2729,16 @@ function renderMore() {
   // the one place that can replace everything sits last, and says so
   h += '<section class="blk"><h2>Your data</h2><div class="panel">' +
     '<button class="row" data-act="sync"><div class="l"><b>Sync status</b><span>' +
-    (store.mode === 'cloud' ? 'Synced with Supabase' : store.mode === 'demo' ? 'Demo: kept in this tab only' : store.mode === 'error' ? 'Not syncing: ' + esc(store.err || 'unknown problem') : store.mode === 'cloud-offline' ? 'Offline, changes are waiting' : 'Saved in this browser only') +
+    (store.mode === 'cloud' ? 'Synced to your account' : store.mode === 'demo' ? 'Demo: kept in this tab only' : store.mode === 'error' ? 'Not syncing: ' + esc(store.err || 'unknown problem') : store.mode === 'cloud-offline' ? 'Offline, changes are waiting' : 'Saved in this browser only') +
     '</span></div><div class="r">\u203a</div></button>' +
     '<button class="row" data-act="export"><div class="l"><b>Download a backup</b><span>' + esc(backupAge()) + '</span></div><div class="r">›</div></button>' +
     '<button class="row caution" data-act="restore"><div class="l"><b>Restore a backup</b><span>Replaces everything you have now. What you have now is kept as a restore point first.</span></div><div class="r">\u203a</div></button>' +
     (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="gsignin"><div class="l"><b>Google sign-in</b><span>' + esc(store.google || 'Email code only') + '</span></div><div class="r">›</div></button>' : '') +
     (store.mode === 'demo' ? '<button class="row" data-act="demo-exit"><div class="l"><b>Leave the demo</b><span>Throw the made-up data away and sign in</span></div><div class="r">›</div></button>' : '') +
-    (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="signout"><div class="l"><b>Sign out</b><span>' + esc(store.email || '') + '</span></div><div class="r">›</div></button>' : '') +
+    (store.mode === 'cloud' || store.mode === 'cloud-offline' ? '<button class="row" data-act="signout"><div class="l"><b>Sign out</b><span>' + esc(store.email || '') + '</span></div><div class="r">›</div></button>' +
+      '<button class="row caution" data-act="delete-account"><div class="l"><b>Delete my account</b><span>Erases your data in the cloud and on this device. No undo.</span></div><div class="r">›</div></button>' : '') +
     '</div></section>';
-  h += '<p class="note">' + (store.mode === 'cloud' ? 'Synced to your Supabase database. A copy is kept on this phone so it works offline.' : store.mode === 'demo' ? 'The demo’s data is made up and kept in this browser tab only. Nothing is sent anywhere.' : 'Saved in this browser only. Add your Supabase keys in config.js to sync.') + '</p>';
+  h += '<p class="note">' + (store.mode === 'cloud' ? 'Synced to your account. A copy is kept on this phone so it works offline.' : store.mode === 'cloud-offline' ? 'You are offline. Changes are safe on this phone and sync when you are back online.' : store.mode === 'error' ? 'Changes are safe on this phone but are not syncing right now. Tap Sync status for details.' : store.mode === 'demo' ? 'The demo’s data is made up and kept in this browser tab only. Nothing is sent anywhere.' : 'Saved in this browser only.') + '</p>';
   // quiet on purpose: the release log is there for anyone curious, never pushed at you
   h += '<button class="wn-link" data-act="whatsnew">' + esc(appVersion() ? 'v' + appVersion() + ' · What’s new' : 'What’s new') + '</button>';
   return h;
@@ -2765,7 +2833,8 @@ function openSheet(title, body, onReady) {
   var tb = $('#toast'); if (tb && tb.parentNode === dlg) document.body.appendChild(tb); // keep it out of the content being replaced
   dlg.innerHTML = '<div class="hd"><h3>' + esc(title) + '</h3><button data-close>Close</button></div><div class="bd">' + body + '</div>';
   dlg.setAttribute('aria-label', title);
-  if (!dlg.open) dlg.showModal();
+  delete dlg.dataset.dirty;
+  if (!dlg.open) { try { history.pushState({ sheet: 1, tab: UI.tab }, ''); } catch (e) { } dlg.showModal(); }
   sheetScope = new AbortController();
   if (onReady) onReady(dlg);
 }
@@ -2776,7 +2845,7 @@ function guideRow(ic, title, sub) {
   return '<div class="row">' + GICON[ic] + '<div class="l"><b>' + esc(title) + '</b><span style="white-space:normal">' + esc(sub) + '</span></div></div>';
 }
 function renderHelp() {
-  var h = '<p class="note" style="margin-top:0">Everything here works offline. Your data lives in your own Supabase account, and no other account can see it.</p>';
+  var h = '<p class="note" style="margin-top:0">Everything here works offline. Your data is saved to your account, and no other account can see it.</p>';
   h += '<section class="blk"><h2>Getting started</h2><div class="panel">' +
     ((window.LEDGER_CONFIG || {}).googleClientId ? guideRow('sparkles', 'Sign in with Google or email', 'Tap Continue with Google, or get a one-time code by email. No password either way. Each new code replaces the previous one, so use the latest email.') : guideRow('sparkles', 'Sign in with your email', 'A one-time code arrives by email — no password. Each new code replaces the previous one, so use the latest email.')) +
     guideRow('plus', 'Add your first entry', 'Tap the + button, choose income or spending, and pick a category. Type a short note if you want. That is the whole habit.') +
@@ -2806,14 +2875,14 @@ function renderHelp() {
     guideRow('lock', 'App lock', 'Settings → App lock asks for a PIN — or Face ID on phones that have it — every time the app opens.') +
     guideRow('download', 'Backup', 'Settings → Download a backup saves everything as one file. Do it after a big import.') +
     guideRow('rotate', 'Restore', 'Restore a backup replaces everything you have now — but the current state is kept as a restore point first.') +
-    guideRow('shield', 'Privacy', 'Data sits in your Supabase project behind row level security: each account sees only its own rows. Signing out wipes the copy on the phone. The AI key lives in Supabase, never in this app.') +
+    guideRow('shield', 'Privacy', 'Your data is saved to your account and each account sees only its own. Signing out wipes the copy on the phone. The AI key stays on the server, never in this app.') +
     '</div></section>';
   h += '<div class="actions"><button class="btn ghost" data-act="tour">Replay the welcome tour</button></div>';
   return h;
 }
 function helpSheet() { openSheet('Help and guide', renderHelp()); }
 var TOUR = [
-  { ic: 'sparkles', t: 'Welcome to 20bucks', s: 'Your money, on your own account. ' + ((window.LEDGER_CONFIG || {}).googleClientId ? 'Sign in with Google or a code sent to your email. No password.' : 'A one-time code emailed to you signs you in — no password.') + ' Everything you add stays yours: it is stored in your Supabase project, and no other account can see it.' },
+  { ic: 'sparkles', t: 'Welcome to 20bucks', s: 'Everything you add is saved to your account, and only you can see it.' },
   { ic: 'plus', t: 'Log every entry with +', s: 'Tap the + button for income or spending: amount, category, a short note, tags for people or projects, and the wallet it came from. Two minutes a day is enough.' },
   { ic: 'chart', t: 'Watch it add up', s: 'Month shows this month at a glance and Insights draws the trends. Ask answers questions in plain language. It is off until you turn it on in Settings.' },
   { ic: 'lock', t: 'Lock the door', s: 'Settings → App lock turns on a PIN or Face ID, and Settings → Download a backup keeps a copy of everything as one file. Both take a minute.' }
@@ -2945,6 +3014,9 @@ function txSheet(existing, asNew) {
     '<label class="f" for="dt">Date</label><input class="t" type="date" id="dt" value="' + t.d + '">' +
     '<div class="actions sticky">' + (existing ? '<button class="btn danger" id="del">Delete</button>' : '') + '<button class="btn" id="save">' + (existing ? 'Save changes' : 'Add') + '</button></div>';
   openSheet(existing ? 'Edit transaction' : 'New transaction', body, function (el) {
+    // anything typed or picked from here on makes closing ask first
+    el.addEventListener('input', function () { dlg.dataset.dirty = '1'; });
+    el.addEventListener('click', function (e) { if (e.target.closest('.chip,.seg button')) dlg.dataset.dirty = '1'; });
     if (!existing) setTimeout(function () { $('#amt', el).focus(); }, 50);
     wireCalc(el, 'amt', function () { if (typeof drawInst === 'function') { try { drawInst(); drawWho(); } catch (x) { } } });
     $('#tt', el).addEventListener('click', function (e) {
@@ -3224,7 +3296,7 @@ function xferSheet(existing) {
       var m = monthOf(t.d); (S.tx[m] = S.tx[m] || []).push(t); markMonth(m);
       closeSheet(); render(); toast('Transfer recorded');
     });
-    var dl = $('#xdel', el); if (dl) dl.addEventListener('click', function () { if (!confirm('Delete this transfer?')) return; removeTx(existing); closeSheet(); render(); });
+    var dl = $('#xdel', el); if (dl) dl.addEventListener('click', function () { removeTx(existing); closeSheet(); render(); toastUndo('Transfer deleted'); });
   });
 }
 
@@ -3806,7 +3878,7 @@ function importSheet() {
         $('#imp', el).innerHTML = '<div class="kv" style="margin-top:14px"><span>Transactions</span><span>' + res.tx.length + '</span><span>Trading and poker entries</span><span>' + res.ledger.length +
           '</span><span>Friend loans and paybacks</span><span>' + res.debts.length + '</span><span>' + (mpt ? 'Tagged with ' + esc(mpt) : 'Tagged rows') + '</span><span>' + money(al, 0) + '</span></div>' +
           '<div class="actions"><button class="btn" id="go">Import</button></div>';
-        $('#go', el).addEventListener('click', function () { applyImport(res); closeSheet(); UI.tab = 'home'; render(); toast('Imported ' + res.tx.length + ' transactions'); });
+        $('#go', el).addEventListener('click', function () { applyImport(res); closeSheet(); goTab('home'); render(); toast('Imported ' + res.tx.length + ' transactions'); });
       };
       rd.readAsArrayBuffer(f);
     });
@@ -3831,7 +3903,7 @@ window.addEventListener('beforeinstallprompt', function (e) { e.preventDefault()
 function isStandalone() { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; }
 function installChecks() {
   var out = [];
-  out.push({ k: 'Served over HTTPS', ok: location.protocol === 'https:' || location.hostname === 'localhost', fix: 'Open the Netlify or GitHub Pages address, not a local file.' });
+  out.push({ k: 'Served over HTTPS', ok: location.protocol === 'https:' || location.hostname === 'localhost', fix: 'Open 20bucks.ethantam.dev, not a local file.' });
   out.push({ k: 'Opened in Chrome or Safari itself', ok: !/(FBAN|FBAV|Instagram|Line\/|Twitter|WebView|wv\))/i.test(navigator.userAgent), fix: 'Browsers inside other apps cannot install. Open the link in Chrome or Safari.' });
   var manifest = document.querySelector('link[rel="manifest"]');
   out.push({ k: 'Manifest linked', ok: !!manifest, fix: 'manifest.webmanifest is missing from the site.' });
@@ -4104,7 +4176,7 @@ function restoreSheet() {
     '<div class="actions"><button class="btn ghost" id="rgo">Restore pasted backup</button></div><p class="neg" id="rerr"></p>' +
     (pts.length ? '<label class="f" style="margin-top:18px">Go back to how things were</label><div class="panel">' + pts.map(function (p, i) {
       var dt = new Date(p.t);
-      return '<div class="row"><div class="l"><b>' + esc(p.label) + '</b><span>' + dayLabel(dt.toISOString().slice(0, 10)) + ' ' + dt.toTimeString().slice(0, 5) + ', ' + p.n + ' transaction' + (p.n === 1 ? '' : 's') + '</span></div><button class="chip sm" data-rp="' + i + '">Go back</button></div>';
+      return '<div class="row"><div class="l"><b>' + esc(p.label) + '</b><span>' + dayLabel(ymdOf(dt)) + ' ' + dt.toTimeString().slice(0, 5) + ', ' + p.n + ' transaction' + (p.n === 1 ? '' : 's') + '</span></div><button class="chip sm" data-rp="' + i + '">Go back</button></div>';
     }).join('') + '</div><p class="note">Restore points are kept on this device. Going back also saves what you have now, so it can be undone too.</p>' : '');
   function apply(text, el, label) {
     try {
@@ -4136,18 +4208,19 @@ function restoreSheet() {
 }
 function syncSheet() {
   var pending = Object.keys(store.dirty).length;
-  var state = store.mode === 'cloud' ? 'Everything is saved to your Supabase database.'
-    : store.mode === 'cloud-offline' ? 'Your phone cannot reach Supabase right now. Changes are safe on this device and go up when the connection returns.'
-    : store.mode === 'error' ? 'Supabase answered, but refused the request. Until this is fixed, nothing new is being saved to the database.'
+  var state = store.mode === 'cloud' ? 'Everything is saved to your account.'
+    : store.mode === 'cloud-offline' ? 'Your phone cannot reach the cloud right now. Changes are safe on this device and go up when the connection returns.'
+    : store.mode === 'error' ? 'The cloud refused the last save. Your data is safe on this device, but nothing new is reaching your account until this is fixed.'
     : store.mode === 'auth' ? 'You are signed out.'
-    : store.mode === 'demo' ? 'This is the demo. Its made-up data stays in this browser tab and is never sent to Supabase.'
-    : 'No Supabase keys are set, so data is kept in this browser only.';
+    : store.mode === 'demo' ? 'This is the demo. Its made-up data stays in this browser tab and is never sent anywhere.'
+    : 'Syncing isn\u2019t set up here, so data is kept in this browser only.';
   var body = '<p style="margin-top:0">' + state + '</p>' +
     '<div class="kv"><span>State</span><span>' + ({ cloud: 'Synced', 'cloud-offline': 'Offline', error: 'Sync problem', local: 'This device only', auth: 'Signed out', demo: 'Demo' }[store.mode] || store.mode) + '</span>' +
     '<span>Changes waiting to upload</span><span>' + pending + '</span>' +
     '<span>Connection</span><span>' + (navigator.onLine === false ? 'No network' : 'Network available') + '</span></div>';
-  if (store.err) body += '<label class="f">What Supabase said</label><div class="panel" style="padding:12px 14px"><div style="font-size:13px;word-break:break-word">' + esc(store.err) + '</div></div>' +
-    '<p class="warn">' + esc(syncHint(store.err)) + '</p>';
+  if (store.err) body += '<p class="warn">' + esc(syncMain()) + '</p>' +
+    '<details class="fold"><summary>Details</summary><div class="panel" style="padding:12px 14px"><div style="font-size:13px;word-break:break-word">' + esc(store.err) + '</div></div>' +
+    '<p class="note">' + esc(syncHint(store.err)) + '</p></details>';
   body += store.mode === 'demo' ? '<div class="actions"><button class="btn" data-act="demo-exit">Leave the demo</button></div>' : '<div class="actions"><button class="btn ghost" id="sbk">Download a backup</button><button class="btn" id="sretry">Try again now</button></div>' +
     '<p class="note">Your data always stays on this device as well, so nothing is lost while sync is broken.</p>';
   openSheet('Sync status', body, function (el) {
@@ -4157,6 +4230,34 @@ function syncSheet() {
       store.err = null; setSync('Checking\u2026'); closeSheet();
       if (store.mode === 'cloud') { flush(); } else { store.mode = 'connecting'; connect(); }
       setTimeout(function () { toast(store.mode === 'cloud' ? 'Synced' : store.mode === 'error' ? 'Still failing' : 'Trying\u2026'); }, 1500);
+    });
+  });
+}
+// Settings -> Delete my account: the delete_my_account() function in supabase/migrations removes every row of
+// yours in the database and then the sign-in itself. Typing DELETE is the confirmation; there is no undo.
+function deleteAccountSheet() {
+  if (!store.sb || (store.mode !== 'cloud' && store.mode !== 'cloud-offline')) { openSheet('Delete my account', '<p>Sign in first, then you can delete the account.</p>'); return; }
+  var body = '<p style="margin-top:0">This erases <b>' + esc(store.email || 'your account') + '</b> and everything in it: every entry, budget, chat and setting, in the cloud and on this device. It cannot be undone, so download a backup first if you want to keep a copy.</p>' +
+    '<label class="f" for="delconf">Type DELETE to confirm</label><input class="t" id="delconf" autocomplete="off" autocapitalize="characters" spellcheck="false">' +
+    '<p class="neg" id="delerr" role="alert"></p>' +
+    '<div class="actions"><button class="btn ghost" data-act="export">Download a backup</button><button class="btn danger" id="delgo" disabled>Delete my account</button></div>';
+  openSheet('Delete my account', body, function (el) {
+    var inp = $('#delconf', el), go = $('#delgo', el), err = $('#delerr', el);
+    inp.addEventListener('input', function () { go.disabled = inp.value.trim() !== 'DELETE'; });
+    go.addEventListener('click', function () {
+      if (inp.value.trim() !== 'DELETE') return;
+      go.disabled = true; go.textContent = 'Deleting…'; err.textContent = '';
+      store.sb.rpc('delete_my_account').then(function (r) {
+        if (r.error) { go.disabled = false; go.textContent = 'Delete my account'; err.textContent = isNetworkErr(r.error) ? 'Could not reach the server. Check your connection and try again.' : 'Could not delete the account: ' + errText(r.error) + '. Try again, or email contact@ethantam.dev.'; return; }
+        // the sign-in is gone on the server; drop the session and every copy kept on this device
+        return Promise.resolve(store.sb.auth.signOut({ scope: 'local' })).catch(function () { }).then(function () {
+          try { window.localStorage.clear(); } catch (e) { }
+          try { [LS_KEY, 'ledger-dirty', BASE_KEY, HIST.KEY, RP_KEY, 'ledger-uid'].forEach(function (k) { LS.removeItem(k); }); } catch (e) { }
+          store.dirty = {}; store.base = {}; store.uid = null; store.email = null; HIST.list = []; HIST.shadow = {}; HIST.ready = false;
+          S = { meta: freshMeta(), ledger: [], debts: [], tx: {}, inbox: [], checks: [], bills: [], chats: [] };
+          store.mode = 'auth'; closeSheet(); render(); toast('Your account and its data are deleted.');
+        });
+      }).catch(function () { go.disabled = false; go.textContent = 'Delete my account'; err.textContent = 'Could not reach the server. Check your connection and try again.'; });
     });
   });
 }
@@ -4219,7 +4320,7 @@ function googleSheet() {
         // Email-code accounts in 20bucks have no password identity, so Google
         // being the only identity is normal: the email code still signs in,
         // because Supabase keeps the email as a magic-link/OTP way in.
-        if (!others.length && !confirm('Google is the only identity on this account. Your email code will still work (Supabase keeps it). Disconnect anyway?')) return;
+        if (!others.length && !confirm('Google is the only identity on this account. Your email code will still work. Disconnect anyway?')) return;
         store.sb.auth.unlinkIdentity({ identity: g }).then(function (r2) {
           if (r2.error) { toast(r2.error.message); return; }
           store.google = null; toast('Google disconnected'); closeSheet(); render();
@@ -4588,20 +4689,28 @@ function coinsValue(a) {
   return { value: r2(v), missing: missing };
 }
 function coinsLabel(a) { return (a.coins || []).map(function (c) { return qtyLabel(c.qty) + ' ' + esc(String(c.sym).toUpperCase()); }).join(' \u00b7 ') || 'No coins added'; }
-function ratesNote() { return RATES.usd ? 'US$1 = S$' + (+RATES.usd).toFixed(4) + ', updated ' + chatWhen(RATES.at) : 'Live rates aren\u2019t loaded yet'; }
+function ratesInit() { return window.AbortSignal && AbortSignal.timeout ? { signal: AbortSignal.timeout(15000) } : {}; }
+function ratesNote() {
+  if (!RATES.usd) return 'Live rates aren\u2019t loaded yet';
+  var s = 'US$1 = S$' + (+RATES.usd).toFixed(4) + ', updated ' + chatWhen(RATES.usdAt || RATES.at);
+  if (RATES.coinsAt && RATES.usdAt && Math.abs(Date.parse(RATES.usdAt) - Date.parse(RATES.coinsAt)) > 3600e3) s += '; coin prices ' + chatWhen(RATES.coinsAt);
+  return s;
+}
 // US$ from open.er-api.com, coins from CoinGecko; both free and keyless. Cached, so offline uses the last rates.
 function refreshRates(force) {
   if (!force && RATES.at && Date.now() - Date.parse(RATES.at) < 30 * 60e3) return Promise.resolve(false);
   var syms = { BTC: 1, ETH: 1, SOL: 1 };
   S.meta.accounts.forEach(function (a) { (a.coins || []).forEach(function (c) { syms[String(c.sym).toUpperCase()] = 1; }); });
   var ids = Object.keys(syms).map(function (x) { return COIN_IDS[x]; }).filter(Boolean);
-  var fx = fetch('https://open.er-api.com/v6/latest/USD').then(function (r) { return r.json(); }).then(function (j) { return j && j.rates && j.rates.SGD; });
-  var cg = fetch('https://api.coingecko.com/api/v3/simple/price?ids=' + ids.join(',') + '&vs_currencies=sgd').then(function (r) { return r.json(); });
+  var fx = fetch('https://open.er-api.com/v6/latest/USD', ratesInit()).then(function (r) { return r.json(); }).then(function (j) { return j && j.rates && j.rates.SGD; });
+  var cg = fetch('https://api.coingecko.com/api/v3/simple/price?ids=' + ids.join(',') + '&vs_currencies=sgd', ratesInit()).then(function (r) { return r.json(); });
   return Promise.all([fx.catch(function () { return null; }), cg.catch(function () { return null; })]).then(function (res) {
     if (!res[0] && !res[1]) return false;
     var coins = Object.assign({}, RATES.coins || {});
     if (res[1]) Object.keys(COIN_IDS).forEach(function (x) { var q = res[1][COIN_IDS[x]]; if (q && q.sgd) coins[x] = q.sgd; });
-    RATES = { usd: res[0] || RATES.usd, coins: coins, at: new Date().toISOString() };
+    var now = new Date().toISOString();
+    // one clock per source: if only one of the two answered, the other keeps its own age
+    RATES = { usd: res[0] || RATES.usd, coins: coins, at: now, usdAt: res[0] ? now : (RATES.usdAt || RATES.at), coinsAt: res[1] ? now : (RATES.coinsAt || RATES.at) };
     try { LS.setItem('ledger-rates', JSON.stringify(RATES)); } catch (e) { }
     return true;
   });
@@ -4987,7 +5096,7 @@ function countGapSheet(c, only, fresh) {
         var more = openCountGaps().filter(function (H) { return H.check !== G.check; }).map(function (H) {
           var o = gapOfIn(H, n); return o && Math.abs(o.gap) >= GAP_MIN ? signed(o.gap) + ' between ' + countStamp(H.prev) + ' and ' + countStamp(H.check) : null;
         }).filter(Boolean).slice(-4);
-        closeSheet(); UI.tab = 'ask'; UI.chatId = null; render(); window.scrollTo(0, 0);
+        closeSheet(); goTab('ask'); UI.chatId = null; render(); window.scrollTo(0, 0);
         askSend('My ' + n + ' wallet: I counted ' + money(x.prev) + ' on ' + countStamp(G.prev) + ' and ' + money(x.counted) + ' on ' + countStamp(G.check) + '. My logs in between say it should be ' + money(x.logs) + ', so it is ' + signed(x.gap) + ' off.' +
           (more.length ? ' Also still open on ' + n + ': ' + more.join('; ') + '.' : '') +
           ' Using the dates and times of my counts and of what I logged on ' + n + ' around them (an entry dated a count day but logged after the count is after it, not inside it), what did I most likely miss, log on the wrong wallet, or put on the wrong side of a count?');
@@ -5910,7 +6019,7 @@ function insTabs() {
 function renderInsights() {
   var h = '<header class="top"><h1>Insights</h1>' + hdRight() + '</header>' + insTabs();
   var v = UI.insView || 'trends';
-  if (!allTx().length) return h + '<div class="empty">Log or import some transactions to see insights.</div>';
+  if (!allTx().length) return h + '<div class="empty"><p>Log or import some transactions to see insights.</p><div class="actions wrap-btns"><button class="btn sm" data-act="add-tx">Add your first spend</button><button class="btn sm ghost" data-act="stmt">Import a statement</button></div></div>';
   if (v === 'overview') return h + '<div role="tabpanel" class="ins-view ins-ov" aria-labelledby="it-overview">' + renderOverview() + '</div>';
   if (v === 'lens') return h + '<div role="tabpanel" class="ins-view ins-lens" aria-labelledby="it-lens">' + renderLens() + '</div>';
   return h + '<div role="tabpanel" class="ins-view ins-trends" aria-labelledby="it-trends">' + renderTrends() + '</div>';
@@ -6300,7 +6409,7 @@ function onClick(e) {
   if (t.closest('[data-close]')) { closeSheet(); return; }
   var b;
   if ((b = t.closest('[data-tab][data-acct]'))) { UI.acct = b.dataset.acct; }
-  if ((b = t.closest('[data-tab]'))) { if (UI.askDrawer) { UI.askDrawer = false; if (history.state && history.state.askDrawer) history.back(); } UI.tab = b.dataset.tab; closeSheet(); render(); window.scrollTo(0, 0); return; }
+  if ((b = t.closest('[data-tab]'))) { closeSheet(); goTab(b.dataset.tab); render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-acct]'))) { UI.acct = b.dataset.acct; render(); window.scrollTo(0, 0); return; }
   if ((b = t.closest('[data-gapfind]'))) { gapSheet(b.dataset.gapfind, +b.dataset.gapamt); return; }
   if ((b = t.closest('[data-countgap]'))) { countGapSheet(null); return; }
@@ -6345,9 +6454,9 @@ function onClick(e) {
     return;
   }
   if ((b = t.closest('[data-catgo]'))) { // a category on Month opens its entries for that month
-    UI.tab = 'activity'; UI.fcat = b.dataset.catgo; UI.fsub = ''; UI.filter = 'all'; UI.q = ''; UI.all = false; render(); window.scrollTo(0, 0); return;
+    goTab('activity'); UI.fcat = b.dataset.catgo; UI.fsub = ''; UI.filter = 'all'; UI.q = ''; UI.all = false; render(); window.scrollTo(0, 0); return;
   }
-  if ((b = t.closest('[data-lensgo]'))) { UI.tab = 'insights'; UI.insView = 'lens'; UI.lensTag = b.dataset.lensgo; render(); return; }
+  if ((b = t.closest('[data-lensgo]'))) { goTab('insights'); UI.insView = 'lens'; UI.lensTag = b.dataset.lensgo; render(); return; }
   if ((b = t.closest('[data-hm]'))) { UI.homeMode = b.dataset.hm; render(); return; }
   if ((b = t.closest('[data-lump]'))) { lumpSheet(b.dataset.lump); return; }
   if ((b = t.closest('[data-plopen]'))) { payLaterSheet(b.dataset.plopen); return; }
@@ -6425,6 +6534,7 @@ function onClick(e) {
     else if (a === 'cleanup') csvImportSheet();
     else if (a === 'restore') restoreSheet();
     else if (a === 'gsignin') googleSheet();
+    else if (a === 'delete-account') deleteAccountSheet();
     else if (a === 'demo-exit') demoExit();
     else if (a === 'signout') {
       var unsynced = Object.keys(store.dirty).length;
@@ -6442,7 +6552,11 @@ function onClick(e) {
 
 function boot() {
   dlg = $('#sheet');
-  dlg.addEventListener('click', function (e) { if (e.target === dlg) closeSheet(); });
+  // a tap beside a sheet (or Esc) shouldn't throw away an entry you've started typing
+  dlg.addEventListener('click', function (e) { if (e.target === dlg) { if (dlg.dataset.dirty && !confirm('Discard this entry?')) return; closeSheet(); } });
+  dlg.addEventListener('cancel', function (e) { if (dlg.dataset.dirty && !confirm('Discard this entry?')) e.preventDefault(); });
+  // however a sheet closed, its history entry goes with it
+  dlg.addEventListener('close', function () { if (!dlg.open && history.state && history.state.sheet) { try { history.back(); } catch (e) { } } });
   if ('showPopover' in HTMLElement.prototype) $('#toast').setAttribute('popover', 'manual');
   scopeSheetListeners();
   applyTheme();
@@ -6458,7 +6572,7 @@ function boot() {
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (el && el.isContentEditable)) return;
       if (e.key === '/') {
         e.preventDefault();
-        if (UI.tab !== 'home') { UI.tab = 'home'; render(); }
+        if (UI.tab !== 'activity') { goTab('activity'); render(); }
         var q = $('#q'); if (q) q.focus();
       } else if (e.key === 'n' || e.key === 'N') {
         e.preventDefault(); txSheet();
@@ -6467,9 +6581,12 @@ function boot() {
   }
   var q = new URLSearchParams(location.search);
   if (q.get('tab')) UI.tab = q.get('tab');
+  try { history.replaceState({ tab: UI.tab }, ''); } catch (e) { }
   render();
   if (q.get('add')) txSheet();
   connect();
+  if (LS_BLOCKED) setTimeout(function () { toast('Your browser is blocking storage, so nothing is kept on this device. Sign-in and syncing still work while this tab stays open.'); }, 400);
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) { }
   // Keep rates (and with them US$/crypto balances) live while the app sits open. The
   // refresh itself is throttled to 30 minutes, so this interval is nearly free.
   setInterval(ratesMaybe, 15 * 60e3);
@@ -6478,9 +6595,13 @@ function boot() {
     // page you see is the version just installed rather than the copy kept for offline use.
     var hadController = !!navigator.serviceWorker.controller, reloaded = false;
     navigator.serviceWorker.addEventListener('controllerchange', function () {
-      if (!hadController || reloaded) return; reloaded = true;
-      try { sessionStorage.setItem('ledger-updated', '1'); } catch (e) { }
-      location.reload();
+      if (!hadController || reloaded) return;
+      // not while a sheet is open or a field has focus: that would throw away what you're typing
+      var busy = function () { var a = document.activeElement; return (dlg && dlg.open) || (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName)); };
+      var go = function () { if (reloaded) return; reloaded = true; try { sessionStorage.setItem('ledger-updated', '1'); } catch (e) { } location.reload(); };
+      if (!busy()) { go(); return; }
+      dlg.addEventListener('close', function () { setTimeout(function () { if (!busy()) go(); }, 300); });
+      document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'hidden') go(); });
     });
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function (reg) {
       document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') reg.update().catch(function () { }); });
