@@ -19,13 +19,13 @@ One place for all of your money, so nothing lives in a separate spreadsheet or a
 - know where money goes each month: by category, place and person;
 - notice overspending early and stay on budget;
 - know honestly whether prop firms, brokers and poker make or lose money;
-- never lose track of owed money: PayLater bills and instalments, who owes him, who he owes, and wallet balances that match reality.
+- never lose track of owed money: PayLater bills and instalments, who owes you, who you owe, and wallet balances that match reality.
 
 Success is trusting the numbers without double-checking elsewhere, and logging fast enough that entries actually get logged.
 
 ## Positioning
 
-A tracker shaped around one person's real money life in Singapore, not a generic budgeting app: Grab and Grab PayLater (with instalments and bill cycles), Money Manager history, prop-firm fees counted as spending, poker and broker P&L, money shared with or owed by friends, and periodic balance counts that reconcile against actual wallets. Each account's data is saved to its own row in the app's Supabase project, behind row level security.
+A tracker shaped around the real money life of people in Singapore, not a generic budgeting app (it grew out of its builder's own spending): Grab and Grab PayLater (with instalments and bill cycles), Money Manager history, prop-firm fees counted as spending, poker and broker P&L, money shared with or owed by friends, and periodic balance counts that reconcile against actual wallets. Each account's data is saved to its own row in the app's Supabase project, behind row level security.
 
 ## Operating Context
 
@@ -38,10 +38,11 @@ A tracker shaped around one person's real money life in Singapore, not a generic
 
 - Month view (spent after paybacks, pace, categories, budgets, earnings), Activity (search by words, dates or amounts), Insights (trends, the Alaina lens, overview), Accounts (balances and wallets, people and shared money, PayLater bills, subscriptions, investments), Settings.
 - Undo and history for every change; restore points; data health checks; Suggestions that flag likely slips and change nothing until approved.
-- A single static page: `index.html` with inline script and styles, plus `sw.js`, `manifest.webmanifest`, `config.js`, fonts and icons. No build step or framework.
+- A single static page: `index.html` with `app.css` and scripts under `js/` (no inline script, because the CSP forbids it), plus `sw.js`, `manifest.webmanifest`, `config.js`, fonts and icons. No build step or framework.
 - The repository is public, so no secrets or personal data may be committed; keys live in Supabase.
 - Terminology in use: wallet, PayLater, bill, instalment, payback, balance count, people, venue, prop firm, tag, subcategory.
-- Undecided: whether other people will ever get their own accounts or copies.
+- The app is public: anyone can sign up, so the privacy page, terms, delete-account and plain error wording are product requirements, not extras.
+- A reload for a new version happens silently at a quiet moment; a toast appears only when a reload would wipe what is on screen. The user-agent check only shows an "open in Safari or Chrome" hint and never changes layout.
 
 ## Brand Commitments
 
@@ -50,7 +51,7 @@ A tracker shaped around one person's real money life in Singapore, not a generic
 
 ## Evidence on Hand
 
-- The owner's real transaction history lives in Supabase and local backups; it is private and must never be used in public material, screenshots or commits.
+- Real transaction history (the builder's and every user's) lives in Supabase and local backups; it is private and must never be used in public material, screenshots or commits.
 - App icons in `icons/`. No testimonials, users, metrics or press exist; none should be invented.
 
 ## Product Principles
@@ -58,5 +59,5 @@ A tracker shaped around one person's real money life in Singapore, not a generic
 1. **Numbers must be trustworthy.** A wrong total is worse than a missing feature. Imports, sync and merges must never silently change or lose data; anything uncertain is shown for approval.
 2. **Logging must be fast.** If adding an entry is slow on a phone right after paying, entries stop getting logged and every other feature fails.
 3. **All of it in one place.** Spending, owed money, PayLater and trading results live together so the full picture is never split across tools.
-4. **Readable over a shoulder.** Others see the screen; it should be clear at a glance and not embarrass the owner with clutter or jargon.
-5. **Private by default.** The data belongs to the owner and is saved to their own account; anything sent elsewhere (like the AI) is opt-in and minimal.
+4. **Readable over a shoulder.** Others see the screen; it should be clear at a glance and not embarrass the person using it with clutter or jargon.
+5. **Private by default.** The data belongs to the person who entered it and is saved to their own account; anything sent elsewhere (like the AI) is opt-in and minimal.

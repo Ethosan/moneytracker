@@ -1180,7 +1180,7 @@ function suggestSheet() {
     ? '<div class="healthy"><div class="tick" aria-hidden="true"></div><b>Nothing looks off</b><span>Your last 90 days were checked for unusual amounts, entries logged twice, odd categories and dates.</span></div>'
     : '<p style="margin-top:0">' + (list.length === 1 ? 'One entry looks' : list.length + ' entries look') + ' like a slip. Nothing changes unless you approve it.</p>' +
       list.map(function (d, i) {
-        return '<div class="panel sug"><div class="row"><span class="av">' + esc(avatar(d.t.cat)) + '</span><div class="l"><b>' + esc(d.t.note || plain(d.t.cat || '')) + '</b><span>' + sugDay(d.t.d) + (d.t.cat ? ', ' + esc(plain(d.t.cat)) : '') + '</span></div><div class="r">' + money(d.t.amt) + '</div></div>' +
+        return '<div class="panel sug"><div class="row"><span class="av" aria-hidden="true">' + esc(avatar(d.t.cat)) + '</span><div class="l"><b>' + esc(d.t.note || plain(d.t.cat || '')) + '</b><span>' + sugDay(d.t.d) + (d.t.cat ? ', ' + esc(plain(d.t.cat)) : '') + '</span></div><div class="r">' + money(d.t.amt) + '</div></div>' +
           '<p class="sugmsg">' + (d.ai ? '<b class="aitag">AI</b> ' : '') + esc(d.msg) + '</p><div class="wrap">' +
           (d.fix ? '<button class="chip" data-sgfix="' + i + '" aria-pressed="true">' + esc(d.fix.label) + '</button>' : '') +
           '<button class="chip" data-sgedit="' + i + '">Edit</button><button class="chip" data-sgok="' + i + '">It\u2019s right</button></div></div>';
@@ -2047,7 +2047,7 @@ var GICON = {
 function avatar(cat) { var m = String(cat || '').match(/^(\p{Extended_Pictographic}\uFE0F?)/u); return m ? m[1] : String(cat || '?').charAt(0).toUpperCase(); }
 function nav() {
   function b(id, label, ic) { return '<button data-tab="' + id + '"' + (UI.tab === id ? ' aria-current="page"' : '') + '>' + ICON[ic] + label + '</button>'; }
-  return '<nav class="tabs"><div class="in">' + b('home', 'Month', 'home') + b('activity', 'Activity', 'list') +
+  return '<nav class="tabs" data-glass><div class="in">' + b('home', 'Month', 'home') + b('activity', 'Activity', 'list') +
     '<button class="add" data-act="add-tx" aria-label="Add transaction"><span class="ms" aria-hidden="true"><svg viewBox="0 0 256 256" fill="currentColor" aria-hidden="true" focusable="false" class="pi pi-line"><path d="M224,128a8,8,0,0,1-8,8H136v80a8,8,0,0,1-16,0V136H40a8,8,0,0,1,0-16h80V40a8,8,0,0,1,16,0v80h80A8,8,0,0,1,224,128Z"/></svg></span></button>' + b('insights', 'Insights', 'ins') + b('ask', 'Ask', 'ask') + b('pnl', 'Accounts', 'pnl') + '</div></nav>';
 }
 function hdRight() {
@@ -2104,7 +2104,7 @@ function earnHero(m, quick) {
     h += '<div class="panel legend-wrap"><ul class="legend">' + cats.map(function (c, k) {
       var d = prev.length ? cur.by[c] - (avgBy[c] || 0) : null; if (d != null && Math.abs(d) < 0.5) d = null;
       var cls = d == null ? 'flat' : d > 5 ? 'down' : d < -5 ? 'up' : 'flat';
-      return '<li class="catrow" data-catgo="' + esc(c) + '" role="button" tabindex="0"><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(plain(c)) + '</span><span class="delta ' + cls + '">' + (d == null ? '' : (d > 0 ? '+' : '\u2212') + '$' + Math.abs(Math.round(d))) + '</span><span class="amt">' + money(cur.by[c], 0) + '</span></li>';
+      return '<li class="catrow" data-catgo="' + esc(c) + '" role="button" tabindex="0"><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '" aria-hidden="true">' + esc(avatar(c)) + '</span><span>' + esc(plain(c)) + '</span><span class="delta ' + cls + '">' + (d == null ? '' : (d > 0 ? '+' : '\u2212') + '$' + Math.abs(Math.round(d))) + '</span><span class="amt">' + money(cur.by[c], 0) + '</span></li>';
     }).join('') + '</ul></div>';
     if (prev.length) h += '<p class="note" style="margin:-4px 4px 14px">Tags compare with your average for the previous ' + (prev.length === 1 ? 'month' : prev.length + ' months') + '. Paybacks from friends are left out: they reduce spending instead.</p>';
   } else h += '<div class="panel"><div class="empty" style="padding:14px">No income logged in ' + monthLabel(m) + ' yet.</div></div>';
@@ -2136,7 +2136,7 @@ function renderHome() {
   var freq = m === monthOf(today()) ? frequentNotes() : [];
   var quick = '';
   if (freq.length) quick = '<section class="blk quick"><h2>Log again</h2><div class="chips">' + freq.map(function (o, i) {
-    return '<button class="chip qa" data-quick="' + i + '"><span>' + esc(avatar(o.t.cat)) + '</span>' + esc(o.t.note.length > 22 ? o.t.note.slice(0, 21) + '\u2026' : o.t.note) + '<em>' + money(o.t.amt) + '</em></button>';
+    return '<button class="chip qa" data-quick="' + i + '"><span aria-hidden="true">' + esc(avatar(o.t.cat)) + '</span>' + esc(o.t.note.length > 22 ? o.t.note.slice(0, 21) + '\u2026' : o.t.note) + '<em>' + money(o.t.amt) + '</em></button>';
   }).join('') + '</div></section>';
   var cats = Object.keys(st.byCat).sort(function (a, b) { return st.byCat[b] - st.byCat[a]; });
   var h = '<header class="top">' + monthSwitch() + '' + hdRight() + '</header>' + '<h1 class="sr">Month</h1>';
@@ -2178,7 +2178,7 @@ function renderHome() {
     cats.slice(0, 7).forEach(function (c, k) {
       var d = avgNow ? st.byCat[c] - (avgNow[c] || 0) : null, cls = d == null ? 'flat' : d > 5 ? 'up' : d < -5 ? 'down' : 'flat';
       var dl = d == null || cls === 'flat' ? 'About usual' : money(Math.abs(Math.round(d)), 0) + (d > 0 ? ' more' : ' less') + ' than usual' + (byNow < 1 ? ' by now' : '');
-      h += '<li class="catrow" data-catgo="' + esc(c) + '" role="button" tabindex="0"><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '">' + esc(avatar(c)) + '</span><span>' + esc(c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')) + '</span><span class="delta ' + cls + '">' +
+      h += '<li class="catrow" data-catgo="' + esc(c) + '" role="button" tabindex="0"><span class="sw" style="--c:' + SEGS[Math.min(k, 4)] + '" aria-hidden="true">' + esc(avatar(c)) + '</span><span>' + esc(c.replace(/^\p{Extended_Pictographic}\uFE0F?\s*/u, '')) + '</span><span class="delta ' + cls + '">' +
         (d == null ? '' : '<span aria-hidden="true">' + (Math.round(d) === 0 ? '' : d > 0 ? '+' : '−') + '$' + Math.abs(Math.round(d)) + '</span><span class="sr">' + dl + '</span>') + '</span><span class="amt">' + money(st.byCat[c], 0) + '</span></li>';
     });
     if (cats.length > 7) h += '<li><span class="sw">+</span><span class="note" style="margin:0">' + (cats.length - 7) + ' more categories</span><span></span><span class="amt">' + money(sum(cats.slice(7), function (c) { return st.byCat[c]; }), 0) + '</span></li>';
@@ -2271,7 +2271,7 @@ function txRow(t) {
   if (t.calc && isSum(t.calc)) { var np = sumParts(t.calc).length; sub = (sub ? sub + ' \u00b7 ' : '') + (np > 1 && !/[*/()]/.test(t.calc) ? np + ' items: ' + sumParts(t.calc).join(' + ') : t.calc); }
   if (t._inst) sub = 'Instalment ' + t._inst + ' of ' + money(t._full) + (sub ? ' \u00b7 ' + sub : '');
   else if (t.inst && t.inst.n > 1) sub = (sub ? sub + ' \u00b7 ' : '') + t.inst.n + ' instalments of ' + money(r2((t.amt + (t.inst.fee || 0)) / t.inst.n)) + (t.inst.fee ? ' incl. ' + money(t.inst.fee) + ' interest' : '');
-  return '<button class="row" data-edit-tx="' + esc(t.id) + '"><span class="av' + (personTag() && (t.tags || []).indexOf(personTag()) > -1 ? ' al' : '') + '">' + esc(avatar(t.cat)) + '</span>' +
+  return '<button class="row" data-edit-tx="' + esc(t.id) + '"><span class="av' + (personTag() && (t.tags || []).indexOf(personTag()) > -1 ? ' al' : '') + '" aria-hidden="true">' + esc(avatar(t.cat)) + '</span>' +
     '<div class="l"><b>' + esc(title) + tags + '</b>' + (sub ? '<span>' + esc(sub) + '</span>' : '') + '</div>' +
     (t.split && t.split.mine === 0
       ? '<div class="r mut">' + money(t.amt) + '<span>paid out, owed back</span></div></button>'
@@ -2409,7 +2409,7 @@ function catFilterSheet(openCat) {
   if (openCat && cats[openCat]) {
     var c = cats[openCat], subs = Object.keys(c.subs).sort(function (a, b) { return c.subs[b].amt - c.subs[a].amt; });
     body = '<button class="row" data-back="1"><div class="l"><b>\u2039 All categories</b></div></button>' +
-      '<div class="panel" style="margin-top:8px"><button class="row" data-pick=""><span class="av">' + esc(avatar(openCat)) + '</span><div class="l"><b>All of ' + esc(plain(openCat)) + '</b><span>' + c.n + ' transactions</span></div><div class="r">' + money(c.amt) + '</div></button>' +
+      '<div class="panel" style="margin-top:8px"><button class="row" data-pick=""><span class="av" aria-hidden="true">' + esc(avatar(openCat)) + '</span><div class="l"><b>All of ' + esc(plain(openCat)) + '</b><span>' + c.n + ' transactions</span></div><div class="r">' + money(c.amt) + '</div></button>' +
       subs.map(function (x) {
         return '<button class="row" data-pick="' + esc(x) + '"><div class="l"><b>' + esc(x) + '</b><span>' + c.subs[x].n + ' transaction' + (c.subs[x].n === 1 ? '' : 's') + '</span></div><div class="r">' + money(c.subs[x].amt) + '</div></button>';
       }).join('') + '</div>';
@@ -2418,7 +2418,7 @@ function catFilterSheet(openCat) {
     body = '<p class="note" style="margin-top:0">Pick a category, then a subcategory if you want to narrow it further. Counts are ' + where + '.</p>' +
       (names.length ? '<div class="panel">' + names.map(function (n) {
         var ns = Object.keys(cats[n].subs).filter(function (x) { return x !== '(no subcategory)'; }).length;
-        return '<button class="row" data-open="' + esc(n) + '"><span class="av">' + esc(avatar(n)) + '</span><div class="l"><b>' + esc(plain(n)) + '</b><span>' + cats[n].n + ' transactions' + (ns ? ', ' + ns + ' subcategor' + (ns === 1 ? 'y' : 'ies') : '') + '</span></div><div class="r">' + money(cats[n].amt) + '<span>\u203a</span></div></button>';
+        return '<button class="row" data-open="' + esc(n) + '"><span class="av" aria-hidden="true">' + esc(avatar(n)) + '</span><div class="l"><b>' + esc(plain(n)) + '</b><span>' + cats[n].n + ' transactions' + (ns ? ', ' + ns + ' subcategor' + (ns === 1 ? 'y' : 'ies') : '') + '</span></div><div class="r">' + money(cats[n].amt) + '<span>\u203a</span></div></button>';
       }).join('') + '</div>' : '<div class="empty">Nothing ' + where + '.</div>');
   }
   openSheet(openCat ? plain(openCat) : 'Filter by category', body, function (el) {
@@ -3455,7 +3455,7 @@ function ledgerSheet(opts) {
     calcField('amt', e.amt || '') +
     '<label class="f" id="acctlbl" for="acct">Money came from</label>' + acctSelect('acct', e.acct) +
     '<label class="f">Whose money</label><div class="wrap" id="who">' + whoChips() + '</div>' +
-    '<div id="offbox" hidden><label style="display:flex;gap:9px;align-items:center;font-size:13.5px;margin-top:10px"><input type="checkbox" id="offset" checked> <span id="offlbl"></span></label></div>' +
+    '<div id="offbox" hidden><label style="display:flex;gap:9px;align-items:center;font-size:.85rem;margin-top:10px"><input type="checkbox" id="offset" checked> <span id="offlbl"></span></label></div>' +
     '<div id="fkbox"><label class="f">Kind of fee</label><div class="seg" id="fk">' + ['Evaluation', 'Funded', 'Other'].map(function (k) { return '<button data-fk="' + k + '" aria-pressed="' + (feeKind(e) === k) + '">' + k + '</button>'; }).join('') + '</div>' +
       '<p class="note" style="margin-top:6px">Counts as spending under Prop firms, in this subcategory. Payouts count as income.</p></div>' +
     '<label class="f" for="note">Note</label><input class="t" id="note" value="' + esc(e.note) + '">' +
@@ -3818,7 +3818,7 @@ function catSheet() {
   function catRows(type) {
     return S.meta.cats.filter(function (c) { return c.type === type; }).map(function (c) {
       var u = catUse(c.name), ss = subsFor(c.name).length;
-      return '<button class="row" data-editcat="' + esc(c.name) + '"><span class="av">' + esc(avatar(c.name)) + '</span><div class="l"><b>' + esc(plain(c.name)) + '</b><span>' +
+      return '<button class="row" data-editcat="' + esc(c.name) + '"><span class="av" aria-hidden="true">' + esc(avatar(c.name)) + '</span><div class="l"><b>' + esc(plain(c.name)) + '</b><span>' +
         u.n + ' transaction' + (u.n === 1 ? '' : 's') + (ss ? ', ' + ss + ' subcategor' + (ss === 1 ? 'y' : 'ies') : '') +
         (type === 'inc' ? ', counts as ' + ({ earned: 'earned', other: 'gift or bonus', reimb: 'payback' }[c.kind] || 'other') : '') +
         '</span></div><div class="r mut">' + money(u.amt, 0) + '</div></button>';
@@ -4116,7 +4116,7 @@ function csvImportSheet() {
         $('#cres', el).innerHTML = '<div class="kv" style="margin-top:14px"><span>Rows updated</span><span>' + diff.upd.length + '</span>' +
           '<span>Rows added</span><span>' + diff.add.length + '</span><span>Missing from the file</span><span>' + diff.del.length + '</span>' +
           (diff.bad ? '<span>Rows skipped, no valid date or amount</span><span>' + diff.bad + '</span>' : '') + '</div>' +
-          (diff.del.length ? '<label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-top:10px"><input type="checkbox" id="dodel"> Delete the ' + diff.del.length + ' ' + (diff.isInv ? 'entries' : 'transactions') + ' missing from the file</label>' : '') +
+          (diff.del.length ? '<label style="display:flex;gap:8px;align-items:center;font-size:.85rem;margin-top:10px"><input type="checkbox" id="dodel"> Delete the ' + diff.del.length + ' ' + (diff.isInv ? 'entries' : 'transactions') + ' missing from the file</label>' : '') +
           '<p class="note">' + (diff.isInv ? 'Investment entries' : 'Transactions') + ' only. Bills, loans and settings are untouched.</p>' +
           '<div class="actions"><button class="btn" id="capply">Apply</button></div>';
         $('#capply', el).addEventListener('click', function () {
@@ -5208,7 +5208,7 @@ function checkSheet() {
   var body = '<p class="note" style="margin-top:0">Enter what you actually have right now. The app compares it with what your logs say you should have' + (prev ? ' since your last check on ' + countLabel(prev) : '') + '. The time is saved with the count, so anything you log later today counts as after it.</p>' +
     '<div class="panel" id="accs">' + accRows() + '</div>' +
     '<div style="display:flex;gap:8px;margin-top:10px"><input class="t" id="an" placeholder="e.g. DBS, Cash, GrabPay Later"><button class="btn sm ghost" id="aa">Add</button></div>' +
-    '<label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-top:8px"><input type="checkbox" id="al"> This is money I owe, like GrabPay Later</label>' +
+    '<label style="display:flex;gap:8px;align-items:center;font-size:.85rem;margin-top:8px"><input type="checkbox" id="al"> This is money I owe, like GrabPay Later</label>' +
     (owedPL > 0 ? '<p class="note">PayLater purchases count as spending on the day you make them, but the cash only leaves when you pay the bill. Entering what you owe keeps both sides right, so it is filled in for you.</p>' : '') +
     '<div id="calc" class="panel" style="margin-top:16px;padding:10px 14px"></div>' +
     (qd.length ? '<p class="note">Days in the last month with no spending logged: ' + qd.slice(0, 12).map(function (d) { return dayLabel(d); }).join(', ') + (qd.length > 12 ? ' and ' + (qd.length - 12) + ' more' : '') + '. A gap usually hides here.</p>' : '') +
